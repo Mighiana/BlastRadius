@@ -101,8 +101,8 @@ python -m blastradius.cli --plan examples/plans/ssh_open_plan.json --format sari
   do not run the publisher against a live PR without explicit authorization.
 * GitHub permissions failures leave the report in summary/artifacts. No token is
   embedded in command arguments or logs; use the step-scoped GITHUB_TOKEN env var.
-* This integration and packaging are locally verified, not a published PyPI
-  package, Action release or verified hosted GitHub run. Publication needs approval.
+* The source package and hosted PR flow are verified; no PyPI package or Action
+  release is published. New releases and new hosted test writes need approval.
 * Tests with very large parametrized strings need short explicit IDs: Windows
   environment variables (including PYTEST_CURRENT_TEST) have a 32767-char limit.
 * Invoke tests with `python -m pytest`, not the standalone pytest entry point.
@@ -113,5 +113,11 @@ python -m blastradius.cli --plan examples/plans/ssh_open_plan.json --format sari
 * GitHub rejects `runner.temp` in job-level defaults.run. Specify it in each
   shell step's working-directory instead. Plain YAML parsing misses this contextual
   validation error; the hosted workflow validator exposed it.
-* Linux tests and gate verified in Actions run 35441042287. This is not evidence
-  that the separate PR-comment acceptance workflow has completed.
+* Linux tests and gate verified in Actions run 35441042287.
+* Hosted PR #1 verified BLOCK in run 35441550348 and SAFE after remediation in
+  run 35441968970. Bot comment ID 5741664556 was updated, not duplicated. PR stays
+  open and unmerged. This proves same-repo public PR delivery, not hosted fork
+  permission fallback (which remains mocked locally).
+* Acceptance checks must run even when remediation leaves zero diff against base:
+  do not use Terraform path filters. Restrict the acceptance job by test-branch
+  prefix instead; the copyable consumer workflow also avoids path filters.

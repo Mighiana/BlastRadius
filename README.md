@@ -18,7 +18,8 @@ credentials, deployment, or paid service.
 
 **Availability:** installable packaging and the PR workflow are published on GitHub.
 Installation from commit `a72c04890640102b315506ab85e5f1ccbe91bb9f` is verified.
-No PyPI package, `v1` tag, or hosted PR success is claimed.
+The hosted BLOCK → SAFE flow and single-comment update are verified on PR #1.
+No PyPI package or `v1` tag is published.
 The copyable workflow defaults to that immutable, packaging-enabled commit.
 
 [Add the GitHub check](#github-actions) · [Install locally](#installation) ·
@@ -463,10 +464,31 @@ it is **not** executed by local tests. Use only with an authorized Actions bot t
 `.github/workflows/blastradius.yml` is this project's own CI/test workflow; its
 internal gate uses bundled `examples/safe`. The external-install workflow is the
 example above. YAML, shell syntax, gate exits, installation, and event inputs are
-locally tested. Hosted PR analysis/comment publication remains unverified.
-The repository's Linux test suite and CLI gate passed in
+locally tested. Hosted PR analysis and comment updates are verified on the public,
+same-repository [acceptance PR #1](https://github.com/Mighiana/BlastRadius/pull/1).
+The repository's Linux test suite and CLI gate also passed in
 [GitHub CI run 35441042287](https://github.com/Mighiana/BlastRadius/actions/runs/35441042287).
-That push-triggered run does not verify PR comments or the BLOCK → SAFE transition.
+
+| Hosted acceptance (2026-09-19) | Risky head | Remediated head |
+|---|---|---|
+| Gate decision | BLOCK CHANGE | SAFE TO MERGE |
+| Candidate security score | 20 | 100 |
+| New critical paths | 1 | 0 |
+| Newly reachable sensitive resources | 1 | 0 |
+| Workflow conclusion | Failure at enforcement, as intended | Success |
+| Run | [35441550348](https://github.com/Mighiana/BlastRadius/actions/runs/35441550348) | [35441968970](https://github.com/Mighiana/BlastRadius/actions/runs/35441968970) |
+
+Both runs successfully installed the published analyzer, analyzed the real Git
+snapshots, uploaded report artifacts, and published the bot report. The initial
+run failed only at the gate. The second run passed the gate and updated the
+**same comment**, ID `5741664556`, from BLOCK to SAFE; exactly one marked bot comment
+was present. [View the updated comment](https://github.com/Mighiana/BlastRadius/pull/1#issuecomment-5741664556).
+The fixed report shows 100 → 100 because PR analysis compares against the original
+safe base, not the preceding risky head. PR #1 is intentionally left open and unmerged.
+
+This hosted verification covers a public, same-repository PR using the Actions bot.
+Fork/read-only-token behavior remains locally tested through mocked permission
+failures; it has not been exercised on a hosted fork/private repository.
 
 For this repository's live acceptance test, `.github/workflows/blastradius-hosted-test.yml`
 uses the same published analyzer and bot-comment path against `examples/hosted-pr`.
@@ -589,12 +611,15 @@ remediation and score formula are preserved.
 synthetic inputs. Simulation edits real Terraform text and reuses the same engine;
 it does not fake reachability. Fixes are local recommendations, not AWS changes.
 
-**Supplied, hosted PR acceptance unverified:** the installation and GitHub Actions
-workflow, idempotent bot-comment publisher, fork fallback, and summaries are
-implemented and locally validated. No hosted PR was created and no successful
-hosted comment/run is claimed. API tests use a fake client; analysis tests use
-real Git and the real graph engine. Packaging is published as installable GitHub
-source, not as a PyPI package, `v1` Action, or release.
+**Hosted-GitHub verified:** PR #1 demonstrated an actual blocking gate, report
+artifact upload, bot-comment creation, remediation, a passing gate, and an update
+to the same comment. The run links and observed counts are recorded above. The
+analyzer was installed from its immutable published GitHub commit on Ubuntu.
+
+**Locally tested, not hosted-verified:** fork/read-only permission fallback, invalid
+API responses, and stale-head handling have mocked API tests. Broader private/fork
+repository acceptance remains future work. Packaging is published as installable
+GitHub source, not as a PyPI package, `v1` Action, or release.
 
 **Not production assurance:** AWS reachability and IAM are simplified; incomplete
 coverage can miss paths. No branch protection, cloud deployment, hosted service,
@@ -609,7 +634,8 @@ Not implemented:
 * Azure and GCP providers
 * Live AWS account import (read-only) for drift-aware graphs
 * Checkov and Trivy integration to enrich nodes with existing findings
-* Hosted GitHub acceptance testing and a reviewed versioned distribution release
+* Broader hosted acceptance coverage for forks/private repositories and a reviewed
+  versioned distribution release
 * GitHub Enterprise API support and multi-root aggregation into one report
 * AI-agent remediation that opens the fix PR directly
 * MITRE ATT&CK technique mapping per edge

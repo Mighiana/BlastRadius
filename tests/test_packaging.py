@@ -26,11 +26,14 @@ def test_cli_install_does_not_require_the_dashboard():
     assert 'ui' in metadata['project']['optional-dependencies']
 
 
-def test_readme_distinguishes_prepared_local_and_hosted_status():
+def test_readme_distinguishes_published_source_and_hosted_verification():
     readme = (ROOT / 'README.md').read_text(encoding='utf-8')
     assert 'Attack-path diff for Terraform pull requests.' in readme
-    assert 'No PyPI package, `v1` tag, or hosted PR success is claimed.' in readme
-    assert 'Hosted PR analysis/comment publication remains unverified.' in readme
+    assert 'No PyPI package or `v1` tag is published.' in readme
+    assert 'Hosted PR analysis and comment updates are verified' in readme
+    assert '35441550348' in readme and '35441968970' in readme
+    assert '5741664556' in readme
+    assert 'Fork/read-only-token behavior remains locally tested' in readme
     assert 'docs/screenshot-' not in readme
     assert 'Vendor the `blastradius/` package' not in readme
     roadmap = readme.split('## Future roadmap', 1)[1]
