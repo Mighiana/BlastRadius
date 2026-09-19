@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import { SessionProvider } from '../session';
@@ -21,6 +22,44 @@ function mount(route = '/dashboard') {
   return render(<MemoryRouter initialEntries={[route]}><SessionProvider><Workspace /></SessionProvider></MemoryRouter>);
 }
 describe('workspace roles and polling', () => {
+  it.each([session, viewer])('does not offer unusable onboarding or writes on an untrusted origin ($authenticated)', async current => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      ...current, auth: { ...current.auth, public_url: 'https://configured.example' },
+    }))));
+    mount();
+    expect(await screen.findByRole('heading', { name: 'Workspace unavailable at this address' })).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent('BR_PUBLIC_URL');
+    expect(screen.queryByRole('button', { name: /Create.*workspace|Create project|Analyze change/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Try the public demo' })).toHaveAttribute('href', '/demo');
+  });
+  it('selects the created workspace and scopes the first project to it', async () => {
+    const user = userEvent.setup();
+    const owner = { ...viewer, organizations: [{ ...viewer.organizations[0]!, role: 'owner' as const }] };
+    const created = { ...owner.organizations[0]!, id: 'new-org', name: 'New workspace' };
+    let current = owner;
+    const fetcher = vi.fn(async (url: string, options?: RequestInit) => {
+      if (url === '/api/organizations') {
+        current = { ...owner, organizations: [...owner.organizations, created] };
+        return new Response(JSON.stringify(created));
+      }
+      const body = url === '/api/me' ? current
+        : url === '/api/projects' ? { ...project, organization_id: 'new-org' }
+          : url.startsWith('/api/projects?') ? { projects: [] } : { analyses: [] };
+      return new Response(JSON.stringify(body), { status: options?.method === 'POST' ? 201 : 200 });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    mount();
+    await user.click(await screen.findByText('Create another workspace'));
+    await user.type(screen.getByLabelText('Workspace name'), 'New workspace');
+    await user.click(screen.getByRole('button', { name: 'Create workspace' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Workspace “New workspace” created');
+    expect(screen.getByLabelText('Workspace', { exact: true })).toHaveValue('new-org');
+    await user.type(screen.getByLabelText('Project name'), 'Infrastructure');
+    await user.click(screen.getByRole('button', { name: 'Create project' }));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledWith('/api/projects', expect.objectContaining({
+      body: JSON.stringify({ organization_id: 'new-org', name: 'Infrastructure' }),
+    })));
+  });
   it('keeps a viewer read-only instead of presenting unusable mutation controls', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(
       url === '/api/me' ? viewer : url.startsWith('/api/projects?') ? { projects: [project] } : { analyses: [queued] },
@@ -43,6 +82,9 @@ describe('workspace roles and polling', () => {
     }));
     mount('/dashboard?project=project&analysis=job');
     expect(await screen.findByText(/Queued — waiting/)).toBeVisible();
+    const selected = screen.getByLabelText('Selected analysis');
+    expect(selected).toHaveFocus();
+    expect(selected.compareDocumentPosition(screen.getByRole('heading', { name: 'Analysis history' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('The analysis could not be completed.'), { timeout: 3000 });
     expect(polls).toBe(2);
     expect(screen.queryByLabelText('Analysis decision')).not.toBeInTheDocument();

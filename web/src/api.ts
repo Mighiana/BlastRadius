@@ -63,7 +63,7 @@ export const sessionSchema = z.object({
   authenticated: z.boolean(),
   user: z.object({ id: z.string(), name: z.string(), email: z.string() }).nullable(),
   organizations: z.array(organization), csrf_token: z.string(),
-  auth: z.object({ enabled: z.boolean(), mode: z.enum(['disabled', 'demo', 'oidc']), login_url: z.string().nullable() }),
+  auth: z.object({ enabled: z.boolean(), mode: z.enum(['disabled', 'demo', 'oidc']), public_url: z.string().url(), login_url: z.string().nullable() }),
   billing: z.object({ enabled: z.boolean(), test_mode: z.boolean() }),
 });
 export const projectSchema = z.object({
@@ -100,6 +100,9 @@ export type AnalysisInput = {
 const errorMessages: Record<string, string> = {
   invalid_request: 'Check the input format, filenames and required fields.',
   csrf_required: 'Your session changed. Refresh your session, then try again.',
+  invalid_origin: 'This address does not match the server’s trusted origin. Ask the operator to set BR_PUBLIC_URL to this site’s exact origin, including scheme and port, then restart the service.',
+  insufficient_role: 'Your workspace role does not allow this action. Ask a workspace owner for access.',
+  organization_limit_exceeded: 'You already own the maximum of five workspaces. Use an existing workspace.',
   use_billing_portal: 'A subscription already exists. Use the billing portal to manage it.',
   billing_customer_missing: 'No billing customer exists yet. Start with a test checkout.',
   analysis_timeout: 'The analysis exceeded its time limit. Try a smaller Terraform scope.',

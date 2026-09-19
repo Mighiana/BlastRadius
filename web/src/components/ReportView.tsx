@@ -26,11 +26,16 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
     {report.analysis_complete === false && <div role="alert" className="notice error">Analysis incomplete. Counts are lower bounds within the modeled coverage. Resolve the coverage diagnostics before treating this change as safe.</div>}
     <div className="metrics">
       <div className="metric score"><span>Security score</span><div><span>{report.score.before}</span><ArrowRight size={20} aria-hidden="true" /><strong>{report.score.after}<small>/100</small></strong></div>
-        <small>Heuristic · not a risk probability</small></div>
+        <small><span className={report.score.delta < 0 ? 'danger-text' : ''}>{report.score.delta > 0 ? '+' : ''}{report.score.delta} points</span> · Heuristic · not a risk probability</small></div>
       <div className="metric"><span>New critical paths</span><strong className={report.new_critical_paths.length ? 'danger-text' : ''}>{report.new_critical_paths.length}</strong><small>{report.new_attack_paths.length} total new paths · {report.removed_critical_paths.length} critical removed</small></div>
       <div className="metric"><span>New sensitive reachability</span><strong className={report.newly_reachable_sensitive.length ? 'danger-text' : ''}>{report.newly_reachable_sensitive.length}</strong><small>Newly reachable sensitive resources</small></div>
       <div className="metric"><span>New exposed resources</span><strong>{report.newly_exposed.length}</strong><small>{report.before.risk_level} → {report.after.risk_level}</small></div>
     </div>
+    <section className="panel change-summary" aria-label="Responsible change">
+      <div><h2><GitBranch size={18} aria-hidden="true" />Responsible change</h2>
+        <p>{report.demo?.stage === 'safe' ? 'Baseline configuration — no candidate change yet.' : report.responsible_change || 'Review the modeled changes and relationship evidence below.'}</p></div>
+      <nav className="button-row" aria-label="Report sections"><a className="button secondary" href="#remediation">Review remediation</a><a className="button secondary" href="#report-export">Export</a></nav>
+    </section>
     <section className="panel graph-panel">
       <div className="panel-heading"><div><p className="eyebrow">FOLLOW THE CONNECTIONS</p><h2>One change. A different attack surface.</h2></div>
         <div className="segmented" role="group" aria-label="Graph snapshot">
@@ -42,12 +47,11 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
       <Graph key={`${side}-${report.demo?.stage ?? jobId}`} snapshot={report[side]} />
     </section>
     <div className="report-columns">
-      <section className="panel"><div className="panel-heading"><h2><GitBranch size={18} aria-hidden="true" />Responsible change</h2></div>
-        <p>{report.responsible_change}</p>
-        {report.responsible_changes.map(change => <details key={change.file} open={report.responsible_changes.length === 1}>
+      <section className="panel"><div className="panel-heading"><h2>Source changes</h2></div>
+        {report.responsible_changes.map(change => <details key={change.file}>
           <summary>{change.file}</summary><pre className="diff"><code>{change.diff}</code></pre>
         </details>)}
-        {!report.responsible_changes.length && <p className="muted">No HCL source diff is available for this comparison. Plan inputs supply modeled changes, not source patches.</p>}
+        {!report.responsible_changes.length && <p className="muted">No HCL source changes to display. For plan inputs, review modeled changes and relationship evidence.</p>}
       </section>
       <section className="panel"><h2>What became reachable</h2>
         <h3>Sensitive resources</h3>
@@ -74,7 +78,7 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
       <details open={report.analysis_complete === false}><summary>Coverage diagnostics ({report.diagnostics.length})</summary><ul className="findings">{report.diagnostics.map((d, i) => <li key={i}><strong>{d.code}</strong><p>{d.message}</p>{d.phase && <p>{d.phase}: <code>{d.resource}</code>{d.attribute && ` · ${d.attribute}`}{d.source_file && ` · ${d.source_file}`}</p>}</li>)}</ul></details>
       <details><summary>How the heuristic score was calculated</summary><div className="code-pair">{(['before', 'after'] as const).map(key => <div key={key}><h3>{key === 'before' ? 'Before' : 'After'}: {report[key].score}/100</h3><ul className="findings">{report[key].score_breakdown.map(item => <li key={item.finding}>{item.finding}: {item.points} points ({item.count})</li>)}</ul>{!report[key].score_breakdown.length && <p>No score penalties in this model.</p>}</div>)}</div><p className="muted">Scores start at 100 and subtract capped findings. The score is not a calibrated measure of real-world risk.</p></details>
     </section>
-    <section className="panel export-panel"><div><p className="eyebrow">TAKE THE EVIDENCE WITH YOU</p><h2>Export this analysis</h2></div>
+    <section className="panel export-panel" id="report-export"><div><p className="eyebrow">TAKE THE EVIDENCE WITH YOU</p><h2>Export this analysis</h2></div>
       <div className="button-row">{(['json', 'markdown', 'sarif'] as const).map(format =>
         <button className="button secondary" key={format} disabled={exporting} onClick={() => { void exportAs(format); }}><Download size={16} aria-hidden="true" />{format.toUpperCase()}</button>)}</div>
       <ErrorNotice error={error} />

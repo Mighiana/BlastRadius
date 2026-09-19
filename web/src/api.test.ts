@@ -3,6 +3,21 @@ import { ApiError, mutate, reportSchema, request, safeBillingUrl, setCsrf } from
 import { risky } from './test/fixtures';
 
 describe('API security and contract', () => {
+  it.each([
+    ['invalid_origin', 'BR_PUBLIC_URL', 0],
+    ['insufficient_role', 'workspace role', 0],
+    ['csrf_required', 'session changed', 1],
+  ])('distinguishes %s without replaying workspace creation', async (code, message, refreshes) => {
+    const listener = vi.fn();
+    window.addEventListener('br:session-refresh', listener);
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: code }), { status: 403 }));
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      await expect(mutate('/api/organizations', 'POST', { name: 'Example' })).rejects.toThrow(message);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(listener).toHaveBeenCalledTimes(refreshes);
+    } finally { window.removeEventListener('br:session-refresh', listener); }
+  });
   it('uses same-origin cookies and memory-only CSRF for every mutation', async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetcher);

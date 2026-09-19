@@ -49,6 +49,11 @@ Open `http://localhost:5173`. Vite uses a strict port and proxies `/api` and
 origin, including scheme and port; do not mix `localhost` and `127.0.0.1`.
 Cookies and mutation CSRF checks depend on the origin. Public landing/demo pages
 work with `BR_AUTH_MODE=disabled` and without any credentials.
+If workspace onboarding reports `invalid_origin`, set `BR_PUBLIC_URL` to the
+browser address's exact origin and restart the API. For a preview, use its HTTPS
+origin, not the API's local listen address. The UI identifies this deployment
+mismatch before showing workspace actions; it is not a role restriction. Do not
+disable CSRF or trust arbitrary forwarded headers to work around it.
 Development demo login explicitly creates an isolated local identity. Signing
 out loses that identity; it is unsuitable for real users or sensitive inputs.
 

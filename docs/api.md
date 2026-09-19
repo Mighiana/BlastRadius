@@ -150,7 +150,7 @@ Use `passed` and the evidence rather than assuming every safe score is 100.
   "user":null,
   "organizations":[],
   "csrf_token":"opaque-value",
-  "auth":{"enabled":true,"mode":"demo","login_url":null},
+  "auth":{"enabled":true,"mode":"demo","public_url":"http://localhost:8000","login_url":null},
   "billing":{"enabled":false,"test_mode":true}
 }
 ```
@@ -168,6 +168,9 @@ After authentication, `user` is `{id,name,email}` and each organization is
   cookie. Returns `{"authenticated":false}`.
 
 Fetch `/api/me` again after login because both session and CSRF token rotate.
+`auth.public_url` is the configured canonical browser origin. The UI checks it
+before offering workspace mutations. The server independently enforces Origin,
+CSRF, authentication and membership on every protected operation.
 
 `POST /api/organizations {"name":"Platform"}` creates a new free organization
 with the authenticated caller as its only owner. Limit: five owned organizations

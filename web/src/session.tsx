@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { request, sessionSchema, setCsrf, type Session } from './api';
 
 const Context = createContext<{
-  session: Session | null; error: Error | null; loading: boolean; refresh: () => Promise<void>;
+  session: Session | null; error: Error | null; loading: boolean; originMismatch: boolean; refresh: () => Promise<void>;
 } | null>(null);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
@@ -33,7 +33,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     window.addEventListener('br:session-refresh', listener);
     return () => window.removeEventListener('br:session-refresh', listener);
   }, [refresh]);
-  return <Context value={{ session, error, loading, refresh }}>{children}</Context>;
+  const originMismatch = !!session && new URL(session.auth.public_url).origin !== window.location.origin;
+  return <Context value={{ session, error, loading, originMismatch, refresh }}>{children}</Context>;
 }
 export function useSession() {
   const context = useContext(Context);

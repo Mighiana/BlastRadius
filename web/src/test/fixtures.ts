@@ -2,7 +2,7 @@ import type { Report, Session } from '../api';
 
 export const session: Session = {
   authenticated: false, user: null, organizations: [], csrf_token: 'test-csrf',
-  auth: { enabled: true, mode: 'demo', login_url: null }, billing: { enabled: false, test_mode: true },
+  auth: { enabled: true, mode: 'demo', public_url: window.location.origin, login_url: null }, billing: { enabled: false, test_mode: true },
 };
 const edges = [{
   source: 'INTERNET', target: 'aws_s3_bucket.customer_data', relationship: 'public access',

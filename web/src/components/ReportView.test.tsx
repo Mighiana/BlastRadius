@@ -6,11 +6,20 @@ import { risky, safe } from '../test/fixtures';
 import { validateFiles, validatePlan } from './AnalysisForm';
 
 describe('report evidence and graph', () => {
+  it('explains a demo baseline without implying that a candidate change exists', () => {
+    render(<ReportView report={{ ...safe, responsible_changes: [], demo: {
+      scenario_id: 'public_ssh', stage: 'safe', remediation_kind: 'supported_patch', note: '',
+    } }} />);
+    expect(screen.getByLabelText('Responsible change')).toHaveTextContent('Baseline configuration — no candidate change yet.');
+    expect(screen.getByText(/No HCL source changes to display/)).toBeVisible();
+  });
   it('shows the backend decision, heuristic labels, all nodes and disclosed evidence', async () => {
     const user = userEvent.setup();
     render(<ReportView report={risky} />);
     expect(screen.getByLabelText('Analysis decision')).toHaveTextContent('BLOCK CHANGE');
-    expect(screen.getByText('Heuristic · not a risk probability')).toBeVisible();
+    expect(screen.getByText(/Heuristic · not a risk probability/)).toBeVisible();
+    expect(screen.getByText('-65 points')).toBeVisible();
+    expect(screen.getByLabelText('Responsible change')).toHaveTextContent('Bucket ACL changed.');
     const path = screen.getByRole('list', { name: 'Attack path' });
     expect(within(path).getByText('Internet')).toBeVisible();
     expect(within(path).getByText('Customer Data')).toBeVisible();

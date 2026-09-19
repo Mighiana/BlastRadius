@@ -78,6 +78,34 @@ def client(app):
         yield client
 
 
+def test_workspace_origin_rejection_is_not_an_owner_permission_failure(client, settings):
+    anonymous = client.get("/api/me").json()
+    assert anonymous["auth"]["public_url"] == settings.public_url
+    alternate = "http://testserver:8001"
+    rejected_login = client.post(
+        "/api/auth/demo",
+        headers={"X-CSRF-Token": anonymous["csrf_token"], "Origin": alternate},
+    )
+    assert rejected_login.status_code == 403
+    assert rejected_login.json()["detail"] == "invalid_origin"
+    me = login(client)
+    assert me["organizations"][0]["role"] == "owner"
+    for origin, status in ((alternate, 403), (settings.public_url, 201)):
+        response = client.post(
+            "/api/organizations",
+            json={"name": "Second workspace"},
+            headers={"X-CSRF-Token": me["csrf_token"], "Origin": origin},
+        )
+        assert response.status_code == status
+        if status == 403:
+            assert response.json()["detail"] == "invalid_origin"
+        else:
+            assert response.json()["role"] == "owner"
+    refreshed = client.get("/api/me").json()
+    assert refreshed["user"]["id"] == me["user"]["id"]
+    assert len(refreshed["organizations"]) == 2
+
+
 def login(client):
     anonymous = client.get("/api/me").json()
     response = client.post(
@@ -224,7 +252,12 @@ def test_disabled_auth_still_serves_demo(settings, demo_results, monkeypatch):
     monkeypatch.setattr("blastradius.server.app.build_demos", lambda _: demo_results)
     with TestClient(create_app(replace(settings, auth_mode="disabled"))) as client:
         me = client.get("/api/me").json()
-        assert me["auth"] == {"enabled": False, "mode": "disabled", "login_url": None}
+        assert me["auth"] == {
+            "enabled": False,
+            "mode": "disabled",
+            "login_url": None,
+            "public_url": settings.public_url,
+        }
         assert me["billing"] == {"enabled": False, "test_mode": True}
         assert client.get("/api/projects").status_code == 503
         assert client.post("/api/auth/demo").status_code == 404

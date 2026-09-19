@@ -107,6 +107,7 @@ export function AnalysisForm({ projectId, onSubmitted }: { projectId: string; on
         <button type="button" disabled={busy} aria-pressed={mode === 'plan'} onClick={() => { setMode('plan'); setError(null); }}>Plan JSON</button>
       </div></div>
     <p className="muted">Source text is analyzed as data. No repository code, Terraform providers or commands are executed. Do not upload secrets.</p>
+    <p className="muted">Baseline is your current or reference configuration. Candidate is the proposed change. A baseline may already contain exposure.</p>
     <fieldset disabled={busy || reading} className="form-fields">
       <div className="form-grid"><label>Baseline label<input required maxLength={120} value={baseLabel} onChange={e => setBaseLabel(e.target.value)} /></label><label>Candidate label<input required maxLength={120} value={candidateLabel} onChange={e => setCandidateLabel(e.target.value)} /></label></div>
       {mode === 'hcl' ? <div className="form-grid"><FileEditor title="Baseline" files={before} setFiles={setBefore} disabled={busy} /><FileEditor title="Candidate" files={after} setFiles={setAfter} disabled={busy} /></div>

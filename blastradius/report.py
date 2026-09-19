@@ -44,7 +44,7 @@ def responsible_change(before_dir: Optional[Path], after_dir: Optional[Path]) ->
         return f"{removed[0]} -> {added[0]}"
     if removed or added:
         return f"{len(removed)} line(s) removed, {len(added)} line(s) added"
-    return "no textual change"
+    return "Baseline and candidate configurations are identical."
 
 
 def _terraform_text(directory: Path) -> str:

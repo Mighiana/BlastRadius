@@ -29,7 +29,7 @@ function RouteFocus() {
   return null;
 }
 function Header() {
-  const { session, refresh } = useSession();
+  const { session, originMismatch, refresh } = useSession();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [busy, setBusy] = useState(false);
@@ -48,7 +48,7 @@ function Header() {
       <NavLink to="/demo">Product demo</NavLink><NavLink to="/guide">Documentation</NavLink><NavLink to="/pricing">Pricing</NavLink>
       {session?.authenticated && <NavLink to="/history">History</NavLink>}
       <NavLink className="nav-cta" to="/dashboard">{session?.authenticated ? 'Workspace' : 'Get started'}<ArrowUpRight size={15} aria-hidden="true" /></NavLink>
-      {session?.authenticated && <button className="text-button" disabled={busy} onClick={() => { void logout(); }}>{busy ? 'Signing out…' : 'Sign out'}</button>}
+      {session?.authenticated && <button className="text-button" disabled={busy || originMismatch} title={originMismatch ? 'Sign-out requires the configured application origin.' : undefined} onClick={() => { void logout(); }}>{busy ? 'Signing out…' : 'Sign out'}</button>}
     </nav>
   </div><div className="container"><ErrorNotice error={error} /></div></header>;
 }

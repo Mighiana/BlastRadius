@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import { ArrowRight, FolderPlus, RefreshCw, Trash2 } from 'lucide-react';
@@ -17,6 +17,13 @@ function JobView({ id, onComplete }: { id: string; onComplete: () => void }) {
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [retry, setRetry] = useState(0);
+  const resultRef = useRef<HTMLElement>(null);
+  const status = job?.status;
+  useEffect(() => {
+    if (!status) return;
+    resultRef.current?.focus({ preventScroll: true });
+    resultRef.current?.scrollIntoView({ block: 'start' });
+  }, [status]);
   useEffect(() => {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
@@ -38,13 +45,14 @@ function JobView({ id, onComplete }: { id: string; onComplete: () => void }) {
     void poll();
     return () => { controller.abort(); clearTimeout(timer); };
   }, [id, retry, onComplete]);
-  return <section aria-label="Selected analysis" className="selected-analysis">
+  return <section ref={resultRef} tabIndex={-1} aria-label="Selected analysis" className="selected-analysis">
     <ErrorNotice error={error} retry={() => setRetry(n => n + 1)} />
     {!job && !error && <Loading>Opening analysis…</Loading>}
-    {job && <><div className="analysis-heading"><h2>{job.base_label} <ArrowRight size={20} aria-hidden="true" /> {job.candidate_label}</h2><span className="tag">{job.status}</span></div>
+    {job && <><div className="analysis-heading"><h2>Analysis result</h2><span className="tag">{job.status}</span></div>
       {(job.status === 'queued' || job.status === 'running') && <Loading>{job.status === 'queued' ? 'Queued — waiting for an available worker…' : 'Analyzing Terraform in an isolated worker…'}</Loading>}
       {job.status === 'failed' && <ErrorNotice error={new Error(jobError(job.error))} />}
       {job.status === 'succeeded' && job.result && <ReportView report={job.result} jobId={id} />}
+      <div className="analysis-heading"><h3>{job.base_label} <ArrowRight size={20} aria-hidden="true" /> {job.candidate_label}</h3></div>
     </>}
   </section>;
 }
@@ -68,8 +76,10 @@ function WorkspaceContent() {
   const [organizationName, setOrganizationName] = useState('');
   const [error, setError] = useState<Error | null>(null);
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
   const [confirmDelete, setConfirmDelete] = useState('');
-  const canWrite = org?.role !== 'viewer';
+  const canWrite = org?.role === 'owner' || org?.role === 'member';
+  const workspaceLimitReached = (session?.organizations.filter(item => item.role === 'owner').length ?? 0) >= 5;
   const complete = useCallback(() => { reloadHistory(); void refresh(); }, [reloadHistory, refresh]);
   function selectProject(id: string) {
     setParams({ project: id }); setHistoryPage(0); setConfirmDelete('');
@@ -87,8 +97,10 @@ function WorkspaceContent() {
   async function createOrganization(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError(null);
     try {
-      await mutate('/api/organizations', 'POST', { name: organizationName.trim() });
+      const created = await request('/api/organizations', z.object({ id: z.string(), name: z.string() }), { method: 'POST', body: JSON.stringify({ name: organizationName.trim() }) });
       setOrganizationName(''); await refresh();
+      setOrgId(created.id); setParams({}); setHistoryPage(0); setConfirmDelete('');
+      setNotice(`Workspace “${created.name}” created. Create your first project below.`);
     } catch (err) { setError(err instanceof Error ? err : new Error('Could not create workspace.')); }
     finally { setBusy(false); }
   }
@@ -105,14 +117,16 @@ function WorkspaceContent() {
     setParams({ project: job.project_id, analysis: job.id }); history.reload(); void refresh();
   }
   return <>
-    <div className="workspace-toolbar panel"><label>Workspace<select value={org?.id ?? ''} onChange={event => { setOrgId(event.target.value); setParams({}); setHistoryPage(0); }}>
+    <div className="workspace-toolbar panel"><label>Workspace<select value={org?.id ?? ''} onChange={event => { setOrgId(event.target.value); setParams({}); setHistoryPage(0); setNotice(''); }}>
       {session?.organizations.map(item => <option key={item.id} value={item.id}>{item.name} · {item.role}</option>)}
     </select></label>
       {org && <div className="workspace-usage"><span className="tag">{org.plan} plan</span><strong>{org.usage.analyses} / {org.usage.limits.analyses_per_month}</strong><span>analyses · {org.usage.period} UTC</span><Link to={`/billing?organization=${encodeURIComponent(org.id)}`}>Usage & billing<ArrowRight size={14} aria-hidden="true" /></Link></div>}
     </div>
-    <details className="workspace-create"><summary>Create another workspace</summary><form className="inline-form" onSubmit={event => { void createOrganization(event); }}><label>Workspace name<input required maxLength={100} value={organizationName} onChange={e => setOrganizationName(e.target.value)} /></label><button className="button secondary" disabled={busy}>Create workspace</button></form></details>
+    <details className="workspace-create"><summary>Create another workspace</summary>{workspaceLimitReached ? <p className="muted">You already own the maximum of five workspaces. Select an existing workspace above.</p> : <form className="inline-form" onSubmit={event => { void createOrganization(event); }}><label>Workspace name<input required maxLength={100} value={organizationName} onChange={e => setOrganizationName(e.target.value)} /></label><button className="button secondary" disabled={busy}>Create workspace</button></form>}</details>
+    {notice && <p role="status" className="notice">{notice}</p>}
     <ErrorNotice error={error} />
-    <div className="workspace-layout"><aside className="project-sidebar panel">
+    {analysisId && <><JobView key={analysisId} id={analysisId} onComplete={complete} /><p className="analysis-back"><a className="button secondary" href="#analysis-inputs">{historyOnly ? 'Browse analysis history' : canWrite ? 'Edit inputs or run another analysis' : 'Browse projects and history'}<ArrowRight size={16} aria-hidden="true" /></a></p></>}
+    <div className="workspace-layout" id="analysis-inputs"><aside className="project-sidebar panel">
       <div className="panel-heading"><h2>Projects</h2><button className="icon-button" aria-label="Refresh projects" onClick={projects.reload}><RefreshCw size={16} aria-hidden="true" /></button></div>
       <p className="muted">Organize comparisons by repository or environment.</p>
       {projects.loading && <Loading>Loading projects…</Loading>}
@@ -142,7 +156,6 @@ function WorkspaceContent() {
         </>}
       </div>
     </div>
-    {analysisId && <JobView key={analysisId} id={analysisId} onComplete={complete} />}
   </>;
 }
 export function UsageSummary({ organization }: { organization: Organization }) {

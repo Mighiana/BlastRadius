@@ -190,6 +190,7 @@ def create_app(
                 "auth": {
                     "enabled": settings.auth_mode != "disabled",
                     "mode": settings.auth_mode,
+                    "public_url": settings.public_url.rstrip("/"),
                     "login_url": "/api/auth/login"
                     if settings.auth_mode == "oidc"
                     else None,

@@ -117,6 +117,13 @@ def test_responsible_change_identifies_the_single_line():
     assert "0.0.0.0/0" in change and "->" in change
 
 
+def test_responsible_change_explains_an_unchanged_comparison():
+    assert (
+        responsible_change(SAFE_DIR, SAFE_DIR)
+        == "Baseline and candidate configurations are identical."
+    )
+
+
 def test_report_is_deterministic(safe_result, vulnerable_result):
     diff = compare(safe_result, vulnerable_result)
     first = build_report(diff, before_dir=SAFE_DIR, after_dir=VULNERABLE_DIR)
