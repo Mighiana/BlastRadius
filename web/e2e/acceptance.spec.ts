@@ -182,9 +182,9 @@ for (const width of widths) {
       await page.getByRole('button', { name: 'Confirm restore', exact: true }).click();
       await expect(page.getByRole('button', { name: 'Archive project', exact: true })).toBeVisible();
       await workspaceNav.getByRole('link', { name: 'History', exact: true }).click();
-      await page.getByLabel('Status', { exact: true }).selectOption('succeeded');
-      await page.getByLabel('Decision', { exact: true }).selectOption('SAFE TO MERGE');
-      await page.getByLabel('Input type', { exact: true }).selectOption('hcl');
+      await page.getByRole('combobox', { name: 'Status', exact: true }).selectOption('succeeded');
+      await page.getByRole('combobox', { name: 'Decision', exact: true }).selectOption('SAFE TO MERGE');
+      await page.getByRole('combobox', { name: 'Input type', exact: true }).selectOption('hcl');
       await page.getByRole('button', { name: 'Apply filters' }).click();
       await expect(page.getByText('Page 1 · 1 results')).toBeVisible();
       await expect(page.getByRole('button', { name: 'Next', exact: true })).toBeDisabled();
