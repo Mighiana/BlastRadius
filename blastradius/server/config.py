@@ -19,10 +19,7 @@ class Settings:
     oidc_issuer: str = ""
     oidc_client_id: str = ""
     oidc_client_secret: str = ""
-    stripe_secret_key: str = ""
-    stripe_webhook_secret: str = ""
-    stripe_price_pro: str = ""
-    stripe_price_team: str = ""
+    admin_enabled: bool = False
     max_body_bytes: int = 1_048_576
     max_files: int = 30
     max_resources: int = 300
@@ -41,7 +38,7 @@ class Settings:
 
     @property
     def billing_enabled(self) -> bool:
-        return bool(self.stripe_secret_key)
+        return False
 
     def validate(self) -> None:
         if self.environment not in {"development", "test", "production"}:
@@ -61,9 +58,7 @@ class Settings:
             or url.fragment
             or url.username
         ):
-            raise ValueError(
-                "BR_PUBLIC_URL must be an origin without credentials or path"
-            )
+            raise ValueError("BR_PUBLIC_URL must be an origin without credentials or path")
         if self.production and (
             self.auth_mode != "oidc"
             or len(self.session_secret) < 32
@@ -86,31 +81,7 @@ class Settings:
                 or not self.oidc_client_id
                 or not self.oidc_client_secret
             ):
-                raise ValueError(
-                    "OIDC requires HTTPS issuer, client ID and client secret"
-                )
-        billing = (
-            self.stripe_secret_key,
-            self.stripe_webhook_secret,
-            self.stripe_price_pro,
-            self.stripe_price_team,
-        )
-        if any(billing) and not all(billing):
-            raise ValueError(
-                "Billing requires test secret, webhook secret and both price IDs"
-            )
-        if self.stripe_secret_key and not self.stripe_secret_key.startswith("sk_test_"):
-            raise ValueError("Only Stripe test secret keys are accepted")
-        if self.stripe_webhook_secret and not self.stripe_webhook_secret.startswith(
-            "whsec_"
-        ):
-            raise ValueError("Invalid Stripe webhook secret")
-        if self.billing_enabled and (
-            not self.stripe_price_pro.startswith("price_")
-            or not self.stripe_price_team.startswith("price_")
-            or self.stripe_price_pro == self.stripe_price_team
-        ):
-            raise ValueError("Distinct allowlisted Stripe prices are required")
+                raise ValueError("OIDC requires HTTPS issuer, client ID and client secret")
         if (
             min(
                 self.max_body_bytes,
@@ -136,9 +107,7 @@ class Settings:
         production = env.get("BR_ENV") == "production"
         settings = cls(
             environment=env.get("BR_ENV", "development"),
-            database_url=env.get(
-                "BR_DATABASE_URL", "sqlite:///./.blastradius/server.db"
-            ),
+            database_url=env.get("BR_DATABASE_URL", "sqlite:///./.blastradius/server.db"),
             data_dir=Path(env.get("BR_DATA_DIR", ".blastradius")),
             static_dir=Path(env.get("BR_STATIC_DIR", "web/dist")),
             public_url=env.get("BR_PUBLIC_URL", "http://localhost:8000").rstrip("/"),
@@ -149,10 +118,7 @@ class Settings:
             oidc_issuer=env.get("BR_OIDC_ISSUER", ""),
             oidc_client_id=env.get("BR_OIDC_CLIENT_ID", ""),
             oidc_client_secret=env.get("BR_OIDC_CLIENT_SECRET", ""),
-            stripe_secret_key=env.get("BR_STRIPE_SECRET_KEY", ""),
-            stripe_webhook_secret=env.get("BR_STRIPE_WEBHOOK_SECRET", ""),
-            stripe_price_pro=env.get("BR_STRIPE_PRICE_PRO", ""),
-            stripe_price_team=env.get("BR_STRIPE_PRICE_TEAM", ""),
+            admin_enabled=env.get("BR_ADMIN_ENABLED") == "true",
             max_body_bytes=int(env.get("BR_MAX_BODY_BYTES", "1048576")),
             max_files=int(env.get("BR_MAX_FILES", "30")),
             max_resources=int(env.get("BR_MAX_RESOURCES", "300")),
@@ -163,8 +129,7 @@ class Settings:
             rate_limit=int(env.get("BR_RATE_LIMIT", "180")),
             auth_rate_limit=int(env.get("BR_AUTH_RATE_LIMIT", "15")),
             demo_rate_limit=int(env.get("BR_DEMO_RATE_LIMIT", "60")),
-            auto_migrate=env.get("BR_AUTO_MIGRATE", "false" if production else "true")
-            == "true",
+            auto_migrate=env.get("BR_AUTO_MIGRATE", "false" if production else "true") == "true",
         )
         settings.validate()
         return settings

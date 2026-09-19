@@ -9,7 +9,6 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -24,12 +23,6 @@ from blastradius.server.auth import (
     require_csrf,
     require_user,
 )
-from blastradius.server.billing import (
-    Gateway,
-    StripeGateway,
-    apply_event,
-    verified_event,
-)
 from blastradius.server.config import Settings
 from blastradius.server.db import Database
 from blastradius.server.demos import build_demos
@@ -38,11 +31,12 @@ from blastradius.server.jobs import JobManager
 from blastradius.server.lease import ServiceLease
 from blastradius.server.middleware import GuardMiddleware
 from blastradius.server.models import Analysis, Membership, Organization, Project, User
-from blastradius.server.quotas import lock_org, quota, usage_payload
+from blastradius.server.plans import catalog, entitlements, require_feature
+from blastradius.server.quotas import lock_org, quota, usage_payload, usage_row
+from blastradius.server.lifecycle import authorized_org, lifecycle_router
+from blastradius.server.persistence import effective_policy, visible_analysis, cutoff, public_result
 from blastradius.server.schemas import (
     AnalysisInput,
-    CheckoutInput,
-    MemberInput,
     OrganizationInput,
     ProjectInput,
 )
@@ -54,11 +48,19 @@ def project_payload(project: Project) -> dict:
         "id": project.id,
         "organization_id": project.organization_id,
         "name": project.name,
+        "description": project.description,
+        "repository": project.repository,
+        "repository_provider": project.repository_provider,
+        "default_branch": project.default_branch,
+        "environment": project.environment,
+        "terraform_root": project.terraform_root,
+        "archived_at": project.archived_at,
+        "updated_at": project.updated_at,
         "created_at": project.created_at,
     }
 
 
-def analysis_payload(job: Analysis, detail: bool = True) -> dict:
+def analysis_payload(job: Analysis, detail: bool = True, sarif: bool = False) -> dict:
     data = {
         "id": job.id,
         "project_id": job.project_id,
@@ -70,26 +72,35 @@ def analysis_payload(job: Analysis, detail: bool = True) -> dict:
         "completed_at": job.completed_at,
         "status": job.status,
         "error": job.error,
+        "input_type": job.input_type,
+        "base_ref": job.base_ref,
+        "candidate_ref": job.candidate_ref,
+        "base_sha": job.base_sha,
+        "candidate_sha": job.candidate_sha,
+        "decision": job.decision,
+        "score_before": job.score_before,
+        "score_after": job.score_after,
+        "risk_before": job.risk_before,
+        "risk_after": job.risk_after,
+        "critical_paths_added": job.critical_paths_added,
+        "critical_paths_removed": job.critical_paths_removed,
+        "policy_snapshot": job.policy_snapshot,
+        "normalized_version": job.normalized_version,
     }
     if detail:
-        data["result"] = job.result
+        data["result"] = public_result(job.result, sarif)
     elif job.result:
-        data["summary"] = {
-            key: job.result[key] for key in ("decision", "score", "verdict")
-        }
+        data["summary"] = {key: job.result[key] for key in ("decision", "score", "verdict")}
     return data
 
 
-def create_app(
-    settings: Settings | None = None, *, gateway: Gateway | None = None
-) -> FastAPI:
+def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     settings.validate()
     db = Database(settings)
     oauth = oauth_client(settings)
     jobs = JobManager(db, settings)
     lease = ServiceLease(db, settings.data_dir)
-    billing = gateway or (StripeGateway(settings) if settings.billing_enabled else None)
     demos: dict[tuple[str, str], dict] = {}
 
     @asynccontextmanager
@@ -138,6 +149,11 @@ def create_app(
             allowed_hosts=[urlsplit(settings.public_url).hostname or ""],
         )
     app.add_middleware(GuardMiddleware, settings=settings)
+    app.include_router(lifecycle_router(db, settings))
+
+    @app.get("/api/plans")
+    def plans():
+        return catalog()
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(_request: Request, _error: RequestValidationError):
@@ -160,9 +176,7 @@ def create_app(
     @app.get("/api/me")
     def me(request: Request, response: Response):
         with db.session(write=True) as session:
-            login = current_session(request, session) or create_session(
-                response, session, settings
-            )
+            login = current_session(request, session) or create_session(response, session, settings)
             user = session.get(User, login.user_id) if login.user_id else None
             organizations = []
             if user:
@@ -182,7 +196,13 @@ def create_app(
                     )
             return {
                 "authenticated": user is not None,
-                "user": {"id": user.id, "name": user.name, "email": user.email}
+                "user": {
+                    "id": user.id,
+                    "name": user.name,
+                    "email": user.email,
+                    "email_verified": user.email_verified,
+                    "created_at": user.created_at,
+                }
                 if user
                 else None,
                 "organizations": organizations,
@@ -191,11 +211,9 @@ def create_app(
                     "enabled": settings.auth_mode != "disabled",
                     "mode": settings.auth_mode,
                     "public_url": settings.public_url.rstrip("/"),
-                    "login_url": "/api/auth/login"
-                    if settings.auth_mode == "oidc"
-                    else None,
+                    "login_url": "/api/auth/login" if settings.auth_mode == "oidc" else None,
                 },
-                "billing": {"enabled": settings.billing_enabled, "test_mode": True},
+                "billing": {"enabled": False, "mode": "commercial_beta"},
             }
 
     @app.post("/api/auth/demo")
@@ -216,9 +234,7 @@ def create_app(
         if settings.auth_mode != "oidc":
             raise HTTPException(503, "oidc_disabled")
         client = oauth.create_client("oidc")
-        return await client.authorize_redirect(
-            request, settings.public_url + "/api/auth/callback"
-        )
+        return await client.authorize_redirect(request, settings.public_url + "/api/auth/callback")
 
     @app.get("/api/auth/callback")
     async def callback(request: Request):
@@ -231,33 +247,22 @@ def create_app(
             )
             token = await client.authorize_access_token(request)
             claims = token.get("userinfo")
-            if (
-                not claims
-                or claims.get("iss") != settings.oidc_issuer
-                or not claims.get("sub")
-            ):
+            if not claims or claims.get("iss") != settings.oidc_issuer or not claims.get("sub"):
                 raise ValueError("Invalid identity")
-            if (
-                not state
-                or not state.get("nonce")
-                or claims.get("nonce") != state["nonce"]
-            ):
+            if not state or not state.get("nonce") or claims.get("nonce") != state["nonce"]:
                 raise ValueError("Invalid nonce")
             subject = claims["sub"]
             if not isinstance(subject, str) or len(subject) > 255:
                 raise ValueError("Invalid identity")
-            response = RedirectResponse(
-                settings.public_url + "/dashboard", status_code=303
-            )
+            response = RedirectResponse(settings.public_url + "/dashboard", status_code=303)
             with db.session(write=True) as session:
                 user = provision(
                     session,
                     settings.oidc_issuer,
                     subject,
                     str(claims.get("name", "")),
-                    str(claims.get("email", ""))
-                    if claims.get("email_verified") is True
-                    else "",
+                    str(claims.get("email", "")) if claims.get("email_verified") is True else "",
+                    email_verified=claims.get("email_verified") is True,
                 )
                 old = current_session(request, session)
                 if old:
@@ -317,60 +322,8 @@ def create_app(
             org = Organization(name=body.name)
             session.add(org)
             session.flush()
-            session.add(
-                Membership(user_id=user.id, organization_id=org.id, role="owner")
-            )
+            session.add(Membership(user_id=user.id, organization_id=org.id, role="owner"))
             return {"id": org.id, "name": org.name, "role": "owner", "plan": org.plan}
-
-    @app.get("/api/organizations/{organization_id}/members")
-    def members(organization_id: str, request: Request):
-        with db.session() as session:
-            user = require_user(request, session, settings)
-            membership(session, user, organization_id, ("owner",))
-            return {
-                "members": [
-                    {"user_id": member.user_id, "role": member.role}
-                    for member in session.scalars(
-                        select(Membership).where(
-                            Membership.organization_id == organization_id
-                        )
-                    )
-                ]
-            }
-
-    @app.post("/api/organizations/{organization_id}/members", status_code=201)
-    def add_member(organization_id: str, body: MemberInput, request: Request):
-        with db.session(write=True) as session:
-            user = require_user(request, session, settings, True)
-            membership(session, user, organization_id, ("owner",))
-            org = lock_org(session, organization_id)
-            if not session.get(User, body.user_id):
-                raise HTTPException(404, "user_not_found")
-            if session.get(Membership, (body.user_id, organization_id)):
-                raise HTTPException(409, "already_member")
-            quota(session, org, "members")
-            session.add(
-                Membership(
-                    user_id=body.user_id,
-                    organization_id=organization_id,
-                    role=body.role,
-                )
-            )
-            return {"user_id": body.user_id, "role": body.role}
-
-    @app.delete(
-        "/api/organizations/{organization_id}/members/{user_id}", status_code=204
-    )
-    def remove_member(organization_id: str, user_id: str, request: Request):
-        with db.session(write=True) as session:
-            user = require_user(request, session, settings, True)
-            membership(session, user, organization_id, ("owner",))
-            member = session.get(Membership, (user_id, organization_id))
-            if not member:
-                raise HTTPException(404, "not_found")
-            if member.role == "owner":
-                raise HTTPException(409, "cannot_remove_owner")
-            session.delete(member)
 
     @app.get("/api/projects")
     def projects(
@@ -404,11 +357,21 @@ def create_app(
     def create_project(body: ProjectInput, request: Request):
         with db.session(write=True) as session:
             user = require_user(request, session, settings, True)
-            membership(session, user, body.organization_id, ("owner", "member"))
-            quota(session, lock_org(session, body.organization_id), "projects")
-            project = Project(organization_id=body.organization_id, name=body.name)
+            org = authorized_org(session, user, body.organization_id, ("owner", "admin"))
+            quota(session, org, "projects")
+            project = Project(**body.model_dump())
             session.add(project)
             session.flush()
+            return project_payload(project)
+
+    @app.get("/api/projects/{project_id}")
+    def project_detail(project_id: str, request: Request):
+        with db.session() as session:
+            user = require_user(request, session, settings)
+            project = session.get(Project, project_id)
+            if project is None:
+                raise HTTPException(404, "not_found")
+            membership(session, user, project.organization_id)
             return project_payload(project)
 
     @app.delete("/api/projects/{project_id}", status_code=204)
@@ -418,7 +381,7 @@ def create_app(
             project = session.get(Project, project_id)
             if not project:
                 raise HTTPException(404, "not_found")
-            membership(session, user, project.organization_id, ("owner",))
+            authorized_org(session, user, project.organization_id, ("owner", "admin"))
             session.delete(project)
 
     @app.get("/api/projects/{project_id}/analyses")
@@ -427,6 +390,12 @@ def create_app(
         request: Request,
         limit: int = Query(50, ge=1, le=100),
         offset: int = Query(0, ge=0),
+        status: Literal["queued", "running", "succeeded", "failed"] | None = None,
+        decision: str | None = None,
+        input_type: Literal["hcl", "plan"] | None = None,
+        branch: str | None = None,
+        since: float | None = None,
+        until: float | None = None,
     ):
         with db.session() as session:
             user = require_user(request, session, settings)
@@ -434,24 +403,41 @@ def create_app(
             if not project:
                 raise HTTPException(404, "not_found")
             membership(session, user, project.organization_id)
+            org = session.get(Organization, project.organization_id)
+            assert org is not None
+            query = select(Analysis).where(
+                Analysis.project_id == project_id, Analysis.created_at > cutoff(org)
+            )
+            if status:
+                query = query.where(Analysis.status == status)
+            if decision:
+                query = query.where(Analysis.decision == decision)
+            if input_type:
+                query = query.where(Analysis.input_type == input_type)
+            if branch:
+                query = query.where(Analysis.candidate_ref == branch)
+            if since is not None:
+                query = query.where(Analysis.created_at >= since)
+            if until is not None:
+                query = query.where(Analysis.created_at <= until)
             return {
+                "total": session.scalar(select(func.count()).select_from(query.subquery())),
+                "limit": limit,
+                "offset": offset,
                 "analyses": [
                     analysis_payload(job, False)
                     for job in session.scalars(
-                        select(Analysis)
-                        .where(Analysis.project_id == project_id)
-                        .order_by(Analysis.created_at.desc(), Analysis.id)
+                        query.order_by(Analysis.created_at.desc(), Analysis.id)
                         .limit(limit)
                         .offset(offset)
                     )
-                ]
+                ],
             }
 
     @app.post("/api/analyses", status_code=202)
     def create_analysis(body: AnalysisInput, request: Request):
         if any(
-            len(files or {}) > settings.max_files
-            for files in (body.before_files, body.after_files)
+            len(files or {}) > settings.max_files for files in (body.before_files, body.after_files)
         ):
             raise HTTPException(413, "file_limit_exceeded")
         reserved = False
@@ -461,8 +447,12 @@ def create_app(
                 project = session.get(Project, body.project_id)
                 if not project:
                     raise HTTPException(404, "not_found")
-                membership(session, user, project.organization_id, ("owner", "member"))
-                org = lock_org(session, project.organization_id)
+                org = authorized_org(
+                    session, user, project.organization_id, ("owner", "admin", "developer")
+                )
+                session.refresh(project)
+                if project.archived_at is not None:
+                    raise HTTPException(409, "project_archived")
                 if not jobs.reserve():
                     raise HTTPException(429, "job_capacity_exceeded")
                 reserved = True
@@ -473,6 +463,13 @@ def create_app(
                     created_by=user.id,
                     base_label=body.base_label,
                     candidate_label=body.candidate_label,
+                    input_type="plan" if body.plan is not None else "hcl",
+                    base_ref=body.base_ref,
+                    candidate_ref=body.candidate_ref,
+                    base_sha=body.base_sha,
+                    candidate_sha=body.candidate_sha,
+                    policy_snapshot=effective_policy(org, project),
+                    request_id=request.state.request_id,
                 )
                 session.add(job)
                 session.flush()
@@ -488,11 +485,8 @@ def create_app(
     def analysis(analysis_id: str, request: Request):
         with db.session() as session:
             user = require_user(request, session, settings)
-            job = session.get(Analysis, analysis_id)
-            if not job:
-                raise HTTPException(404, "not_found")
-            membership(session, user, job.organization_id)
-            return analysis_payload(job)
+            job, org = visible_analysis(session, user, analysis_id)
+            return analysis_payload(job, sarif=entitlements(org).sarif)
 
     @app.delete("/api/analyses/{analysis_id}", status_code=204)
     def delete_analysis(analysis_id: str, request: Request):
@@ -501,7 +495,7 @@ def create_app(
             job = session.get(Analysis, analysis_id)
             if not job:
                 raise HTTPException(404, "not_found")
-            membership(session, user, job.organization_id, ("owner", "member"))
+            authorized_org(session, user, job.organization_id, ("owner", "admin", "developer"))
             session.delete(job)
 
     @app.get("/api/analyses/{analysis_id}/report")
@@ -510,15 +504,19 @@ def create_app(
         request: Request,
         format: Literal["json", "markdown", "sarif", "web"] = "web",
     ):
-        with db.session() as session:
+        with db.session(write=True) as session:
             user = require_user(request, session, settings)
-            job = session.get(Analysis, analysis_id)
-            if not job:
-                raise HTTPException(404, "not_found")
-            membership(session, user, job.organization_id)
+            job, org = visible_analysis(session, user, analysis_id)
+            org = lock_org(session, org.id)
+            job, org = visible_analysis(session, user, analysis_id)
             if job.status != "succeeded" or not job.result:
                 raise HTTPException(409, "report_not_ready")
-            result = job.result
+            if format == "sarif":
+                require_feature(org, "sarif")
+            if format != "web":
+                usage_row(session, org).exports += 1
+            result = public_result(job.result, entitlements(org).sarif)
+            assert result is not None
             if format == "markdown":
                 return Response(
                     result["reports"]["markdown"],
@@ -528,9 +526,7 @@ def create_app(
             if format == "sarif":
                 return JSONResponse(
                     result["reports"]["sarif"],
-                    headers={
-                        "Content-Disposition": 'attachment; filename="report.sarif"'
-                    },
+                    headers={"Content-Disposition": 'attachment; filename="report.sarif"'},
                 )
             return JSONResponse(
                 result,
@@ -547,73 +543,10 @@ def create_app(
             org = lock_org(session, organization_id)
             return {
                 "enabled": settings.billing_enabled,
-                "test_mode": True,
+                "mode": "commercial_beta",
                 "plan": org.plan,
-                "subscription_status": org.subscription_status,
                 "usage": usage_payload(session, org),
             }
-
-    @app.post("/api/organizations/{organization_id}/billing/checkout")
-    def checkout(organization_id: str, body: CheckoutInput, request: Request):
-        with db.session(write=True) as session:
-            user = require_user(request, session, settings, True)
-            membership(session, user, organization_id, ("owner",))
-            org = lock_org(session, organization_id)
-            if not billing:
-                raise HTTPException(503, "billing_disabled")
-            if org.subscription_status in {
-                "active",
-                "trialing",
-                "past_due",
-                "unpaid",
-                "paused",
-            }:
-                raise HTTPException(409, "use_billing_portal")
-            try:
-                if not org.customer_id:
-                    org.customer_id = billing.customer(org.id)
-                price = (
-                    settings.stripe_price_pro
-                    if body.plan == "pro"
-                    else settings.stripe_price_team
-                )
-                return {
-                    "url": billing.checkout(
-                        org.customer_id, price, settings.public_url + "/billing"
-                    )
-                }
-            except Exception:
-                raise HTTPException(502, "billing_provider_unavailable") from None
-
-    @app.post("/api/organizations/{organization_id}/billing/portal")
-    def portal(organization_id: str, request: Request):
-        with db.session() as session:
-            user = require_user(request, session, settings, True)
-            membership(session, user, organization_id, ("owner",))
-            org = lock_org(session, organization_id)
-            if not billing:
-                raise HTTPException(503, "billing_disabled")
-            if not org.customer_id:
-                raise HTTPException(409, "billing_customer_missing")
-            try:
-                return {
-                    "url": billing.portal(
-                        org.customer_id, settings.public_url + "/billing"
-                    )
-                }
-            except Exception:
-                raise HTTPException(502, "billing_provider_unavailable") from None
-
-    @app.post("/api/billing/webhook")
-    async def webhook(request: Request):
-        event = verified_event(
-            await request.body(), request.headers.get("stripe-signature", ""), settings
-        )
-        try:
-            with db.session(write=True) as session:
-                return apply_event(session, event, settings)
-        except IntegrityError:
-            return {"received": True, "duplicate": True}
 
     if (settings.static_dir / "index.html").is_file():
         app.mount("/", FrontendFiles(directory=settings.static_dir), name="frontend")

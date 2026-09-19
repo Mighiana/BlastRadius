@@ -10,6 +10,7 @@ from blastradius.graph.attack_paths import AnalysisResult
 from blastradius.parser import parse_directory
 from blastradius.parser.models import AttackPath, GraphEdge
 from blastradius.parser.plan_parser import parse_plan_pair
+from blastradius.policy import Policy, load_policy_data
 from blastradius.report import build_report, responsible_change
 from blastradius.sarif import build_sarif
 from blastradius.security.decision import decide
@@ -84,7 +85,12 @@ def snapshot(result: AnalysisResult) -> dict:
     }
 
 
-def analyze_input(payload: AnalysisInput, workdir: Path, max_resources: int) -> dict:
+def analyze_input(
+    payload: AnalysisInput,
+    workdir: Path,
+    max_resources: int,
+    policy_snapshot: dict | None = None,
+) -> dict:
     before_dir = after_dir = None
     if payload.plan is not None:
         plan_file = workdir / "plan.json"
@@ -115,26 +121,27 @@ def analyze_input(payload: AnalysisInput, workdir: Path, max_resources: int) -> 
     before = analyze(build_graph(before_config), payload.base_label)
     after = analyze(build_graph(after_config), payload.candidate_label)
     diff = compare(before, after)
-    decision = decide(diff)
+    policy = Policy()
+    if policy_snapshot and policy_snapshot["rules"] is not None:
+        policy = load_policy_data(
+            policy_snapshot["rules"],
+            source=f"{policy_snapshot['source']} policy v{policy_snapshot['version']}",
+        )
+    decision = decide(diff, policy)
     remediation = generate_safer_config(after_dir) if after_dir else None
     advice = recommend(after_config, after.graph)
     unsupported = sorted(set(before_config.unsupported + after_config.unsupported))
     diagnostics = [
-        {"code": "unsupported", "severity": "warning", "message": item}
-        for item in unsupported
+        {"code": "unsupported", "severity": "warning", "message": item} for item in unsupported
     ]
     diagnostics.extend(
         {"phase": phase, **asdict(diagnostic)}
         for phase, result in (("before", before), ("after", after))
         for diagnostic in result.diagnostics
     )
-    diagnostics.append(
-        {"code": "model_limitations", "severity": "info", "message": LIMITATION}
-    )
+    diagnostics.append({"code": "model_limitations", "severity": "info", "message": LIMITATION})
     changes = []
-    for name in sorted(
-        set(payload.before_files or {}) | set(payload.after_files or {})
-    ):
+    for name in sorted(set(payload.before_files or {}) | set(payload.after_files or {})):
         old, new = (
             (payload.before_files or {}).get(name, ""),
             (payload.after_files or {}).get(name, ""),
@@ -168,13 +175,9 @@ def analyze_input(payload: AnalysisInput, workdir: Path, max_resources: int) -> 
         "before": snapshot(before),
         "after": snapshot(after),
         "new_attack_paths": [path_payload(p, after) for p in diff.new_attack_paths],
-        "removed_attack_paths": [
-            path_payload(p, before) for p in diff.removed_attack_paths
-        ],
+        "removed_attack_paths": [path_payload(p, before) for p in diff.removed_attack_paths],
         "new_critical_paths": [path_payload(p, after) for p in diff.new_critical_paths],
-        "removed_critical_paths": [
-            path_payload(p, before) for p in diff.removed_critical_paths
-        ],
+        "removed_critical_paths": [path_payload(p, before) for p in diff.removed_critical_paths],
         "newly_exposed": diff.newly_exposed,
         "newly_reachable_sensitive": diff.newly_reachable_sensitive,
         "new_nodes": diff.new_nodes,

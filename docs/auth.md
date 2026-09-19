@@ -64,22 +64,25 @@ Frontend flow:
 2. For OIDC, navigate to `auth.login_url`. For explicit local demo mode, send
    `POST /api/auth/demo` with `X-CSRF-Token`.
 3. Fetch `/api/me` again after login for the new session's CSRF token.
-4. Add `X-CSRF-Token` to all authenticated POST/DELETE requests and logout.
+4. Add `X-CSRF-Token` to all authenticated POST/PUT/PATCH/DELETE requests and logout.
 5. On `401`, clear user state and offer login. On `403 csrf_required`, refresh
    `/api/me`; never retry a mutation indefinitely.
 
 Mutations check CSRF by constant-time comparison, reject mismatched `Origin`
 when supplied, and reject `Sec-Fetch-Site: cross-site`. Requests without Origin
 still need the unguessable session-bound token. No wildcard credentialed CORS
-is configured. Stripe webhook requests instead require a verified provider
-signature, timestamp and event validation; they do not trust browser sessions.
+is configured. Payment webhooks and other active payment routes are removed.
 GET endpoints do not change organization/project/plan state; `/api/me` can create
 an anonymous session for bootstrapping.
 
 Logout affects the BlastRadius session only; provider-global logout and SSO
 session revocation are not implemented. OIDC provisioning is first-login signup,
 not domain-restricted onboarding. Configure provider policies to restrict who may
-sign in. There is no in-app account recovery, owner transfer or user deletion flow.
+sign in. There is no in-app account recovery or user deletion flow. Owners can
+promote another member before demoting themselves; the last owner is protected.
+Account session APIs list opaque session IDs and creation/expiry times, and
+support revoking one or all own sessions. Migrated sessions have unknown creation
+times. No hash, cookie or CSRF value is exposed by the session list.
 
 ## Explicit local demo authentication
 
@@ -100,19 +103,18 @@ Membership is checked server-side on every request including report downloads
 and billing. A guessed valid ID in another tenant returns 404. Membership removal
 takes effect on the next request even if the user's login cookie is still valid.
 
-| Capability | Owner | Member | Viewer |
-| --- | --- | --- | --- |
-| List own projects/history; read/download reports | Yes | Yes | Yes |
-| Create project; submit/delete analysis | Yes | Yes | No |
-| Delete project and all its analyses | Yes | No | No |
-| List/add/remove members | Yes | No | No |
-| Read billing details; checkout/portal | Yes | No | No |
+Roles are owner/admin/developer/viewer; migration converts legacy member to
+developer. See the [permission matrix](organizations.md). All four can read
+entitled, nonexpired evidence. Developers can analyze; admins manage settings,
+projects and nonowner members; only owners manage owners and delete workspaces.
+No HTTP endpoint can assign a plan.
 
-Users can create up to five owned free workspaces. Only an owner can add an
-already-existing user by opaque ID, and only with `member` or `viewer` role;
-member quota is enforced. Owners cannot be removed or created through this API.
-There is no global administrator bypass, email-based join, arbitrary tenant
-claim, client-selected plan or endpoint to grant ownership.
+Users can create up to five owned Free workspaces. Team-only invitations replace
+arbitrary user-ID grants. Links contain 256-bit random tokens; only hashes are
+stored. Acceptance is atomic, email-bound and requires the OIDC provider's
+`email_verified: true`. Reauthentication refreshes email and verification state.
+Demo/local identities cannot accept invitations. No email provider is installed;
+authorized creators manually deliver the one-time copyable link.
 
 Tests verify session rotation, hash-at-rest, logout revocation, CSRF/origin
 rejection, disabled/production configuration, Authlib's real JWT validation via

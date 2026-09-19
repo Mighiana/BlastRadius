@@ -27,6 +27,7 @@ class GuardMiddleware:
             return
         start = time.monotonic()
         request_id = str(uuid.uuid4())
+        scope.setdefault("state", {})["request_id"] = request_id
         status = 500
         response_started = False
 

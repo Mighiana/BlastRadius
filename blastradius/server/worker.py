@@ -9,7 +9,7 @@ from lark.exceptions import UnexpectedInput
 from pydantic import ValidationError
 
 from blastradius.server.analysis import ResourceLimitError, analyze_input
-from blastradius.server.schemas import AnalysisInput
+from blastradius.server.schemas import WorkerInput
 
 
 def main() -> None:
@@ -19,10 +19,8 @@ def main() -> None:
     resource.setrlimit(resource.RLIMIT_CPU, (int(sys.argv[3]), int(sys.argv[3]) + 1))
     workdir = Path(sys.argv[1])
     try:
-        payload = AnalysisInput.model_validate_json(
-            (workdir / "input.json").read_bytes()
-        )
-        result = analyze_input(payload, workdir, int(sys.argv[2]))
+        payload = WorkerInput.model_validate_json((workdir / "input.json").read_bytes())
+        result = analyze_input(payload.analysis, workdir, int(sys.argv[2]), payload.policy_snapshot)
         response: dict = {"result": result}
     except ResourceLimitError:
         response = {"error": "resource_limit_exceeded"}

@@ -71,16 +71,10 @@ def create_session(
     return session
 
 
-def require_user(
-    request: Request, db: Session, settings: Settings, mutation: bool = False
-) -> User:
+def require_user(request: Request, db: Session, settings: Settings, mutation: bool = False) -> User:
     if settings.auth_mode == "disabled":
         raise HTTPException(503, "authentication_disabled")
-    session = (
-        require_csrf(request, db, settings)
-        if mutation
-        else current_session(request, db)
-    )
+    session = require_csrf(request, db, settings) if mutation else current_session(request, db)
     if not session or not session.user_id:
         raise HTTPException(401, "authentication_required")
     user = db.get(User, session.user_id)
@@ -97,9 +91,7 @@ def require_csrf(request: Request, db: Session, settings: Settings) -> LoginSess
         raise HTTPException(403, "invalid_origin")
     session = current_session(request, db)
     provided = request.headers.get("x-csrf-token", "")
-    if not session or not secrets.compare_digest(
-        session.csrf_token.encode(), provided.encode()
-    ):
+    if not session or not secrets.compare_digest(session.csrf_token.encode(), provided.encode()):
         raise HTTPException(403, "csrf_required")
     return session
 
@@ -115,11 +107,27 @@ def membership(
     return member
 
 
-def provision(db: Session, issuer: str, subject: str, name: str, email: str) -> User:
+def provision(
+    db: Session,
+    issuer: str,
+    subject: str,
+    name: str,
+    email: str,
+    email_verified: bool = False,
+) -> User:
     user = db.scalar(select(User).where(User.issuer == issuer, User.subject == subject))
     if user:
+        user.email = email[:320]
+        user.email_verified = email_verified
+        user.name = name[:200]
         return user
-    user = User(issuer=issuer, subject=subject, name=name[:200], email=email[:320])
+    user = User(
+        issuer=issuer,
+        subject=subject,
+        name=name[:200],
+        email=email[:320],
+        email_verified=email_verified,
+    )
     db.add(user)
     db.flush()
     org = Organization(name=(name[:70] or "Personal") + "'s workspace")

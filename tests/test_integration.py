@@ -10,7 +10,6 @@ import pytest
 
 pytest.importorskip("fastapi", reason="install .[server,dev] for integration tests")
 pytest.importorskip("sqlalchemy", reason="install .[server,dev] for integration tests")
-pytest.importorskip("stripe", reason="install .[server,dev] for integration tests")
 
 from fastapi.testclient import TestClient
 
@@ -70,7 +69,7 @@ def test_api_report_retains_per_edge_evidence(integrated_demos):
     assert any(edge["source_file"] == "main.tf" and edge["evidence"] for edge in edges)
 
 
-@pytest.mark.parametrize("route", ["/", "/demo", "/dashboard", "/history", "/billing", "/pricing", "/guide"])
+@pytest.mark.parametrize("route", ["/", "/demo", "/dashboard", "/history", "/billing", "/pricing", "/guide", "/invitations/accept"])
 def test_static_frontend_routes_and_asset_boundaries(tmp_path, route):
     static = tmp_path / "dist"
     static.mkdir()

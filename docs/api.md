@@ -1,381 +1,196 @@
-# FastAPI service and frontend contract
+# Backend API contract
 
-The optional backend reuses the Python analysis engine. CLI installations retain
-their original three core dependencies. Install the service with `.[server]`;
-install `.[server,ui,dev]` to run the full repository test suite. Python 3.12 on
-Linux is the verified server platform. The worker uses Unix resource limits and
-file locks; Windows server execution is not supported by this implementation.
+FastAPI app: `blastradius.server.app:app`; factory: `create_app(settings=None)`.
+Run one API process with the existing in-memory bounded job executor. OpenAPI is
+at `/api/openapi.json`; development docs at `/api/docs`. `/health/live` is process
+liveness; `/health/ready` checks the actual packaged Alembic head and nine loaded
+real-engine demo results. There are no fake progress stages.
 
-## Start locally
+## Configuration and migrations
+
+Use `.env.example`, [authentication](auth.md) and `Settings` in
+`blastradius/server/config.py`. Current settings include `BR_ENV`, `BR_PUBLIC_URL`,
+`BR_AUTH_MODE` (`demo`, `oidc`, `disabled`), `BR_DATABASE_URL`, `BR_DATA_DIR`,
+`BR_STATIC_DIR`, `BR_AUTO_MIGRATE`, `BR_SESSION_SECRET`, `BR_SESSION_TTL`,
+`BR_OIDC_ISSUER`, `BR_OIDC_CLIENT_ID`, `BR_OIDC_CLIENT_SECRET`, body/file/resource/
+job/worker/rate limits and the operator-only `BR_ADMIN_ENABLED`. Unknown old
+`BR_STRIPE_*` settings have no effect. No payment SDK or payment API remains.
 
 ```bash
-python -m venv .venv
-. .venv/bin/activate
-python -m pip install ".[server,ui,dev]"
-export BR_AUTH_MODE=demo
 python -m blastradius.server.migrate
-python -m uvicorn blastradius.server.app:app --host 127.0.0.1 --port 8000 --workers 1 --no-access-log
+python -m uvicorn blastradius.server.app:app --host 127.0.0.1 --port 8000 \
+  --workers 1 --no-access-log --no-proxy-headers
 ```
 
-The default database is SQLite at `.blastradius/server.db`. Local startup also
-runs migrations automatically unless `BR_AUTO_MIGRATE=false`. No credentials are
-needed for public demos or explicit development demo authentication. Without
-`BR_AUTH_MODE=demo`, authentication defaults to disabled and only public demos
-are usable. Development demo login creates a new isolated workspace on each login;
-it does not impersonate or reconnect to another demo user's data.
+Migrations support fresh databases and upgrading existing revision `0001` to
+`0002`. Readiness follows Alembic's actual head. Migration Python files and the
+autogeneration template ship in wheels. Back up and stop API processes before
+schema migration. Reverting 0002 requires restoring the pre-upgrade backup;
+lossy schema downgrade is explicitly rejected. Legacy `member` becomes
+`developer`; existing roles/data/results are preserved. Existing users must
+reauthenticate through verified OIDC to establish verified-email status.
 
-The ASGI entrypoint is `blastradius.server.app:app`; the factory is
-`create_app(settings: Settings | None = None)`. Tests can inject a billing gateway.
-The application owns its database pool, job executor, exclusive service lease,
-demo cache and shutdown. Importing the module validates configuration and creates
-the data directory; connecting/migrating/recovering jobs happens during lifespan.
+## Authentication and errors
 
-Serve the frontend and API under the **same origin**. With Vite, proxy `/api` and
-`/health` to port 8000 and set `BR_PUBLIC_URL` to the browser's frontend origin
-(for example `http://localhost:5173`). Use relative URLs with cookies and do not
-enable wildcard CORS. The backend does not serve the frontend build. Frontend
-routes `/dashboard` and `/billing` are the configured login/billing return targets.
+`GET /api/me` creates an anonymous CSRF session if necessary. Authenticated
+responses include `user {id,name,email,email_verified,created_at}`,
+`organizations [{id,name,role,plan,usage}]`, `csrf_token`, `auth`, and
+`billing {enabled:false,mode:"commercial_beta"}`. Mutations require the session
+cookie and `X-CSRF-Token`; optional Origin must match `BR_PUBLIC_URL`, and
+cross-site browser mutations are rejected. Never put CSRF tokens in URLs.
 
-## Configuration
+* `POST /api/auth/demo`: disposable development identity, disabled in production.
+* `GET /api/auth/login`, `/api/auth/callback`: OIDC state/nonce/PKCE/signed claims.
+* `POST /api/auth/logout`: revoke current session and remove cookie.
+* `GET /api/account/sessions`: `{sessions:[{id,created_at,expires_at,current}]}`.
+  Migrated sessions may have `created_at:null`; session/token hashes are never exposed.
+* `DELETE /api/account/sessions/{id}` or `/api/account/sessions`: revoke one/all
+  of the current user's sessions, including the current one; return 204.
 
-All application environment variables:
+Errors are `{"detail":"stable_code"}`: 401 unauthenticated; 403 role/CSRF/origin;
+404 absent, expired or foreign-tenant resource; 402 quota/entitlement; 409 last
+owner, archived project, unavailable report or invitation conflict; 413 input
+size/resource limit; 422 invalid strict request; 429 capacity/rate limit; 503
+disabled auth/not ready; 500 sanitized unexpected error. Validation responses
+never echo source/token values. Every response has `X-Request-ID` and no-store.
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `BR_ENV` | `development` | `development`, `test`, or `production` |
-| `BR_DATABASE_URL` | `sqlite:///./.blastradius/server.db` | SQLite locally; `postgresql+psycopg://…` in production |
-| `BR_DATA_DIR` | `.blastradius` | Private local working directory; create with owner-only access |
-| `BR_STATIC_DIR` | `web/dist` | Built frontend; served when index.html exists, with fallback only for known app routes |
-| `BR_PUBLIC_URL` | `http://localhost:8000` | Exact browser origin, no path, query, credentials or fragment |
-| `BR_SESSION_SECRET` | Random per process outside production | At least 32 characters; required and stable in production |
-| `BR_AUTH_MODE` | `disabled` | `disabled`, `demo` (development/test only), or `oidc` |
-| `BR_OIDC_ISSUER` | Empty | Exact HTTPS issuer, including trailing slash if provider uses one |
-| `BR_OIDC_CLIENT_ID` | Empty | OIDC web application client ID |
-| `BR_OIDC_CLIENT_SECRET` | Empty | OIDC client secret |
-| `BR_STRIPE_SECRET_KEY` | Empty | Optional `sk_test_…` only |
-| `BR_STRIPE_WEBHOOK_SECRET` | Empty | `whsec_…`; required when billing enabled |
-| `BR_STRIPE_PRICE_PRO` | Empty | Allowlisted recurring test Price ID |
-| `BR_STRIPE_PRICE_TEAM` | Empty | Distinct recurring test Price ID |
-| `BR_AUTO_MIGRATE` | `true` locally, `false` in production | Only literal `true` enables startup migrations |
-| `BR_MAX_BODY_BYTES` | `1048576` | Entire incoming request body limit, including chunked bodies |
-| `BR_MAX_FILES` | `30` | Files in each before/after map |
-| `BR_MAX_RESOURCES` | `300` | Parsed Terraform resources per snapshot before graph construction |
-| `BR_MAX_JOBS` | `8` | Concurrent running plus queued submissions in this process |
-| `BR_WORKERS` | `2` | Concurrent isolated analysis subprocesses; not ASGI workers |
-| `BR_JOB_TIMEOUT` | `30` | Worker wall-clock and CPU budget in seconds |
-| `BR_SESSION_TTL` | `28800` | Application cookie and database session lifetime in seconds |
-| `BR_RATE_LIMIT` | `180` | General requests per source IP per 60-second fixed window |
-| `BR_AUTH_RATE_LIMIT` | `15` | Separate `/api/auth/` window |
-| `BR_DEMO_RATE_LIMIT` | `60` | Separate `/api/demo…` window |
+## Catalog, workspaces, usage and invitations
 
-All numeric limits must be positive; workers cannot exceed job capacity. Billing
-settings are all-or-none. Production startup rejects demo/disabled auth, SQLite,
-plain HTTP, missing OIDC settings, a missing/short secret, and automatic migrations.
-No code path accepts live Stripe secret keys. Use a secret manager; do not put
-credentials into source control or command history.
+* `GET /api/plans` (public): `{payments_enabled:false,mode:"commercial_beta",plans}`.
+  Each plan has `code`, `monthly_price_usd`, `price_status`, `assignment`, `limits`,
+  `features` and `configurable`. See [plans](billing.md).
+* `POST /api/organizations {name}` → 201 `{id,name,role:"owner",plan:"free"}`.
+  Maximum five owned workspaces per user. Names are trimmed, nonempty, ≤100 chars,
+  without control characters.
+* `PATCH /api/organizations/{id} {name}` → `{id,name,plan}`; owner/admin.
+* `DELETE /api/organizations/{id}` → 204; owner only, cascading deletion.
+* `GET /api/organizations/{id}/usage` → `{period,analyses,exports,projects,members,
+  pending_invitations,limits,features,plan}`; any member.
+* `GET /api/organizations/{id}/billing` → `{enabled:false,mode:"commercial_beta",
+  plan,usage}`; owner only. Subscription fields are inert
+  legacy placeholders. Checkout/portal/webhook routes are removed.
+* `GET /api/organizations/{id}/members` → `{members:[{user_id,role,name,email}]}`;
+  owner/admin. Public arbitrary user-ID member creation was removed.
+* `PATCH /api/organizations/{id}/members/{user_id} {role}` → `{user_id,role}`.
+  Team/Enterprise only. Owner/admin, but only owners can grant or modify owners.
+* `DELETE /api/organizations/{id}/members/{user_id}` → 204; owner/admin subject
+  to owner protection. The last owner cannot be removed or demoted.
+* `POST /api/organizations/{id}/invitations {email,role?}` → 201 invitation
+  metadata plus one-time `invitation_url` and `delivery:"manual"`; Team/Enterprise
+  owner/admin. Role defaults to `developer`; only admin/developer/viewer allowed.
+* `GET /api/organizations/{id}/invitations?limit=50&offset=0` → `{invitations}`;
+  owner/admin, no tokens or links in subsequent reads.
+* `DELETE /api/organizations/{id}/invitations/{invite_id}` → 204; owner/admin.
+* `POST /api/invitations/accept {token}` → `{organization_id,role}`; authenticated
+  verified matching email only. Tokens are 256-bit, hashed, expire after seven
+  days, revocable and single-use. The creator manually delivers the link. The
+  browser reads the fragment `#token=...` and sends only a POST body; it must
+  clear the fragment and must not send tokens to analytics. Demo identities
+  cannot accept invitations even if a local row is modified.
+* `GET /api/organizations/{id}/audit?limit=50&offset=0` → `{events:[{id,actor,
+  action,target_id,details,created_at}]}`; Team/Enterprise owner/admin.
 
-Before starting production, run `python -m blastradius.server.migrate` with the
-same environment as the service. This applies packaged Alembic revisions
-idempotently. Readiness requires revision `0001`. Migration files are included in
-the wheel; no repository checkout or Terraform fixture paths are needed.
-Back up the database before migrations. Configure database TLS in the connection
-URL for non-local PostgreSQL. Never use SQLite over network storage.
+Invite creation never reports whether an email already has an account. Invalid,
+wrong-email, unverified, expired, revoked, consumed or already-member acceptance
+returns the same 404 `invitation_unavailable`. See [organizations](organizations.md).
 
-## Common protocol
+## Projects and policy
 
-JSON errors use `{"detail":"machine_readable_code"}`. Invalid request fields,
-types, filenames or JSON return `422 {"detail":"invalid_request"}` without
-reflecting uploaded content. Status codes:
+* `GET /api/projects?organization_id=&limit=50&offset=0` → `{projects}`; member
+  workspaces only. Includes archives. `GET /api/projects/{id}` returns one project.
+* `POST /api/projects` → 201 project; owner/admin. Body: `organization_id`, `name`,
+  optional `description` (≤2000), `repository` (`owner/name` or empty),
+  `repository_provider` (`manual` default or `github`), `default_branch` (`main`),
+  `environment` (empty), `terraform_root` (`.`). Repository metadata does not
+  connect to GitHub or execute an import. No credential-bearing URLs accepted.
+* `PATCH /api/projects/{id}` → updated values; same fields except org ID, plus
+  `archived` (default false). This is a complete settings form: send all values
+  to preserve them. `name` is required. `archived_at` records archival; restoring
+  checks available active-project slots.
+* `DELETE /api/projects/{id}` → 204; owner/admin.
+* `GET /api/projects/{id}/policy` → `{policy,version,effective}`.
+* `PUT /api/projects/{id}/policy` → `{policy,version}`; owner/admin with advanced
+  policy entitlement. `DELETE` clears it (204).
+* `GET /api/organizations/{id}/policy` → `{policy,version}`.
+* `PUT /api/organizations/{id}/policy` → `{policy,version}`; Team/Enterprise
+  owner/admin. `DELETE` clears it (204).
 
-* `401`: authentication required/expired.
-* `403`: CSRF, origin or membership role rejected.
-* `404`: missing object or no membership in its organization.
-* `402`: plan quota exceeded (UI should show upgrade/usage information).
-* `409`: report pending, membership/subscription conflict, or portal required.
-* `413`: body or file count limit; `415`: compressed request bodies unsupported.
-* `429`: rate limit or job capacity exhausted; retry with backoff.
-* `502`: billing provider unavailable; `503`: auth/billing disabled or not ready.
-* `500`: sanitized internal failure. Show the returned `X-Request-ID`.
+Read policies as any member. Clearing a policy is permitted after downgrade.
+Policy precedence, exact supported rules, versioning and snapshots: [policy](policy.md).
 
-Every response passing the request guard has a generated `X-Request-ID`,
-`Cache-Control: no-store`, `X-Content-Type-Options: nosniff`,
-`Referrer-Policy: no-referrer`, and `X-Frame-Options: DENY`.
-Production adds HSTS and validates the Host header against `BR_PUBLIC_URL`.
-The structured `blastradius.http` logger emits request ID, method, status and
-duration only, without URL/query strings, headers, identity, plans or Terraform.
-Configure the process log level to INFO to retain these records. Start Uvicorn
-with `--no-access-log`; default access logs and reverse proxy query-string logs
-can otherwise expose OIDC authorization codes. Disable query/body/header logging
-in the reverse proxy, APM and error-reporting integrations too.
+## Analyses and evidence
 
-Timestamps are Unix seconds in UTC. IDs are opaque UUID strings. Do not infer
-authorization from IDs. Membership is checked in the database for every project,
-analysis, export, member-list and billing request. There is no public arbitrary
-analysis route. Mutations use `X-CSRF-Token` and same-origin cookies; see
-[authentication](auth.md).
-
-## Public demos
-
-`GET /api/demo/scenarios`:
-
-```json
-{"scenarios":[{"id":"public_ssh","title":"Public SSH exposure","root_cause":"network","change":"SSH ingress CIDR 10.0.0.0/24 -> 0.0.0.0/0","stages":["safe","risky","remediated"]}]}
-```
-
-The actual list contains `public_ssh`, `broad_iam`, and `public_bucket`.
-
-`GET /api/demo/{scenario_id}?stage=safe|risky|remediated` returns the **unwrapped
-report object** below. Default stage is `risky`. All nine results are computed at
-startup using the real engine in constrained workers over the bundled, generated
-copies of committed Terraform fixtures. Requests only read this bounded cache;
-they cannot specify HCL, paths or arbitrary jobs, and persist no user data.
-To update the fixture bundle after reviewed example changes:
-`python -m blastradius.server.bundle_demos`.
-
-Safe compares the baseline with itself; risky compares baseline to changed
-fixture; remediated compares risky with the supported generated patch (SSH/S3),
-or the reviewed least-privilege IAM baseline. The IAM engine has no automatic IAM
-patch; `demo.remediation_kind` is `reviewed_fixture` for that case. IAM safe and
-remediated scores are 85, because its baseline deliberately contains exposure;
-both have no new critical path. SSH/S3 safe/remediated scores are 100.
-Use `passed` and the evidence rather than assuming every safe score is 100.
-
-## Authentication and organizations
-
-`GET /api/me` is public and creates an anonymous CSRF session when needed:
-
-```json
-{
-  "authenticated":false,
-  "user":null,
-  "organizations":[],
-  "csrf_token":"opaque-value",
-  "auth":{"enabled":true,"mode":"demo","public_url":"http://localhost:8000","login_url":null},
-  "billing":{"enabled":false,"test_mode":true}
-}
-```
-
-After authentication, `user` is `{id,name,email}` and each organization is
-`{id,name,role,plan,usage}`. `usage` is
-`{period:"YYYY-MM",analyses,limits:{analyses_per_month,projects,members},plan}`.
-
-* `GET /api/auth/login`: browser redirect to OIDC provider when enabled.
-* `GET /api/auth/callback`: provider redirect target; success redirects to
-  `${BR_PUBLIC_URL}/dashboard` with a new application session.
-* `POST /api/auth/demo`: explicit non-production demo login, CSRF required.
-  Returns `{"authenticated":true}`. It accepts no identity selection.
-* `POST /api/auth/logout`: CSRF required; invalidates database session and clears
-  cookie. Returns `{"authenticated":false}`.
-
-Fetch `/api/me` again after login because both session and CSRF token rotate.
-`auth.public_url` is the configured canonical browser origin. The UI checks it
-before offering workspace mutations. The server independently enforces Origin,
-CSRF, authentication and membership on every protected operation.
-
-`POST /api/organizations {"name":"Platform"}` creates a new free organization
-with the authenticated caller as its only owner. Limit: five owned organizations
-per user, including the initial workspace. There is no endpoint to claim another
-organization, set a plan, grant owner rights or join by an unverified email.
-
-Owner-only membership management:
-
-* `GET /api/organizations/{id}/members` → `{"members":[{"user_id","role"}]}`.
-* `POST /api/organizations/{id}/members {"user_id":"existing-user-id","role":"member|viewer"}`
-  → `201 {user_id,role}`. Target must already be a user. Enforces member quota.
-  The owner must obtain the target's user ID directly; there is no public user
-  enumeration or invitation-email service.
-* `DELETE /api/organizations/{id}/members/{user_id}` → `204`. Cannot remove owner.
-  To change a non-owner role, remove and add again.
-
-Owners can manage members, billing and project deletion. Members can create
-projects, submit/delete analyses and read reports. Viewers can read only.
-All roles can read their own `/api/me` organization/usage list.
-
-## Projects and analyses
-
-`GET /api/projects?organization_id={optional}&limit=50&offset=0` returns
-`{"projects":[{id,organization_id,name,created_at}]}` for authorized organizations.
-`limit` is 1–100. Newest first with ID tie-breaker.
-
-`POST /api/projects {"organization_id":"uuid","name":"Infrastructure"}`
-returns `201 {id,organization_id,name,created_at}`. It never clones repositories.
-Use the project name to associate an upload with a repository or infrastructure
-scope. The current service accepts content uploads, not repository connections.
-
-`DELETE /api/projects/{id}` is owner-only and returns `204`. It cascades deletion
-of all stored analyses/reports for the project. Jobs already executing may finish
-their bounded work but cannot recreate deleted records.
-
-`POST /api/analyses` accepts exactly one input mode:
+`POST /api/analyses` → 202 analysis. Owner/admin/developer; archived projects
+return 409. Body:
 
 ```json
 {
   "project_id":"uuid",
-  "base_label":"main@abc123",
-  "candidate_label":"feature@def456",
-  "before_files":{"main.tf":"resource \"aws_s3_bucket\" \"data\" { bucket = \"example\" }\n"},
-  "after_files":{"main.tf":"resource \"aws_s3_bucket\" \"data\" { bucket = \"example\" }\n"}
+  "base_label":"baseline",
+  "candidate_label":"candidate",
+  "base_ref":"main",
+  "candidate_ref":"feature/network",
+  "base_sha":null,
+  "candidate_sha":null,
+  "before_files":{"main.tf":"resource \"aws_s3_bucket\" \"example\" {}"},
+  "after_files":{"main.tf":"resource \"aws_s3_bucket\" \"example\" {}"}
 }
 ```
 
-Or `{project_id,base_label?,candidate_label?,plan:{…terraform show -json output…}}`.
-Labels default to `baseline` and `candidate`. Files must have simple ASCII `.tf`
-basenames, no slashes, `..`, NUL bytes, paths or duplicate resource addresses.
-Nested directories, `.tf.json`, ZIP archives, URLs, host paths, repository
-credentials and execution commands are unsupported. Additional fields are
-rejected. Terraform, providers, external data sources and shell commands are
-never executed. Resource bounds are applied after parsing and before graph work;
-parser work itself is bounded by process CPU/memory/wall time.
+Use either nonempty before/after `.tf` maps or `plan` (Terraform show JSON).
+Plan is data, not executed. File names must be simple `.tf` basenames; no archives
+or traversal. Refs are optional ≤120 chars; SHA strings are lowercase 40/64 hex.
+Client metadata is descriptive, not authenticated Git provenance. No policy
+field is accepted from analysis input.
 
-Submission returns `202` immediately after persistence:
+`GET /api/analyses/{id}` returns base/candidate labels, refs/SHAs, input_type
+(`hcl|plan|null`), timestamps, status (`queued|running|succeeded|failed`), sanitized
+error, decision, scores/risk, critical paths added/removed, policy_snapshot,
+normalized_version and `result`. Result remains engine JSON schema 1 (decision,
+graph, paths, score, evidence, diagnostics, remediation and reports). Free
+workspace result JSON omits nested SARIF; Pro+ includes it. Legacy records retain
+their JSON with null new summaries/snapshot/version; no evidence is fabricated.
+Succeeded means the analysis ran, **not** that the gate passed.
 
-```json
-{
-  "id":"uuid","project_id":"uuid","organization_id":"uuid",
-  "base_label":"main@abc123","candidate_label":"feature@def456",
-  "created_at":1780000000.0,"started_at":null,"completed_at":null,
-  "status":"queued","error":null,"result":null
-}
-```
+* `GET /api/projects/{id}/analyses` → `{analyses,total,limit,offset}`. Optional
+  `status`, `decision` (exact engine value), `input_type`, `branch` (candidate_ref),
+  `since`/`until` (Unix seconds). Default limit 50, max 100. History uses summary
+  without full result. Ordered by creation descending and ID.
+* `DELETE /api/analyses/{id}` → 204; owner/admin/developer; usage is not refunded.
+* `GET /api/analyses/{id}/findings?severity=&limit=50&offset=0` →
+  `{normalized_version,findings:[{id,type,severity,title,description,evidence}]}`.
+* `GET /api/analyses/{id}/paths?phase=after&limit=50&offset=0` →
+  `{normalized_version,paths:[{id,key,phase,severity,nodes,labels,explanation,
+  reaches_sensitive,hops}]}`. Phase is before/after; hops contain position and
+  existing engine edge evidence.
+* `GET /api/analyses/{id}/artifacts` → `{normalized_version,artifacts:[{id,format,
+  media_type,created_at}]}`; only entitled formats are listed.
+* `GET /api/analyses/{id}/artifacts/{artifact_id}` → serialized report; artifact
+  must belong to that authorized, nonexpired analysis.
+* `GET /api/analyses/{id}/report?format=web|json|markdown|sarif` → report.
+  Pending/failed jobs return 409. SARIF requires entitlement. JSON/web never
+  provide a nested SARIF bypass. Exports check current retention and entitlements.
 
-`GET /api/analyses/{id}` returns the same shape. Poll with backoff (for example
-one second initially); `status` transitions `queued → running → succeeded|failed`.
-Use a loading state for the first two. `result` is the report on success.
-`error` on failure is a safe code such as `invalid_analysis_input`,
-`analysis_timeout`, `resource_limit_exceeded`, `analysis_failed`, `worker_failed`,
-`result_too_large`, or `server_restarted`; raw parser exceptions are not exposed.
-The result is stored as JSON with findings, paths and all report formats, not as
-cross-tenant filesystem paths.
+Findings/paths/hops/artifacts are committed with results and summary/status in one
+worker completion transaction. Legacy normalized lists are empty with a null
+version. Deleting analyses cascades all children.
 
-`GET /api/projects/{id}/analyses?limit=50&offset=0` returns `{"analyses":[…]}`.
-History entries omit `result`; completed entries include
-`summary:{decision,score,verdict}`. Ordering and bounds match project listing.
+## Public real-engine demo
 
-`DELETE /api/analyses/{id}` returns `204` and deletes the report. Deletion does not
-refund submitted analysis quota. Deleting a queued job prevents execution if it
-has not started; deleting a running job removes persistence immediately, while
-the subprocess may run until its normal timeout.
+`GET /api/demo/scenarios` and `GET /api/demo/{scenario_id}?stage=safe|risky|remediated`
+remain public synthetic samples; all formats including SARIF remain available.
+They do not create tenant analyses or consume usage. Supported scenarios are
+returned by the catalog. They use the same isolated engine and resource limits.
 
-## Stable report version 1
+## Execution boundary and verification
 
-Both demos and successful analyses share this shape:
+Workers use isolated Python (`-I`), minimal environment, unique scratch space,
+timeouts and memory/CPU/file limits. No Terraform/provider/Git candidate code is
+executed. Logs contain request/analysis/workspace/project ID, duration and
+outcome; no source, cookies or tokens. Restart fails abandoned work honestly
+(`server_restarted`). The queue and rate limiter are in-process, single replica.
 
-* `schema_version: 1`, `decision` (engine display string), `passed` (boolean),
-  `analysis_complete` (boolean within the documented static model),
-  `headline`, `verdict`, `score:{before,after,delta}`.
-* Decisions include `SAFE TO MERGE`, `BLOCK CHANGE`, and `REVIEW REQUIRED`.
-  The engine is the source of truth; use `passed` for acceptance and treat unknown
-  future display strings conservatively.
-* `before` and `after`: `{label,score,risk_level,score_breakdown,exposed_resources,
-  reachable_sensitive,attack_paths,graph,complete,paths_truncated,path_work}`.
-* `graph.nodes`: `{id,name,type,sensitive,risk}`; stable IDs are resource addresses,
-  synthetic sensitive-data addresses or `INTERNET`.
-* `graph.edges`: `{source,target,relationship,reason,evidence,severity,
-  terraform_resource,metadata,confidence,category,source_file,remediation}`.
-  Do not infer real exploitability from an edge.
-* Paths: `{id,nodes,labels,edges,severity,explanation,reaches_sensitive}`.
-* Delta lists: `new_attack_paths`, `removed_attack_paths`, `new_critical_paths`,
-  `removed_critical_paths`, `newly_exposed`, `newly_reachable_sensitive`,
-  `new_nodes`, `removed_nodes`, `new_edges`, `removed_edges`.
-* `findings`: `{label,detail,delta,severity}`.
-* `responsible_change`: engine summary; `responsible_changes`: `{file,diff}` for
-  changed source files. Plans have no source patches/diffs.
-* `diagnostics`: `{code,severity,message}` including unsupported model items.
-  Engine diagnostics additionally include `{phase,resource,attribute,source_file,
-  blocks_analysis}`; resource/attribute/file may be empty when unknown.
-  `limitations`: string list.
-* `remediation`: `{recommendations,patched_files,diff,can_autofix}`;
-  recommendations contain `{title,detail,current,recommended,severity,resource}`.
-  Patched files are a name-to-content map of supported edits only. Merge them
-  into the original candidate files and submit a new analysis; never apply edits
-  automatically to real infrastructure.
-* `reports:{markdown,sarif}`: existing engine report and SARIF 2.1.0 payload.
-* Public demos additionally contain
-  `demo:{scenario_id,stage,remediation_kind,note}`.
-
-These coverage/evidence fields are additive within schema version 1. Older stored
-reports may omit them. A missing coverage field is not evidence of completeness.
-Incomplete analysis never receives `SAFE TO MERGE`; the frontend exposes the
-diagnostics rather than substituting a safe result.
-
-`GET /api/analyses/{id}/report?format=web|json|markdown|sarif` requires membership
-and a succeeded job, otherwise `409 report_not_ready`. Default `web` returns the
-report JSON inline. `json`, `markdown`, and `sarif` add fixed attachment filenames
-(`report.json`, `report.md`, `report.sarif`). Reports can contain user-supplied
-Terraform text: escape it in the frontend and sanitize rendered Markdown. Never
-inject report/graph labels as HTML.
-
-## Quotas, operations and limitations
-
-| Plan | Analyses/month | Projects | Members |
-| --- | ---: | ---: | ---: |
-| Free | 20 | 3 | 1 |
-| Pro | 500 | 20 | 5 |
-| Team | 5000 | 100 | 25 |
-
-Counters use UTC calendar months and increment transactionally when a job is
-accepted, including jobs that subsequently fail. Rejected inputs/capacity requests
-do not consume quota. PostgreSQL locks the organization row; SQLite serializes
-writes with `BEGIN IMMEDIATE`. Downgrading does not delete existing data or kick
-out members; creating more objects is blocked until usage is below quota.
-Only verified provider events change plans through the HTTP API.
-
-`GET /health/live` reports process liveness; `GET /health/ready` checks database
-migration revision and the nine precomputed demo results. Both are rate-limited.
-Development OpenAPI UI is `/api/docs`, specification `/api/openapi.json`; the UI
-is disabled in production.
-
-Run exactly **one ASGI process per database**. An exclusive PostgreSQL advisory
-lock or SQLite file lock rejects a second process. `BR_WORKERS` controls analysis
-subprocess concurrency inside that service. There is no distributed queue, retry
-scheduler, HA deployment, or horizontal scaling. Restart marks queued/running
-jobs failed and cleans abandoned job directories. Graceful shutdown drains accepted
-jobs; allow a shutdown budget of `ceil(BR_MAX_JOBS / BR_WORKERS) * BR_JOB_TIMEOUT`
-plus overhead. A database connection loss should restart the service rather than
-attempting a rolling failover. Do not share `BR_DATA_DIR` between unrelated services.
-
-Each job uses a private random directory, isolated Python (`-I`), a minimal
-environment without application/provider secrets, 768 MiB address-space cap,
-CPU/wall time limits, disabled core dumps, 16 MiB file-size cap and 8 MiB result
-cap. Workspaces are removed on success/failure/timeout. These are resource and
-input controls, **not an OS security sandbox against a parser zero-day**. Production
-should run as a non-root account/container with read-only code, no cloud instance
-credentials, restricted egress, private temporary storage and database access
-limited to this service.
-
-TLS termination, trusted proxy configuration, database backups, encryption at
-rest, monitoring, user/organization offboarding, retention policies, identity
-provider deployment and operational incident handling remain operator work.
-Results include source diffs and patched files; do not submit secrets. Database
-and backups contain that sensitive content until deleted/expired by your policy.
-HTTP deletion does not purge external backups. Sessions expire automatically;
-analysis, demo-user, usage and webhook-event retention are not scheduled.
-Rate limits are per-process/per-source-IP fixed windows. Configure Uvicorn to
-trust forwarded addresses only from the actual trusted proxy; a shared proxy IP
-otherwise shares a bucket. Add edge limits before exposing the service.
-
-The simplified AWS model does not cover every Terraform construct, network
-control or policy condition. A path is not proof of exploitation; no path is not
-proof of safety. Source repositories are not fetched or executed. There is no
-GitHub App, invitation service, password store, durable distributed queue,
-payment collection or commercial SLA in this backend. Existing GitHub Actions
-remains the repository integration. A future GitHub App would require signed
-webhooks, installation-to-organization binding, least-privilege installation
-tokens, a durable queue and explicit per-repository authorization before ingest.
-
-## Verification commands
-
-```bash
-python -m pytest -o addopts='' -q
-python -m ruff check blastradius/server tests/test_server.py
-python -m mypy --check-untyped-defs --follow-imports=silent --ignore-missing-imports blastradius/server
-python -m pip wheel . --no-deps --wheel-dir dist
-```
-
-The optional PostgreSQL test uses `BR_TEST_DATABASE_URL` pointing at a dedicated
-disposable database; it creates persistent test records. Do not point it at a
-production or shared application database. Without that test-only variable the
-PostgreSQL integration case is explicitly skipped. Stripe tests use the official
-SDK's real signature verifier with locally signed mock events; OIDC tests use
-RSA-signed tokens and Authlib with mocked HTTP endpoints. These tests do not
-constitute a live-provider or end-to-end browser verification.
+Run `python -m pytest`, `make lint typecheck docs`, and wheel install checks.
+`BR_TEST_DATABASE_URL` enables a disposable PostgreSQL integration test.
+Mocked signed OIDC tests do not verify an external provider deployment.
+See [retention](data-lifecycle.md), [operations](operations.md), and [auth](auth.md).

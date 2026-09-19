@@ -7,12 +7,20 @@ from pathlib import Path
 from alembic import command
 from alembic import context
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from blastradius.server.config import Settings
+from blastradius.server.models import Base
+
+
+def migration_config() -> Config:
+    config = Config()
+    config.set_main_option("script_location", str(Path(__file__).with_name("migrations")))
+    return config
 
 
 class Database:
@@ -44,10 +52,7 @@ class Database:
                 raise
 
     def migrate(self) -> None:
-        config = Config()
-        config.set_main_option(
-            "script_location", str(Path(__file__).with_name("migrations"))
-        )
+        config = migration_config()
         with self.engine.begin() as connection:
             config.attributes["connection"] = connection
             command.upgrade(config, "head")
@@ -56,10 +61,8 @@ class Database:
         try:
             with self.engine.connect() as connection:
                 return (
-                    connection.exec_driver_sql(
-                        "SELECT version_num FROM alembic_version"
-                    ).scalar()
-                    == "0001"
+                    connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar()
+                    == ScriptDirectory.from_config(migration_config()).get_current_head()
                 )
         except Exception:
             return False
@@ -73,6 +76,6 @@ def _sqlite_options(connection, _record) -> None:
 
 
 def run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection)
+    context.configure(connection=connection, target_metadata=Base.metadata, render_as_batch=True)
     with context.begin_transaction():
         context.run_migrations()

@@ -1,27 +1,17 @@
-# Billing terms template — LEGAL REVIEW REQUIRED
+# Commercial terms template — LEGAL REVIEW REQUIRED
 
-**Draft only. Live billing is not activated or authorized.**
-Any integrated Stripe behavior must remain test mode until separately approved.
-The implementation-owned billing document defines actual API/configuration.
+The commercial beta does not process payments or collect payment information.
+Free is available through workspace creation. Pro ($49/month proposed) and Team
+($149/month proposed) may be assigned without payment by an operator; Enterprise
+limits are configured by an operator. None is currently available for purchase.
+The authoritative implemented behavior is documented in [plans](billing.md).
 
-| Decision | Owner must specify |
-|---|---|
-| Plans | Actual Free/Trial, Pro, Team features and measurable quota unit |
-| Pricing | Amount, currency, tax inclusion/exclusion, supported countries |
-| Trial | Duration, eligibility, card requirement, conversion behavior |
-| Metering | Successful versus attempted analyses, reset period, concurrency |
-| Renewals | Billing interval, notices, prorations and plan changes |
-| Quota exhaustion | Clear rejection/upgrade behavior; no surprise overage charge |
-| Cancellation | Effective date, access/export window, data handling |
-| Refunds/disputes | Process, applicable rights, verified contact |
-| Failed payments | Grace period, suspension, recovery rules |
-| Records | Required retention and privacy disclosures |
+Before any paid launch, legal/product owners must approve currency, tax treatment,
+supported countries, renewals, refunds, cancellation, failure/grace periods,
+notices, data retention, dispute handling and a verified support contact.
+Published prices must clearly remain proposed until that separate launch.
 
-Server-authoritative verified events must control entitlements; client navigation
-or a checkout success URL is not proof of payment. Duplicate/out-of-order
-webhooks need idempotency, signature checks and account/tenant identity validation.
-
-Sandbox checkout is not evidence of live-payment readiness. Before launch verify
-plans/price IDs, reconciliation, cancellation, quotas under concurrency, replay
-defense and no leakage of billing secrets into logs or `VITE_*` variables.
-Do not invent prices or claim any plan is available for purchase.
+Analysis usage counts accepted reservations including failed jobs; exports are
+metered for visibility without charges. There are no automatic overage charges,
+trial conversions or payment subscriptions. See the [future adapter](billing-future.md)
+for the technical boundary.
