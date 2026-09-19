@@ -169,13 +169,13 @@ for (const width of widths) {
       const workspaceNav = page.getByRole('navigation', { name: 'Workspace navigation' });
       await workspaceNav.getByRole('link', { name: 'Settings & policy' }).click();
       await expect(page.getByLabel('Project name')).toBeVisible();
-      await page.getByLabel('Description', { exact: true }).fill(`Saved project metadata at ${width}px`);
+      await page.getByRole('textbox', { name: 'Description', exact: true }).fill(`Saved project metadata at ${width}px`);
       const savedProject = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname.startsWith('/api/projects/'));
       await page.getByRole('button', { name: 'Save project', exact: true }).click();
       expect((await savedProject).ok()).toBe(true);
       await page.reload();
       await expect(page.getByRole('combobox', { name: 'Workspace', exact: true }).locator('option:checked')).toHaveText(`Review workspace ${width} · owner`);
-      await expect(page.getByLabel('Description', { exact: true })).toHaveValue(`Saved project metadata at ${width}px`);
+      await expect(page.getByRole('textbox', { name: 'Description', exact: true })).toHaveValue(`Saved project metadata at ${width}px`);
       await expect(page.getByRole('button', { name: 'Save policy', exact: true })).toHaveCount(0);
       await contained(page);
       await page.getByRole('button', { name: 'Archive project', exact: true }).click();
