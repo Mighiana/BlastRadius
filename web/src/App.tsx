@@ -1,5 +1,5 @@
 import { Component, useEffect, useState, type ReactNode } from 'react';
-import { Link, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowUpRight, GitBranch, Menu, Radar, X } from 'lucide-react';
 import Landing from './pages/Landing';
 import Demo from './pages/Demo';
@@ -13,7 +13,7 @@ import Invitation from './pages/Invitation';
 import Integrations from './pages/Integrations';
 import Trust from './pages/Trust';
 import { mutate } from './api';
-import { useSession } from './session';
+import { useOrganization, useSession } from './session';
 import { ErrorNotice } from './components/UI';
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
@@ -36,6 +36,13 @@ function RouteFocus() {
 }
 function Header() {
   const { session, originMismatch, refresh } = useSession();
+  const { organization } = useOrganization();
+  const [params] = useSearchParams();
+  const context = new URLSearchParams();
+  if (organization) context.set('organization', organization.id);
+  const project = params.get('project');
+  if (organization && project) context.set('project', project);
+  const search = context.size ? `?${context}` : '';
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const [busy, setBusy] = useState(false);
@@ -52,9 +59,9 @@ function Header() {
     <button className="icon-button mobile-menu" aria-label={open ? 'Close navigation' : 'Open navigation'} aria-expanded={open} aria-controls="main-navigation" onClick={() => setOpen(!open)}>{open ? <X /> : <Menu />}</button>
     <nav className={open ? 'main-nav is-open' : 'main-nav'} id="main-navigation" aria-label="Main navigation" onKeyDown={e => { if (e.key === 'Escape') setOpen(false); }}>
       <NavLink to="/demo">Product demo</NavLink><NavLink to="/guide">Documentation</NavLink><NavLink to="/pricing">Pricing</NavLink><NavLink to="/security">Security</NavLink>
-      {session?.authenticated && <NavLink to="/history">History</NavLink>}
+      {session?.authenticated && <NavLink to={`/history${search}`}>History</NavLink>}
       {!session?.authenticated && <NavLink to="/account">Sign in</NavLink>}
-      <NavLink className="nav-cta" to="/dashboard">{session?.authenticated ? 'Workspace' : 'Get started'}<ArrowUpRight size={15} aria-hidden="true" /></NavLink>
+      <NavLink className="nav-cta" to={`/dashboard${search}`}>{session?.authenticated ? 'Workspace' : 'Get started'}<ArrowUpRight size={15} aria-hidden="true" /></NavLink>
       {session?.authenticated && <button className="text-button" disabled={busy || originMismatch} title={originMismatch ? 'Sign-out requires the configured application origin.' : undefined} onClick={() => { void logout(); }}>{busy ? 'Signing out…' : 'Sign out'}</button>}
     </nav>
   </div><div className="container"><ErrorNotice error={error} /></div></header>;

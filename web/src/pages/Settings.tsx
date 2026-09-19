@@ -44,7 +44,7 @@ function ProjectSettings({ project, editable, reload }: { project: Project; edit
     </div><label>Description<textarea maxLength={2000} rows={3} value={values.description} onChange={e => setValues({ ...values, description: e.target.value })} /></label>
       {editable && <button className="button primary">Save project</button>}
     </fieldset>
-  </form><p className="muted">Metadata does not connect a repository. Use <Link to={`/integrations?project=${encodeURIComponent(project.id)}`}>GitHub integration</Link> for verified connection status. Terraform root must be repository-relative.</p>
+  </form><p className="muted">Metadata does not connect a repository. Use <Link to={`/integrations?organization=${encodeURIComponent(project.organization_id)}&project=${encodeURIComponent(project.id)}`}>GitHub integration</Link> for verified connection status. Terraform root must be repository-relative.</p>
     <ErrorNotice error={action.error} />{action.notice && <p role="status">{action.notice}</p>}
     <p>{project.archived_at ? 'Archived: new analyses are disabled. Existing evidence remains subject to retention.' : 'Archiving stops new analyses while keeping retained history.'}</p>
     {editable && (archiveConfirmation ? <div className="notice confirm-delete"><span>{project.archived_at ? 'Restore this project?' : 'Archive this project? Unsaved metadata will not be changed.'}</span>

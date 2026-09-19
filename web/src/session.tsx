@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { request, sessionSchema, setCsrf, type Session } from './api';
 
 const Context = createContext<{
@@ -45,5 +46,10 @@ export function useSession() {
 }
 export function useOrganization() {
   const { session, organizationId, selectOrganization } = useSession();
-  return { organization: session?.organizations.find(org => org.id === organizationId) ?? session?.organizations[0], selectOrganization };
+  const [params] = useSearchParams();
+  const requested = params.get('organization');
+  const organization = requested
+    ? session?.organizations.find(org => org.id === requested)
+    : session?.organizations.find(org => org.id === organizationId) ?? session?.organizations[0];
+  return { organization, selectOrganization };
 }

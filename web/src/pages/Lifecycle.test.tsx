@@ -85,6 +85,41 @@ describe('policy role and plan gates', () => {
 });
 
 describe('project lifecycle', () => {
+  it('keeps workspace and project context in navigation, selection and fresh page loads', async () => {
+    const secondOrg = { ...organization, id: 'second-org', name: 'Second workspace' };
+    const firstProject = { ...project, id: 'second-project', organization_id: secondOrg.id, name: 'First project in second workspace' };
+    const secondProject = { ...firstProject, id: 'third-project', name: 'Selected project' };
+    const fetcher = mockApi({ ...account, organizations: [organization, secondOrg] }, url => {
+      if (url.startsWith('/api/projects?')) return { projects: [firstProject, secondProject] };
+      return { policy: null, version: 0 };
+    });
+    const view = mount(<Settings />, '/settings?organization=second-org&project=third-project');
+    expect(await screen.findByLabelText('Project name')).toHaveValue('Selected project');
+    expect(screen.getByRole('combobox', { name: 'Workspace' })).toHaveValue(secondOrg.id);
+    for (const link of within(screen.getByRole('navigation', { name: 'Workspace navigation' })).getAllByRole('link')) {
+      expect(link.getAttribute('href')).toContain('?organization=second-org&project=third-project');
+    }
+    expect(screen.getByRole('link', { name: 'GitHub integration' })).toHaveAttribute('href', '/integrations?organization=second-org&project=third-project');
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Project' }), firstProject.id);
+    expect(await screen.findByLabelText('Project name')).toHaveValue(firstProject.name);
+    const location = screen.getByRole('link', { name: 'Settings & policy' }).getAttribute('href')!;
+    view.unmount();
+    mount(<Settings />, location);
+    expect(await screen.findByLabelText('Project name')).toHaveValue(firstProject.name);
+    await userEvent.click(screen.getByRole('button', { name: 'Save project' }));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledWith('/api/projects/second-project', expect.objectContaining({ method: 'PATCH' })));
+    expect(fetcher.mock.calls.filter(([url]) => url.startsWith('/api/projects?')).every(([url]) => url.includes('organization_id=second-org'))).toBe(true);
+  });
+  it('does not substitute another workspace or project for an unavailable explicit selection', async () => {
+    mockApi(account, url => url.startsWith('/api/projects?') ? { projects: [project] } : { policy: null, version: 0 });
+    const view = mount(<Settings />, '/settings?organization=unavailable');
+    expect(await screen.findByText('Workspace unavailable. Choose a workspace you can access.')).toBeVisible();
+    expect(screen.queryByRole('button', { name: /Save workspace|Save project/ })).not.toBeInTheDocument();
+    view.unmount();
+    mount(<Settings />, '/settings?organization=org&project=unavailable');
+    expect(await screen.findByRole('option', { name: 'Select an available project' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save project' })).not.toBeInTheDocument();
+  });
   it('refreshes inherited rules after saving workspace policy without losing project edits', async () => {
     let threshold = 70;
     mockApi({ ...account, organizations: [teamOrg] }, (url, options) => {

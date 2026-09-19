@@ -67,8 +67,8 @@ function WorkspaceContent() {
   const projects = useResource(org ? `/api/projects?organization_id=${encodeURIComponent(org.id)}&limit=100` : null, projectsSchema);
   const linkedProject = useResource(projectId ? `/api/projects/${encodeURIComponent(projectId)}` : null, projectSchema);
   useEffect(() => {
-    if (linkedProject.data && session?.organizations.some(item => item.id === linkedProject.data?.organization_id)) setOrgId(linkedProject.data.organization_id);
-  }, [linkedProject.data, session, setOrgId]);
+    if (!params.has('organization') && linkedProject.data && session?.organizations.some(item => item.id === linkedProject.data?.organization_id)) setOrgId(linkedProject.data.organization_id);
+  }, [linkedProject.data, params, session, setOrgId]);
   const project = projectId ? projects.data?.projects.find(item => item.id === projectId) : projects.data?.projects[0];
   const [historyLimit, setHistoryLimit] = useState(50);
   const [historyPage, setHistoryPage] = useState(0);
@@ -87,7 +87,7 @@ function WorkspaceContent() {
   const workspaceLimitReached = (session?.organizations.filter(item => item.role === 'owner').length ?? 0) >= 5;
   const complete = useCallback(() => { reloadHistory(); void refresh(); }, [reloadHistory, refresh]);
   function selectProject(id: string) {
-    setParams({ project: id }); setHistoryPage(0); setConfirmDelete('');
+    setParams({ organization: org?.id ?? '', project: id }); setHistoryPage(0); setConfirmDelete('');
   }
   async function createProject(event: FormEvent) {
     event.preventDefault();
@@ -104,7 +104,7 @@ function WorkspaceContent() {
     try {
       const created = await request('/api/organizations', z.object({ id: z.string(), name: z.string() }), { method: 'POST', body: JSON.stringify({ name: organizationName.trim() }) });
       setOrganizationName(''); await refresh();
-      setOrgId(created.id); setParams({}); setHistoryPage(0); setConfirmDelete('');
+      setOrgId(created.id); setParams({ organization: created.id }); setHistoryPage(0); setConfirmDelete('');
       setNotice(`Workspace “${created.name}” created. Create your first project below.`);
     } catch (err) { setError(err instanceof Error ? err : new Error('Could not create workspace.')); }
     finally { setBusy(false); }
@@ -113,13 +113,13 @@ function WorkspaceContent() {
     setBusy(true); setError(null);
     try {
       await mutate(`/api/analyses/${encodeURIComponent(id)}`, 'DELETE');
-      if (analysisId === id && project) setParams({ project: project.id });
+      if (analysisId === id && project) setParams({ organization: project.organization_id, project: project.id });
       setConfirmDelete(''); history.reload();
     } catch (err) { setError(err instanceof Error ? err : new Error('Could not delete analysis.')); }
     finally { setBusy(false); }
   }
   function submitted(job: Job) {
-    setParams({ project: job.project_id, analysis: job.id }); history.reload(); void refresh();
+    setParams({ organization: job.organization_id, project: job.project_id, analysis: job.id }); history.reload(); void refresh();
   }
   return <>
     <WorkspaceNav />
@@ -168,7 +168,7 @@ function WorkspaceContent() {
             {history.loading && <Loading>Loading history…</Loading>}
             {!history.loading && !history.data?.analyses.length && !history.error && <p className="muted">{appliedFilters ? 'No analyses match these filters on this page.' : 'No analyses on this page. Upload Terraform to run your first comparison.'}</p>}
             <div className="history-list">{history.data?.analyses.map(job => <article key={job.id} className={job.id === analysisId ? 'selected' : ''}>
-              <button className="history-open" onClick={() => setParams({ project: project.id, analysis: job.id })}><span><strong>{job.base_label} → {job.candidate_label}</strong><small>{new Date(job.created_at * 1000).toLocaleString()} · {job.input_type ?? 'input not recorded'}{job.candidate_ref && ` · ${job.candidate_ref}`}</small></span>
+              <button className="history-open" onClick={() => setParams({ organization: project.organization_id, project: project.id, analysis: job.id })}><span><strong>{job.base_label} → {job.candidate_label}</strong><small>{new Date(job.created_at * 1000).toLocaleString()} · {job.input_type ?? 'input not recorded'}{job.candidate_ref && ` · ${job.candidate_ref}`}</small></span>
                 {job.summary ? <Decision decision={job.summary.decision} /> : <span className="tag">{job.status}</span>}</button>
               {canWrite && (confirmDelete === job.id ? <div className="confirm-delete"><span>Delete this analysis and report? Usage is not refunded.</span><button className="button danger" disabled={busy} onClick={() => { void deleteAnalysis(job.id); }}>Confirm delete</button><button className="button secondary" onClick={() => setConfirmDelete('')}>Cancel</button></div>
                 : <button className="icon-button" disabled={busy} aria-label={`Delete analysis ${job.base_label} to ${job.candidate_label}`} onClick={() => setConfirmDelete(job.id)}><Trash2 size={16} aria-hidden="true" /></button>)}
