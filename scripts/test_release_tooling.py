@@ -34,7 +34,7 @@ def test_docs_accept_relative_links_and_explicit_legacy_anchors(tmp_path: Path) 
 def test_docs_ignore_examples_and_external_links(tmp_path: Path) -> None:
     source = tmp_path / "README.md"
     source.write_text(
-        '```markdown\n[Example](missing.md)\n```\n[Docs](https://example.com)\n',
+        "```markdown\n[Example](missing.md)\n```\n[Docs](https://example.com)\n",
         encoding="utf-8",
     )
     assert check_file(source, tmp_path) == []
@@ -130,8 +130,16 @@ def test_container_defaults_fail_closed_without_production_configuration() -> No
     env = {key: value for key, value in os.environ.items() if not key.startswith("BR_")}
     env.update(BR_ENV="production", BR_AUTO_MIGRATE="false")
     result = subprocess.run(
-        [sys.executable, "-I", "-c", "from blastradius.server.config import Settings; Settings.from_env()"],
-        env=env, capture_output=True, text=True, check=False,
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            "from blastradius.server.config import Settings; Settings.from_env()",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert result.returncode != 0
     assert "Session secret" in result.stderr
@@ -154,9 +162,7 @@ def test_compose_applies_nonroot_readonly_and_bounded_resources() -> None:
         assert service["logging"]["options"]["max-size"]
     assert compose["services"]["db"]["user"] == "postgres"
     assert "ports" not in compose["services"]["db"]
-    assert compose["services"]["app"]["ports"] == [
-        "127.0.0.1:${BLASTRADIUS_PORT:-8000}:8000"
-    ]
+    assert compose["services"]["app"]["ports"] == ["127.0.0.1:${BLASTRADIUS_PORT:-8000}:8000"]
 
 
 @pytest.mark.parametrize(
@@ -189,4 +195,6 @@ def test_onboarding_workflow_preserves_candidate_data_only_boundary() -> None:
     assert "working-directory: ${{ runner.temp }}" in text
     assert "git checkout" not in text
     assert "if: always()" in text
-    assert '*) echo "::error::BlastRadius analysis did not complete successfully."; exit 2 ;;' in text
+    assert (
+        '*) echo "::error::BlastRadius analysis did not complete successfully."; exit 2 ;;' in text
+    )

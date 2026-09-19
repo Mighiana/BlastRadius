@@ -48,9 +48,7 @@ def upgrade() -> None:
     op.create_table(
         "sessions",
         sa.Column("token_hash", sa.String(64), primary_key=True),
-        sa.Column(
-            "user_id", sa.String(36), sa.ForeignKey("users.id", ondelete="CASCADE")
-        ),
+        sa.Column("user_id", sa.String(36), sa.ForeignKey("users.id", ondelete="CASCADE")),
         sa.Column("csrf_token", sa.String(100), nullable=False),
         sa.Column("expires_at", sa.Float(), nullable=False),
     )
@@ -83,9 +81,7 @@ def upgrade() -> None:
             sa.ForeignKey("organizations.id", ondelete="CASCADE"),
             nullable=False,
         ),
-        sa.Column(
-            "created_by", sa.String(36), sa.ForeignKey("users.id"), nullable=False
-        ),
+        sa.Column("created_by", sa.String(36), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("base_label", sa.String(120), nullable=False),
         sa.Column("candidate_label", sa.String(120), nullable=False),
         sa.Column("status", sa.String(20), nullable=False),

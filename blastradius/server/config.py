@@ -144,7 +144,9 @@ class Settings:
             github_app_id=int(env.get("BR_GITHUB_APP_ID", "0")),
             github_app_slug=env.get("BR_GITHUB_APP_SLUG", ""),
             github_private_key_file=(
-                Path(env["BR_GITHUB_PRIVATE_KEY_FILE"]) if env.get("BR_GITHUB_PRIVATE_KEY_FILE") else None
+                Path(env["BR_GITHUB_PRIVATE_KEY_FILE"])
+                if env.get("BR_GITHUB_PRIVATE_KEY_FILE")
+                else None
             ),
             github_webhook_secret=env.get("BR_GITHUB_WEBHOOK_SECRET", ""),
             max_body_bytes=int(env.get("BR_MAX_BODY_BYTES", "1048576")),

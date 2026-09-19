@@ -55,7 +55,9 @@ def check_wheel(root: Path, wheel: Path) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--wheel", nargs="?", const="",
+        "--wheel",
+        nargs="?",
+        const="",
         help="Verify package contents; defaults to the single dist/*.whl file.",
     )
     args = parser.parse_args()

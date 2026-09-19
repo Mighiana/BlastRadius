@@ -14,12 +14,10 @@ def main() -> None:
             "root_cause": scenario.root_cause,
             "change": scenario.change,
             "before_files": {
-                p.name: p.read_text(encoding="utf-8")
-                for p in sorted(scenario.before.glob("*.tf"))
+                p.name: p.read_text(encoding="utf-8") for p in sorted(scenario.before.glob("*.tf"))
             },
             "after_files": {
-                p.name: p.read_text(encoding="utf-8")
-                for p in sorted(scenario.after.glob("*.tf"))
+                p.name: p.read_text(encoding="utf-8") for p in sorted(scenario.after.glob("*.tf"))
             },
         }
     Path(__file__).with_name("fixtures.py").write_text(

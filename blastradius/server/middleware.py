@@ -47,9 +47,7 @@ class GuardMiddleware:
             await send(message)
 
         async def error(code: int, detail: str) -> None:
-            await JSONResponse({"detail": detail}, status_code=code)(
-                scope, receive, safe_send
-            )
+            await JSONResponse({"detail": detail}, status_code=code)(scope, receive, safe_send)
 
         try:
             headers = Headers(scope=scope)
@@ -74,9 +72,7 @@ class GuardMiddleware:
                 "api": self.settings.rate_limit,
             }[category]
             window, count = self.buckets.get(key, (now, 0))
-            if count >= limit or (
-                key not in self.buckets and len(self.buckets) >= 10000
-            ):
+            if count >= limit or (key not in self.buckets and len(self.buckets) >= 10000):
                 await error(429, "rate_limit_exceeded")
                 return
             self.buckets[key] = (window, count + 1)

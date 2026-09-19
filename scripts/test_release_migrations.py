@@ -49,14 +49,25 @@ def test_migrate_uses_current_head_and_preserves_existing_data(
     for _ in range(2):
         result = subprocess.run(
             ["sh", str(ROOT / "scripts/container-entrypoint.sh"), "migrate"],
-            cwd=tmp_path, env=env, capture_output=True, text=True, check=False,
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         assert result.returncode == 0, result.stderr
     with engine.connect() as connection:
-        assert set(MigrationContext.configure(connection).get_current_heads()) == set(script.get_heads())
+        assert set(MigrationContext.configure(connection).get_current_heads()) == set(
+            script.get_heads()
+        )
         if existing:
-            assert connection.exec_driver_sql("SELECT value FROM release_restore_probe").scalar() == "preserve-me"
-    db = Database(Settings(environment="test", database_url=url, data_dir=tmp_path, auto_migrate=False))
+            assert (
+                connection.exec_driver_sql("SELECT value FROM release_restore_probe").scalar()
+                == "preserve-me"
+            )
+    db = Database(
+        Settings(environment="test", database_url=url, data_dir=tmp_path, auto_migrate=False)
+    )
     try:
         assert db.ready(), "Readiness must follow the packaged migration head."
     finally:

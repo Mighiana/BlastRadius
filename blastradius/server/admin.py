@@ -61,7 +61,9 @@ def main(argv: list[str] | None = None) -> int:
     inspect.add_argument("--offset", type=int, default=0)
     clean = commands.add_parser("cleanup")
     clean.add_argument("--limit", type=int, default=100)
-    github = commands.add_parser("github-register", help="Operator-verified workspace/account mapping")
+    github = commands.add_parser(
+        "github-register", help="Operator-verified workspace/account mapping"
+    )
     github.add_argument("organization_id")
     github.add_argument("installation_id", type=int)
     github.add_argument("account_id", type=int)
@@ -81,12 +83,22 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"removed": cleanup(db, args.limit)}))
         elif args.command == "github-register":
             try:
-                print(json.dumps(register_installation(
-                    db, settings, args.organization_id, args.installation_id, args.account_id,
-                    args.verification_reference,
-                )))
+                print(
+                    json.dumps(
+                        register_installation(
+                            db,
+                            settings,
+                            args.organization_id,
+                            args.installation_id,
+                            args.account_id,
+                            args.verification_reference,
+                        )
+                    )
+                )
             except (GitHubError, ValueError):
-                parser.error("registration rejected; verify operator mapping, App setup and permissions")
+                parser.error(
+                    "registration rejected; verify operator mapping, App setup and permissions"
+                )
         else:
             if not 1 <= args.limit <= 1000 or args.offset < 0:
                 parser.error("limit must be 1..1000 and offset nonnegative")

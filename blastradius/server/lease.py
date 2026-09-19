@@ -37,9 +37,7 @@ class ServiceLease:
                 fcntl.flock(self.file, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
                 self.file.close()
-                raise RuntimeError(
-                    "Only one server process per database is supported"
-                ) from None
+                raise RuntimeError("Only one server process per database is supported") from None
 
     def release(self) -> None:
         if self.connection:
