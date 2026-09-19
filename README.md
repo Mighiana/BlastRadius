@@ -8,7 +8,7 @@ and export a review report.
 
 [Try the legacy demo](https://blastradius.streamlit.app/) ·
 [Install](#installation) · [GitHub check](#github-actions) ·
-[Demo script](docs/demo.md) · [Documentation](docs/index.md)
+[Demo script](docs/demo.md) · [Readiness](docs/readiness.md) · [Documentation](docs/index.md)
 
 ```bash
 python -m blastradius.cli --before examples/safe --after examples/vulnerable
@@ -22,8 +22,9 @@ Restore the restricted CIDR and re-analyze: **BLOCK CHANGE → SAFE TO MERGE**.
 the selected policy. It does not prove AWS infrastructure is safe.
 
 The public URL is the **legacy Streamlit demonstration**, not the new application.
-No new public deployment is claimed. Current screenshots will be added after
-integrated browser verification; none are fabricated.
+No new public deployment is claimed. [Product screenshots and acceptance
+evidence](https://github.com/Mighiana/BlastRadius/pull/2) show the tested integrated
+application.
 
 ## The problem
 
@@ -153,7 +154,8 @@ make check
 ```
 
 See [Contributing](CONTRIBUTING.md) for lint/types, frontend checks and audits.
-The original baseline has 239 tests; the integrated report must record the final count.
+The original baseline has 239 tests; [product readiness](docs/readiness.md#test-results)
+records the final counts, browser evidence and remaining launch prerequisites.
 
 ## Architecture
 

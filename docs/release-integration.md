@@ -152,9 +152,10 @@ ESLint 9's support deprecation; lint passes and npm audit reports no vulnerabili
 
 ## Remaining acceptance and operational boundaries
 
-- Parent must run the unchanged Playwright suite and final browser/mobile/legacy
-  recordings on the integrated revision. This integration session did not drive
-  a browser or produce screenshots.
+- Final acceptance is recorded in [product readiness](readiness.md). The unchanged
+  Playwright suite passed 12/12; React checks covered all five requested widths,
+  real uploads/exports and tenant isolation. Legacy functional/session checks
+  passed with separately documented presentation limitations.
 - Real OIDC browser authentication and configured Stripe provider flows remain
   unverified. Their local signature/state/nonce/PKCE/webhook and authorization
   tests pass; provider calls are mocked. Billing accepts test keys only.
@@ -163,8 +164,9 @@ ESLint 9's support deprecation; lint passes and npm audit reports no vulnerabili
 - Exactly one ASGI process per database, in-memory queue, no distributed HA,
   scheduled retention, membership-administration UI or project-deletion UI.
   The underlying membership and deletion APIs enforce ownership/roles.
-- Container OS/base-image vulnerability scanning is still required before
-  deployment; Python/npm dependency audits do not cover OS packages.
+- Final container scanning drove a Trixie application base and removal of runtime
+  Python installers. Remaining application OS and PostgreSQL OS/Go findings are
+  listed in the readiness report and require review before deployment.
 - Production TLS, persistent identity, secrets, database encryption/backups,
   reverse-proxy limits, legal/license decisions and public release remain owner
   responsibilities. No PR, merge, public deployment, purchase, registry

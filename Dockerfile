@@ -5,21 +5,25 @@ RUN npm ci
 COPY web/ ./
 RUN npm run lint && npm run typecheck && npm run build
 
-FROM python:3.12.13-slim-bookworm@sha256:4766d8b510c428e595d74b9cc5bbb2fae8e26316fffb4adc89908d79aacd58a2 AS python-build
+FROM python:3.12.14-slim-trixie@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9 AS python-build
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /build
 COPY pyproject.toml README.md ./
 COPY blastradius/ ./blastradius/
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/python -m pip install "pip==26.2" \
-    && /opt/venv/bin/python -m pip install ".[server]"
+    && /opt/venv/bin/python -m pip install ".[server]" \
+    && /opt/venv/bin/python -m pip check \
+    && /opt/venv/bin/python -m pip uninstall --yes pip
 
-FROM python:3.12.13-slim-bookworm@sha256:4766d8b510c428e595d74b9cc5bbb2fae8e26316fffb4adc89908d79aacd58a2 AS runtime
+FROM python:3.12.14-slim-trixie@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9 AS runtime
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     HOME=/home/blastradius
-RUN groupadd --gid 10001 blastradius \
+RUN /usr/local/bin/python -m pip uninstall --yes pip \
+    && rm -rf /usr/local/lib/python3.12/ensurepip \
+    && groupadd --gid 10001 blastradius \
     && useradd --uid 10001 --gid blastradius --create-home blastradius \
     && mkdir -p /app/.local \
     && chown blastradius:blastradius /app/.local

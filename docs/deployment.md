@@ -1,5 +1,9 @@
 # Deployment and local environments
 
+Read the [readiness assessment](readiness.md#security-limitations) before promoting
+images. Both the application and local Compose database have outstanding upstream
+scan findings; a working local stack is not production security approval.
+
 The integrated application serves Vite assets and the API from one FastAPI
 process. No new public deployment, provider write or purchase has been performed.
 
@@ -43,11 +47,14 @@ Known browser routes return the application shell; missing API, health and asset
 paths remain 404. A wheel contains the engine, service, fixtures and migrations;
 it does not bundle the frontend, which must be built separately.
 The final stage does not require Node, Terraform, AWS credentials or root.
+Python package installers, their vendored libraries and bundled `ensurepip`
+wheels are removed from the runtime. Install dependencies in the build stage
+and rebuild the image when they change.
 
 Image versions and multi-platform manifest digests are explicit. The handoff uses
-Node 22.23.2, Python 3.12.13 and PostgreSQL 16.15, verified against the upstream
-registry. Version releases predate the handoff by more than seven days; the
-Node/PostgreSQL image rebuilds were published on the handoff date.
+Node 22.23.2, Python 3.12.14 on Debian 13 and PostgreSQL 16.15, verified against
+the upstream registry. Python moved from Debian 12 after the runtime image scan.
+Image rebuilds can be newer than the underlying version release.
 Review base-image provenance and scan both build and runtime images before
 promotion. Update digests deliberately when security patches become available.
 Python direct dependencies are pinned, but the repository does not yet contain

@@ -9,6 +9,7 @@ Start with the [README](../README.md), [demo](demo.md) or [GitHub onboarding](gi
 | Review product threats | [Threat model](threat-model.md) |
 | Build a deployment | [Deployment](deployment.md) |
 | Integrate the application work | [Release integration](release-integration.md) |
+| Assess verified scope and launch prerequisites | [Product readiness](readiness.md) |
 | Monitor and recover | [Operations](operations.md) |
 | Understand retained data | [Data lifecycle](data-lifecycle.md) |
 | Evaluate repository connection | [Future GitHub App](github-app-design.md) |
