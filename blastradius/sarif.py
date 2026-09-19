@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
+from dataclasses import asdict
 from urllib.parse import quote
 
 from blastradius import __version__
 from blastradius.parser.models import Relationship
+from blastradius.parser.coverage import safe_source
 from blastradius.security.decision import Decision, decide
 
 RULES = [
@@ -20,6 +21,9 @@ RULES = [
     {"id": "BR003", "name": "PolicyGateViolation",
      "shortDescription": {"text": "Repository security policy blocks this change"},
      "defaultConfiguration": {"level": "error"}},
+    {"id": "BR004", "name": "IncompleteAnalysis",
+     "shortDescription": {"text": "Static analysis coverage diagnostic"},
+     "defaultConfiguration": {"level": "warning"}},
 ]
 
 
@@ -35,8 +39,7 @@ def location(resource, graph):
     result = {"logicalLocations": [{"fullyQualifiedName": resource, "kind": "resource"}]}
     file = graph.graph.get("source_files", {}).get(resource)
     if file:
-        path = Path(file)
-        uri = path.as_uri() if path.is_absolute() else quote(path.as_posix(), safe="/")
+        uri = quote(safe_source(file), safe="/")
         result["physicalLocation"] = {"artifactLocation": {"uri": uri}}
     return result
 
@@ -59,7 +62,8 @@ def build_sarif(diff, decision=None):
             "message": {"text": "New attack path: " + " -> ".join(labels) + ". " + advice},
             "partialFingerprints": {"attackPath/v1": hashlib.sha256(path.key.encode()).hexdigest()},
             "properties": {"attackPath": path.nodes, "severity": path.severity.value,
-                           "terraformResource": resource, "recommendation": advice},
+                           "terraformResource": resource, "recommendation": advice,
+                           "edgeEvidence": [asdict(edge) for edge in path.edges]},
             "codeFlows": [{"threadFlows": [{"locations": [
                 {"location": {
                     **location(edge.terraform_resource or edge.target, diff.after.graph),
@@ -77,6 +81,20 @@ def build_sarif(diff, decision=None):
             "properties": {"attackPath": [], "severity": "HIGH",
                            "recommendation": "Resolve the listed gate violations and re-analyze."},
         })
+    for phase, analysis in (("before", diff.before), ("after", diff.after)):
+        for diagnostic in analysis.diagnostics:
+            result = {
+                "ruleId": "BR004", "ruleIndex": 3,
+                "level": "warning" if diagnostic.blocks_analysis else "note",
+                "message": {"text": f"{phase}: {diagnostic.code}: {diagnostic.message}"},
+                "properties": {"phase": phase, **asdict(diagnostic)},
+            }
+            if diagnostic.resource:
+                result["locations"] = [location(diagnostic.resource, analysis.graph)]
+            elif diagnostic.source_file:
+                result["locations"] = [{"physicalLocation": {"artifactLocation": {
+                    "uri": quote(safe_source(diagnostic.source_file), safe="/")}}}]
+            results.append(result)
     return {
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
@@ -85,6 +103,8 @@ def build_sarif(diff, decision=None):
             "results": results,
             "invocations": [{"executionSuccessful": True}],
             "properties": {"decision": decision.decision.value,
+                           "analysisComplete": diff.complete,
+                           "pathsTruncated": diff.before.paths_truncated or diff.after.paths_truncated,
                            "unsupportedResourceTypes": diff.after.graph.graph.get("unsupported", [])},
         }],
     }

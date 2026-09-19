@@ -16,6 +16,8 @@ import argparse
 import os
 import sys
 import tempfile
+import json
+from dataclasses import asdict
 from pathlib import Path
 from typing import List, Optional, Sequence, TextIO
 
@@ -23,11 +25,15 @@ from blastradius import gitsource
 from blastradius.policy import PolicyError, discover_policy, load_policy_file
 from blastradius.graph import analyze, build_graph, compare
 from blastradius.graph.diff_engine import GraphDiff
-from blastradius.parser import parse_directory
 from blastradius.parser.inputs import parse_input
+from blastradius.parser.limits import InputLimitError
+from blastradius.parser.coverage import safe_source
 from lark.exceptions import UnexpectedInput
 from blastradius.parser.plan_parser import PlanParseError, parse_plan_pair
-from blastradius.report import build_report
+from blastradius.report import build_report, build_pr_comment, coverage_lines
+from blastradius.actions_output import deliver_error, deliver_success, step_outputs
+from blastradius.github_context import GitHubContextError, PullRequestContext
+from blastradius.sarif import build_sarif
 from blastradius.security.decision import DeploymentDecision, decide
 
 EXIT_USAGE = 2
@@ -106,12 +112,25 @@ def _summary_lines(diff: GraphDiff, decision: DeploymentDecision) -> List[str]:
             lines.append("  " + " -> ".join(diff.display_path(path, "before")))
 
     lines.extend(f"Policy: {note}" for note in decision.policy_notes)
+    lines.extend(coverage_lines(diff))
     return lines
 
 
 def _json_payload(diff: GraphDiff, decision: DeploymentDecision) -> dict:
     return {
         "decision": decision.decision.value,
+        "analysis_complete": diff.complete,
+        "analysis": {
+            phase: {"complete": result.complete, "paths_truncated": result.paths_truncated,
+                    "path_work": result.path_work}
+            for phase, result in (("before", diff.before), ("after", diff.after))
+        },
+        "coverage_diagnostics": [
+            {"phase": phase, **asdict(diagnostic)}
+            for phase, result in (("before", diff.before), ("after", diff.after))
+            for diagnostic in result.diagnostics
+        ],
+        "edge_evidence": [asdict(edge) for edge in diff.new_edges],
         "passed": decision.passed,
         "policy_notes": decision.policy_notes,
         "verdict": diff.verdict.value,
@@ -151,23 +170,19 @@ def run(argv: Optional[Sequence[str]] = None, stream: Optional[TextIO] = None) -
     args = _build_parser().parse_args(argv)
     try:
         code = _run_analysis(args, out)
-    except OSError as error:
-        print(f"error: {error}", file=sys.stderr)
+    except (OSError, InputLimitError, UnicodeError) as error:
+        print(f"error: input/output failure ({type(error).__name__})", file=sys.stderr)
         code = EXIT_USAGE
     if code == EXIT_USAGE:
-        from blastradius.actions_output import deliver_error
-
         try:
             deliver_error(args)
         except OSError as error:
-            print(f"error: cannot write failure artifacts: {error}", file=sys.stderr)
+            print(f"error: cannot write failure artifacts ({type(error).__name__})", file=sys.stderr)
     return code
 
 
 def _run_analysis(args, out):
     if args.github_action:
-        from blastradius.github_context import GitHubContextError, PullRequestContext
-
         args.github_output = args.github_output or os.environ.get("GITHUB_OUTPUT")
         args.github_summary = args.github_summary or os.environ.get("GITHUB_STEP_SUMMARY")
         if args.base or args.head or args.before or args.after or args.plan:
@@ -213,8 +228,8 @@ def _run_analysis(args, out):
             args.diagnostics.append(
                 "outside current model coverage, ignored: " + ", ".join(after_config.unsupported)
             )
-        before = analyze(build_graph(before_config), f"{args.plan} (prior state)")
-        after = analyze(build_graph(after_config), f"{args.plan} (planned)")
+        before = analyze(build_graph(before_config), f"{safe_source(args.plan)} (prior state)")
+        after = analyze(build_graph(after_config), f"{safe_source(args.plan)} (planned)")
         return _report(args, compare(before, after), None, None, out)
 
     with tempfile.TemporaryDirectory(prefix="blastradius-") as workdir:
@@ -242,8 +257,8 @@ def _run_analysis(args, out):
                         resource.source_file = (Path(comparison.terraform_dir) / Path(resource.source_file).name).as_posix()
             before = analyze(build_graph(before_config), str(before_dir))
             after = analyze(build_graph(after_config), str(after_dir))
-        except (OSError, UnexpectedInput, PlanParseError) as error:
-            print(f"error: {error}", file=out)
+        except (OSError, UnexpectedInput, PlanParseError, InputLimitError, UnicodeError) as error:
+            print(f"error: invalid analysis input ({type(error).__name__})", file=out)
             return EXIT_USAGE
 
         return _report(args, compare(before, after), before_dir, after_dir, out)
@@ -265,8 +280,6 @@ def _report(
         return EXIT_USAGE
     decision = decide(diff, policy)
     if args.comment_file:
-        from blastradius.report import build_pr_comment
-
         try:
             args.comment_file.write_text(build_pr_comment(diff, decision, before_dir, after_dir), encoding="utf-8")
         except OSError as error:
@@ -275,8 +288,6 @@ def _report(
     if args.format not in ("json", "sarif"):
         for message in args.diagnostics:
             print(f"# {message}", file=out)
-
-    from blastradius.actions_output import deliver_success, step_outputs
 
     exit_code = (0 if decision.decision.value == "SAFE TO MERGE" else 1) if args.fail_on_review else decision.exit_code
     payload = _json_payload(diff, decision)
@@ -289,13 +300,8 @@ def _report(
     if args.format == "pr":
         print(build_report(diff, decision, before_dir, after_dir), file=out)
     elif args.format == "json":
-        import json
-
         print(json.dumps(payload, indent=2), file=out)
     elif args.format == "sarif":
-        import json
-        from blastradius.sarif import build_sarif
-
         print(json.dumps(build_sarif(diff, decision), indent=2), file=out)
     else:
         print("\n".join(_summary_lines(diff, decision)), file=out)

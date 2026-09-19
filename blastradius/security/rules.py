@@ -10,6 +10,7 @@ This is a deliberately simplified model of AWS reachability - see the README.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from fnmatch import fnmatchcase
 from typing import Any, Dict, List, Optional, Tuple
 
 from blastradius.parser.models import Risk, TerraformResource
@@ -30,8 +31,6 @@ ADMIN_PORTS: Dict[int, str] = {22: "SSH", 3389: "RDP"}
 SENSITIVE_TAG_KEYS = ("sensitive", "blastradius_sensitive")
 SENSITIVE_DATA_CLASSES = ("pii", "phi", "secret", "confidential", "restricted")
 
-S3_ACTION_PREFIXES = ("s3:", "s3")
-WILDCARD_ACTIONS = ("*", "s3:*")
 
 
 @dataclass
@@ -70,6 +69,9 @@ class S3AccessFinding:
     has_wildcard_action: bool = False
     risk: Risk = Risk.MEDIUM
     reason: str = ""
+    resources: list[str] = field(default_factory=list)
+    data_read: bool = False
+    conditional: bool = False
 
     @property
     def evidence(self) -> str:
@@ -93,6 +95,8 @@ def _port_label(from_port: int, to_port: int, protocol: str) -> str:
 def _covers_admin_port(from_port: int, to_port: int, protocol: str) -> Optional[int]:
     if protocol in ("-1", "all"):
         return next(iter(ADMIN_PORTS))
+    if protocol not in ("tcp", "udp", "6", "17"):
+        return None
     for port in ADMIN_PORTS:
         if from_port <= port <= to_port:
             return port
@@ -111,8 +115,11 @@ def public_ingress_findings(security_group: TerraformResource) -> List[IngressFi
         if not isinstance(rule, dict):
             continue
         protocol = str(rule.get("protocol", "tcp"))
-        from_port = int(rule.get("from_port", 0) or 0)
-        to_port = int(rule.get("to_port", from_port) or from_port)
+        try:
+            from_port = int(rule.get("from_port", 0) or 0)
+            to_port = int(rule.get("to_port", from_port) or from_port)
+        except (ValueError, TypeError, OverflowError):
+            continue
         public = [c for c in as_list(rule.get("cidr_blocks")) if is_public_cidr(c)]
         public += [c for c in as_list(rule.get("ipv6_cidr_blocks")) if is_public_cidr(c)]
         if not public:
@@ -170,8 +177,42 @@ def instance_role_addresses(
 
 
 def _statement_s3_actions(statement: Dict[str, Any]) -> List[str]:
-    actions = [str(a) for a in as_list(statement.get("Action"))]
-    return [a for a in actions if a == "*" or a.lower().startswith(S3_ACTION_PREFIXES)]
+    actions = [a for a in as_list(statement.get("Action")) if isinstance(a, str)]
+    return [a for a in actions if a == "*" or a.lower().startswith("s3:")]
+
+
+def permits_object_read(actions: list[str]) -> bool:
+    return any(aws_pattern_matches(action, pattern.lower()) for pattern in actions
+               for action in ("s3:getobject", "s3:getobjectversion"))
+
+
+def aws_pattern_matches(value: str, pattern: str) -> bool:
+    return fnmatchcase(value, pattern.replace("[", "[[]"))
+
+
+def anonymous_principal(principal: object) -> bool:
+    if principal == "*":
+        return True
+    return isinstance(principal, dict) and "*" in as_list(principal.get("AWS"))
+
+
+def bucket_resource_matches(patterns: list[str], bucket: TerraformResource, objects_only: bool = False) -> bool:
+    for pattern in patterns:
+        if pattern == "*":
+            return True
+        if bucket.address in references(pattern):
+            if not objects_only or ".arn}/" in pattern or ".arn/" in pattern:
+                return True
+        for arn in (bucket.get("arn"), f"arn:aws:s3:::{bucket.get('bucket')}" if bucket.get("bucket") else None):
+            if not isinstance(arn, str):
+                continue
+            if not objects_only and aws_pattern_matches(arn, pattern):
+                return True
+            # Any nonempty object key under a matching bucket is a possible target.
+            bucket_pattern, separator, key_pattern = pattern.partition("/")
+            if separator and key_pattern and aws_pattern_matches(arn, bucket_pattern):
+                return True
+    return False
 
 
 def s3_access_findings(policy_document: Any) -> List[S3AccessFinding]:
@@ -186,7 +227,7 @@ def s3_access_findings(policy_document: Any) -> List[S3AccessFinding]:
     findings: List[S3AccessFinding] = []
 
     for statement in policy_statements(policy):
-        if str(statement.get("Effect", "Allow")).lower() != "allow":
+        if statement.get("Effect") != "Allow":
             continue
         s3_actions = _statement_s3_actions(statement)
         if not s3_actions:
@@ -197,14 +238,14 @@ def s3_access_findings(policy_document: Any) -> List[S3AccessFinding]:
             ref for ref in references(resources) if ref.startswith("aws_s3_bucket.")
         ]
         targets_all = any(r.strip() in ("*", "arn:aws:s3:::*", "arn:aws:s3:::*/*") for r in resources)
-        wildcard_action = any(a in WILDCARD_ACTIONS for a in s3_actions)
+        wildcard_action = any("*" in a or "?" in a for a in s3_actions)
 
         if targets_all and wildcard_action:
-            risk, reason = Risk.CRITICAL, "Role allows s3:* on all resources (*)"
+            risk, reason = Risk.CRITICAL, f"Role allows {', '.join(s3_actions)} on all resources (*)"
         elif targets_all:
             risk, reason = Risk.HIGH, f"Role allows {', '.join(s3_actions)} on all resources (*)"
         elif wildcard_action:
-            risk, reason = Risk.HIGH, "Role allows s3:* on the bucket"
+            risk, reason = Risk.HIGH, f"Role allows {', '.join(s3_actions)} on the bucket"
         else:
             risk, reason = Risk.MEDIUM, f"Role allows {', '.join(s3_actions)} on the bucket"
 
@@ -216,6 +257,9 @@ def s3_access_findings(policy_document: Any) -> List[S3AccessFinding]:
                 has_wildcard_action=wildcard_action,
                 risk=risk,
                 reason=reason,
+                resources=resources,
+                data_read=permits_object_read(s3_actions),
+                conditional="Condition" in statement,
             )
         )
     return findings
@@ -256,7 +300,7 @@ def role_policy_documents(
     return [document for _, document in role_policy_sources(role_address, config_resources)]
 
 
-PUBLIC_ACLS = ("public-read", "public-read-write", "authenticated-read")
+PUBLIC_ACLS = ("public-read", "public-read-write")
 
 
 @dataclass
@@ -267,6 +311,17 @@ class PublicBucketFinding:
     evidence: str
     terraform_resource: str
     risk: Risk = Risk.HIGH
+    conditional: bool = False
+
+
+def bucket_public_access_block(bucket: TerraformResource, config_resources: list[TerraformResource]) -> dict[str, bool]:
+    controls = [r for r in config_resources if r.type == "aws_s3_bucket_public_access_block"
+                and bucket.address in references(r.get("bucket"))]
+    if len(controls) != 1:
+        return {}
+    return {name: controls[0].get(name) is True for name in (
+        "block_public_acls", "ignore_public_acls", "block_public_policy", "restrict_public_buckets"
+    )}
 
 
 def public_bucket_findings(
@@ -280,6 +335,7 @@ def public_bucket_findings(
       * a bucket policy that allows an `s3:Get*`/`*` action to Principal `"*"`
     """
     findings: List[PublicBucketFinding] = []
+    controls = bucket_public_access_block(bucket, config_resources)
 
     acl_sources: List[Tuple[str, Any]] = [(bucket.address, bucket.get("acl"))]
     for resource in config_resources:
@@ -289,7 +345,7 @@ def public_bucket_findings(
             acl_sources.append((resource.address, resource.get("acl")))
 
     for address, acl in acl_sources:
-        if isinstance(acl, str) and acl.strip().lower() in PUBLIC_ACLS:
+        if isinstance(acl, str) and acl.strip().lower() in PUBLIC_ACLS and not controls.get("ignore_public_acls"):
             findings.append(
                 PublicBucketFinding(
                     reason=f'Bucket ACL is "{acl}", allowing anonymous read access',
@@ -305,16 +361,18 @@ def public_bucket_findings(
         if bucket.address not in references(resource.get("bucket")):
             continue
         for statement in policy_statements(parse_policy_document(resource.get("policy"))):
-            if str(statement.get("Effect", "Allow")).lower() != "allow":
+            if statement.get("Effect") != "Allow":
                 continue
             principals = statement.get("Principal")
-            flattened = (
-                list(principals.values()) if isinstance(principals, dict) else as_list(principals)
-            )
-            if not any("*" in str(p) for p in flattened):
+            if not anonymous_principal(principals):
                 continue
-            actions = [str(a) for a in as_list(statement.get("Action"))]
-            if not any(a == "*" or a.lower().startswith("s3:") for a in actions):
+            actions = [a for a in as_list(statement.get("Action")) if isinstance(a, str)]
+            if not permits_object_read(actions):
+                continue
+            resources = [r for r in as_list(statement.get("Resource")) if isinstance(r, str)]
+            if not bucket_resource_matches(resources, bucket, objects_only=True):
+                continue
+            if controls.get("restrict_public_buckets") and "Condition" not in statement:
                 continue
             findings.append(
                 PublicBucketFinding(
@@ -325,6 +383,7 @@ def public_bucket_findings(
                     evidence=f'"Principal": "*", "Action": {actions}',
                     terraform_resource=resource.address,
                     risk=Risk.CRITICAL,
+                    conditional="Condition" in statement,
                 )
             )
 

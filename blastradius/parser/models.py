@@ -58,6 +58,19 @@ _RISK_ORDER = [Risk.NONE, Risk.LOW, Risk.MEDIUM, Risk.HIGH, Risk.CRITICAL]
 INTERNET_ID = "INTERNET"
 
 
+@dataclass(frozen=True)
+class Diagnostic:
+    """A coverage gap, without input values or machine-local filesystem paths."""
+
+    code: str
+    message: str
+    severity: str = "warning"
+    resource: str = ""
+    attribute: str = ""
+    source_file: str = ""
+    blocks_analysis: bool = True
+
+
 @dataclass
 class TerraformResource:
     """A single `resource "<type>" "<name>"` block, with values normalized."""
@@ -89,6 +102,11 @@ class ParsedConfig:
     # Resource types present in the input but outside the modelled coverage.
     # Reported rather than silently dropped, so users know the scope limit.
     unsupported: List[str] = field(default_factory=list)
+    diagnostics: list[Diagnostic] = field(default_factory=list)
+
+    @property
+    def complete(self) -> bool:
+        return not any(d.blocks_analysis for d in self.diagnostics)
 
     def of_type(self, *types: str) -> List[TerraformResource]:
         return [r for r in self.resources if r.type in types]
@@ -132,6 +150,10 @@ class GraphEdge:
     # Structured facts about the edge (ports, cidr, ...) for policy decisions
     # that must not rely on parsing the human-readable reason.
     metadata: Dict[str, Any] = field(default_factory=dict)
+    confidence: str = "modeled"
+    category: str = "reachability"
+    source_file: str = ""
+    remediation: str = ""
 
 
 @dataclass
