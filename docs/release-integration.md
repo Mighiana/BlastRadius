@@ -141,10 +141,33 @@ This integration does not claim browser results.
 
 ## Evidence and remaining boundaries
 
-The final integration handoff records exact test counts, image IDs, clean-wheel
-and clean-clone checks. Provider tests use mocked HTTP; no live App/OIDC writes
-are part of these commands. External TLS, managed PostgreSQL/PITR, production
-retention jobs, email delivery and load/SLO acceptance remain unverified.
+The integration ran on Linux/amd64, Python 3.12.14 and Node 24.19.0:
+
+| Check | Result |
+| --- | --- |
+| `BR_TEST_DATABASE_URL=<disposable PostgreSQL 16.15> make check` | 561 Python tests, no skips; 22 release tests; Ruff, mypy and 38-document link check passed |
+| `make frontend` | Clean npm install, lint, types, 75 tests across 8 files and production build passed |
+| `make audit`; `python -m pip check` | No known dependency vulnerabilities; no broken requirements |
+| Ruff formatting | 39 server/script/integration-test files passed; canonical generated fixtures excluded |
+| Wheel | Every packaged module checked; clean core installation outside checkout ran 9 scenario cases plus plan JSON/SARIF with isolated Python and expected exits; no FastAPI/Streamlit dependency |
+| Installed server wheel | Repeated packaged SQLite migrations through 0003 and readiness passed outside checkout |
+| Container/Compose | Same-digest mirror builds, double PostgreSQL migration, healthy app/db, UID10001/999, read-only roots, dropped capabilities and bounded CPU/memory/PIDs verified |
+| Real HTTP → frontend Zod | 31 actual container responses across 17 schemas; all public demo states, isolated analysis, operator inspection/grants, Free/Team export gates, policies, sessions, history and deletion passed |
+| Fresh local clone | No inherited environment/build artifacts; Node24 `cp .env.example .env && make dev` installed, checked/built, migrated and started; the same 31-response API smoke passed |
+| Trivy 0.74.0 | Source/image secret checks passed; app 0 CRITICAL/44 HIGH and DB 1 CRITICAL/61 HIGH reproduced, no listed fixes. Existing promotion gate failed as intended; full severities retained |
+| Browser inventory only | 18 Playwright definitions listed; no browser test executed by this integration |
+
+The fresh clone was a full local Git clone of the integration branch with
+`--no-hardlinks`; it did not reuse ignored venv, Node, assets or database files.
+The container registry fallback changed only the registry hostname supplied to
+the local build; committed digests and Dockerfile remain unchanged.
+Starlette warns about its httpx TestClient compatibility path and npm warns about
+ESLint 9's support status; checks pass, with no suppressions.
+
+The final handoff includes image IDs and complete scan evidence. Provider tests
+use mocked HTTP; no live App/OIDC writes are part of these commands. External
+TLS, managed PostgreSQL/PITR, production retention jobs, email delivery and
+load/SLO acceptance remain unverified.
 The [readiness report](readiness.md) is authoritative for launch blockers.
 
 ## Tooling scope

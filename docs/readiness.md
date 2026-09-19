@@ -81,19 +81,20 @@ Worker limits and non-root containers reduce exposure; they are not a complete
 sandbox or kernel boundary. One process and in-memory queues remain explicit
 operational constraints. See [threat model](threat-model.md).
 
-The operations handoff's Trivy 0.74.0 scan (database dated
-2026-09-19T07:03:12Z) reported application **0 CRITICAL / 44 HIGH** and PostgreSQL
-**1 CRITICAL / 61 HIGH**, without scanner-listed fixes. The critical finding was
-`CVE-2026-6653` in libxml2. Those are upstream evidence, not a new integrated-image
-scan or a waiver. Final images must be rescanned and pass the existing promotion
-gate; no suppressions or reduced severity policy are authorized.
+The integration's Trivy 0.74.0 rescan (database dated
+2026-09-19T07:03:12Z) reproduced application **0 CRITICAL / 44 HIGH** and PostgreSQL
+**1 CRITICAL / 61 HIGH**, without scanner-listed fixes. The critical finding is
+`CVE-2026-6653` in libxml2. Source/image secret scans passed; the existing
+HIGH/CRITICAL promotion gate failed as intended. No suppressions or reduced
+severity policy were added. Rescan each final release image before promotion;
+these results are not a waiver.
 
 ## COMMERCIAL LAUNCH BLOCKERS
 
 1. Resolve or obtain an explicitly approved risk disposition for container OS
    findings under the existing promotion policy; rebuild/rescan exact final images.
 2. Parent-owned browser acceptance on the integrated revision at
-   320/375/480/768/1024/1440/1920px, including graph controls, errors, uploads,
+   320/375/430/768/1024/1440/1920px, including graph controls, errors, uploads,
    role boundaries, history, exports, trust pages and absence of payment actions.
 3. Real OIDC verified-email login/invitation acceptance and GitHub installation,
    signed delivery, stale PR and publication acceptance in an approved environment.

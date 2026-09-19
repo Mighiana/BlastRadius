@@ -6,7 +6,7 @@ publicly or activate billing without explicit approval.
 
 ## Environment
 
-Python 3.12 is the test baseline. Node 22 and npm are needed for `web/`; Make
+Python 3.12 is the test baseline. Node 24.19.0 and npm are needed for `web/`; Make
 commands assume a POSIX shell. No pre-commit configuration exists at this
 baseline, so the commands below are explicit developer/CI gates.
 If `python3.12` is not on PATH, pass `PYTHON` to Make with the installed
