@@ -22,6 +22,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select, update
 
 from blastradius.server.app import create_app
+from blastradius.server.admin import assign_plan
 from blastradius.server.config import Settings
 from blastradius.server.github_api import (
     GitHubAPI,
@@ -329,6 +330,44 @@ def test_pr_to_real_isolated_analysis_check_comment_and_replay(harness, caplog):
         assert session.scalar(select(func.count()).select_from(Analysis)) == 1
         assert session.get(Usage, (project["organization_id"], period())).analyses == 1
     assert TOKEN not in caplog.text and "PRIVATE KEY" not in caplog.text
+
+
+@pytest.mark.parametrize("plan", ["free", "pro", "team"])
+def test_github_policy_entitlements_reach_real_worker_and_filtered_history(harness, plan):
+    app, client, _, project, _ = harness
+    org_id = project["organization_id"]
+    assign_plan(app.state.db, org_id, "team")
+    policy = {
+        "gate": {
+            "block_new_critical_paths": False,
+            "block_new_sensitive_exposure": False,
+            "block_public_admin_ports": False,
+        },
+    }
+    assert client.put(f"/api/organizations/{org_id}/policy", json=policy).status_code == 200
+    assign_plan(app.state.db, org_id, plan)
+    assert send(harness).status_code == 202
+    drain(app)
+    run = run_record(app)
+    job = client.get(f"/api/analyses/{run.analysis_id}").json()
+    assert job["status"] == "succeeded"
+    assert job["policy_snapshot"]["source"] == ("organization" if plan == "team" else "default")
+    assert (job["decision"] == "BLOCK CHANGE") is (plan != "team")
+    assert job["result"]["after"]["attack_paths"]
+    history = client.get(
+        f"/api/projects/{project['id']}/analyses",
+        params={"input_type": "github", "branch": "feature/network", "status": "succeeded"},
+    )
+    assert history.status_code == 200
+    assert history.json()["total"] == 1
+    assert history.json()["analyses"][0]["id"] == job["id"]
+    assert (
+        client.get(f"/api/projects/{project['id']}/analyses", params={"input_type": "hcl"}).json()[
+            "total"
+        ]
+        == 0
+    )
+    assert client.get(f"/api/organizations/{org_id}/usage").json()["analyses"] == 1
 
 
 @pytest.mark.parametrize("bad", ["sha1=abc", "sha256=" + "0" * 64, "not-a-signature"])

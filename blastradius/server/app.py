@@ -399,7 +399,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         offset: int = Query(0, ge=0),
         status: Literal["queued", "running", "succeeded", "failed"] | None = None,
         decision: str | None = None,
-        input_type: Literal["hcl", "plan"] | None = None,
+        input_type: Literal["hcl", "plan", "github"] | None = None,
         branch: str | None = None,
         since: float | None = None,
         until: float | None = None,
