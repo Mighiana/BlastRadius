@@ -1,6 +1,7 @@
 # Development configuration worksheet
 
-Copy [.env.example](../.env.example) to `.env`, then run `make dev`.
+Prerequisites: Python 3.12, Node 24, npm and Make. Copy
+[.env.example](../.env.example) to `.env`, then run `make dev`.
 
 ```dotenv
 POSTGRES_DB=blastradius
@@ -34,3 +35,25 @@ For Vite hot reload, use [frontend development](frontend.md) and set
 `BR_PUBLIC_URL=http://localhost:5173` to match its browser origin.
 `.env` is trusted local configuration,
 not an upload format. Never commit it. `make dev` does not deploy anything publicly.
+
+For a repeatable fresh-clone check without starting a long-running server:
+
+```bash
+cp .env.example .env
+make install
+make migrate
+make check
+make wheel
+```
+
+`make migrate` can be repeated safely; it uses the installed Alembic resources and
+upgrades to the current head. `make start` migrates the local SQLite database and
+starts one server process; production uses an explicit migration job instead.
+SQLite is for local development, not production deployment.
+
+For local PostgreSQL use `make compose-up`, then `make compose-down` when finished.
+Volumes survive shutdown. The app and database use non-root users and read-only
+root filesystems. A first Trixie startup creates `postgres-trixie-data`; it does
+not migrate an older Bookworm volume. Follow the
+[deployment instructions](deployment.md#postgresql-compose) before changing an
+existing database installation.
