@@ -1,0 +1,8 @@
+target-version = "py312"
+line-length = 100
+extend-exclude = ["build", "dist", "web", ".venv*"]
+
+[lint]
+# Fatal/static correctness across the legacy tree. `make lint` additionally runs
+# the full standard rule set on scripts and the new server, without exemptions.
+select = ["E4", "E9", "F63", "F7", "F82"]

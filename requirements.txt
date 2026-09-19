@@ -1,6 +1,6 @@
-streamlit>=1.40
-networkx>=3.2
-python-hcl2>=4.3
-pyvis>=0.3.2
-PyYAML>=6.0
-pytest>=8.0
+# Legacy Streamlit hosting. Core/server dependencies belong in pyproject.toml.
+streamlit==1.63.0
+networkx==3.6.1
+python-hcl2==8.1.4
+pyvis==0.3.2
+PyYAML==6.0.3
