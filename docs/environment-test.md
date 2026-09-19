@@ -25,7 +25,7 @@ Release verification:
 
 ```bash
 make wheel
-python -m pytest -o addopts='' -q scripts/test_release_tooling.py
+python -m pytest -o addopts='' -q scripts/test_release_*.py
 docker compose config --quiet
 docker build --check .
 sh -n scripts/container-entrypoint.sh

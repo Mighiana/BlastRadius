@@ -55,7 +55,7 @@ legacy: install-core
 
 test:
 	$(PY) -m pytest
-	$(PY) -m pytest -o addopts='' -q scripts/test_release_tooling.py
+	$(PY) -m pytest -o addopts='' -q scripts/test_release_*.py
 
 lint:
 	$(PY) -m ruff check blastradius app.py scripts

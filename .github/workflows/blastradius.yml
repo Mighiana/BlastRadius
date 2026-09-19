@@ -63,7 +63,7 @@ jobs:
             requirements-dev.txt
       - run: python -m pip install -e ".[server,ui,dev]" -r requirements.txt -r requirements-dev.txt
       - run: python -m pytest -q
-      - run: python -m pytest -o addopts='' -q scripts/test_release_tooling.py
+      - run: python -m pytest -o addopts='' -q scripts/test_release_*.py
       - run: make lint typecheck docs PY=python
       - name: Build installable wheel
         run: make wheel PY=python
