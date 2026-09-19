@@ -21,3 +21,16 @@ export function useResource<T>(url: string | null, schema: z.ZodType<T>) {
   }, [url, schema, revision]);
   return { ...(state.url === url && url ? state : { data: null, error: null, loading: !!url }), reload };
 }
+export function useAction() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const [notice, setNotice] = useState('');
+  async function run(action: () => Promise<void>, success = '') {
+    if (busy) return;
+    setBusy(true); setError(null); setNotice('');
+    try { await action(); setNotice(success); }
+    catch (err) { setError(err instanceof Error ? err : new Error('The request could not be completed.')); }
+    finally { setBusy(false); }
+  }
+  return { busy, error, notice, run };
+}

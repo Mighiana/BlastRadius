@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ApiError, mutate, reportSchema, request, safeBillingUrl, setCsrf } from './api';
-import { risky } from './test/fixtures';
+import { ApiError, mutate, projectSchema, reportSchema, request, safeGitHubUrl, setCsrf } from './api';
+import { project, risky } from './test/fixtures';
 
 describe('API security and contract', () => {
+  it('accepts new projects before an update timestamp exists', () => {
+    expect(projectSchema.parse({ ...project, updated_at: null }).updated_at).toBeNull();
+  });
   it.each([
     ['invalid_origin', 'BR_PUBLIC_URL', 0],
     ['insufficient_role', 'workspace role', 0],
@@ -47,11 +50,10 @@ describe('API security and contract', () => {
     expect(event).toHaveBeenCalledTimes(1);
     window.removeEventListener('br:session-refresh', event);
   });
-  it.each(['javascript:alert(1)', 'https://checkout.stripe.com.evil.test/x', 'https://evil.test', 'https://user:secret@billing.stripe.com/x', 'http://checkout.stripe.com', 'https://checkout.stripe.com:8443'])('rejects unsafe billing redirect %s', value => {
-    expect(() => safeBillingUrl(value)).toThrow();
+  it.each(['javascript:alert(1)', 'https://github.com.evil.test/x', 'https://evil.test', 'https://user:secret@github.com/x', 'http://github.com', 'https://github.com:8443'])('rejects unsafe GitHub link %s', value => {
+    expect(() => safeGitHubUrl(value)).toThrow();
   });
-  it('accepts only exact HTTPS Stripe checkout and portal hosts', () => {
-    expect(safeBillingUrl('https://checkout.stripe.com/c/pay/test')).toBe('https://checkout.stripe.com/c/pay/test');
-    expect(safeBillingUrl('https://billing.stripe.com/p/session/test')).toBe('https://billing.stripe.com/p/session/test');
+  it('accepts only exact HTTPS GitHub links', () => {
+    expect(safeGitHubUrl('https://github.com/apps/blastradius/installations/new')).toBe('https://github.com/apps/blastradius/installations/new');
   });
 });

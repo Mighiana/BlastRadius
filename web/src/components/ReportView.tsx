@@ -8,7 +8,9 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
   const [side, setSide] = useState<'before' | 'after'>('after');
   const [error, setError] = useState<Error | null>(null);
   const [exporting, setExporting] = useState(false);
+  const sarifAvailable = !!report.reports.sarif;
   async function exportAs(format: 'json' | 'markdown' | 'sarif') {
+    if (format === 'sarif' && !sarifAvailable) return;
     setError(null); setExporting(true);
     try {
       if (jobId) await exportReport(jobId, format);
@@ -80,7 +82,8 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
     </section>
     <section className="panel export-panel" id="report-export"><div><p className="eyebrow">TAKE THE EVIDENCE WITH YOU</p><h2>Export this analysis</h2></div>
       <div className="button-row">{(['json', 'markdown', 'sarif'] as const).map(format =>
-        <button className="button secondary" key={format} disabled={exporting} onClick={() => { void exportAs(format); }}><Download size={16} aria-hidden="true" />{format.toUpperCase()}</button>)}</div>
+        <button className="button secondary" key={format} disabled={exporting || (format === 'sarif' && !sarifAvailable)} aria-describedby={format === 'sarif' && !sarifAvailable ? 'sarif-restriction' : undefined} onClick={() => { void exportAs(format); }}><Download size={16} aria-hidden="true" />{format.toUpperCase()}</button>)}</div>
+      {!sarifAvailable && <p className="notice" id="sarif-restriction">Saved SARIF exports require an operator-granted Pro, Team or Enterprise plan. JSON and Markdown are available on Free. Public demo SARIF remains available.</p>}
       <ErrorNotice error={error} />
     </section>
   </div>;

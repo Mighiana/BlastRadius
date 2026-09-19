@@ -46,34 +46,63 @@ export const reportSchema = z.object({
     })),
     patched_files: z.record(z.string(), z.string()), diff: z.string(), can_autofix: z.boolean(),
   }),
-  reports: z.object({ markdown: z.string(), sarif: z.record(z.string(), z.unknown()) }),
+  reports: z.object({ markdown: z.string(), sarif: z.record(z.string(), z.unknown()).optional() }),
   demo: z.object({
     scenario_id: z.string(), stage: z.enum(['safe', 'risky', 'remediated']),
     remediation_kind: z.string(), note: z.string(),
   }).optional(),
 });
-const usage = z.object({
-  period: z.string(), analyses: z.number(), plan: z.string(),
-  limits: z.object({ analyses_per_month: z.number(), projects: z.number(), members: z.number() }),
+export const limitsSchema = z.object({
+  analyses_per_month: z.number(), projects: z.number(), members: z.number(), retention_days: z.number(),
 });
+export const featuresSchema = z.object({
+  advanced_policy: z.boolean(), sarif: z.boolean(), team: z.boolean(), organization_policy: z.boolean(),
+  audit: z.boolean(), json: z.boolean(), markdown: z.boolean(), payments: z.literal(false),
+  priority_queue: z.boolean(), saml: z.boolean(),
+});
+export const usageSchema = z.object({
+  period: z.string(), analyses: z.number(), plan: z.string(), exports: z.number(),
+  projects: z.number(), members: z.number(), pending_invitations: z.number(),
+  limits: limitsSchema, features: featuresSchema,
+});
+export const roleSchema = z.enum(['owner', 'admin', 'developer', 'viewer']);
 const organization = z.object({
-  id: z.string(), name: z.string(), role: z.enum(['owner', 'member', 'viewer']), plan: z.string(), usage,
+  id: z.string(), name: z.string(), role: roleSchema, plan: z.string(), usage: usageSchema,
 });
 export const sessionSchema = z.object({
   authenticated: z.boolean(),
-  user: z.object({ id: z.string(), name: z.string(), email: z.string() }).nullable(),
+  user: z.object({ id: z.string(), name: z.string(), email: z.string(), email_verified: z.boolean(), created_at: z.number() }).nullable(),
   organizations: z.array(organization), csrf_token: z.string(),
   auth: z.object({ enabled: z.boolean(), mode: z.enum(['disabled', 'demo', 'oidc']), public_url: z.string().url(), login_url: z.string().nullable() }),
-  billing: z.object({ enabled: z.boolean(), test_mode: z.boolean() }),
+  billing: z.object({ enabled: z.literal(false), mode: z.literal('commercial_beta') }),
 });
 export const projectSchema = z.object({
   id: z.string(), organization_id: z.string(), name: z.string(), created_at: z.number(),
+  description: z.string(), repository: z.string(), repository_provider: z.enum(['manual', 'github']),
+  default_branch: z.string(), environment: z.string(), terraform_root: z.string(),
+  archived_at: z.number().nullable(), updated_at: z.number().nullable(),
+});
+export const policySchema = z.object({
+  version: z.literal(1),
+  gate: z.object({ block_new_critical_paths: z.boolean(), block_new_sensitive_exposure: z.boolean(), block_public_admin_ports: z.boolean() }),
+  allowed: z.object({ public_https: z.boolean() }),
+  thresholds: z.object({ minimum_security_score: z.number().int().min(0).max(100).nullable() }),
+});
+export const policySnapshotSchema = z.object({
+  source: z.string(), version: z.number(), rules: policySchema.nullable(),
+});
+export const policyResponseSchema = z.object({
+  policy: policySchema.nullable(), version: z.number(), effective: policySnapshotSchema.optional(),
 });
 export const jobSchema = z.object({
   id: z.string(), project_id: z.string(), organization_id: z.string(),
   base_label: z.string(), candidate_label: z.string(), created_at: z.number(),
   started_at: z.number().nullable(), completed_at: z.number().nullable(),
   status: z.enum(['queued', 'running', 'succeeded', 'failed']), error: z.string().nullable(),
+  input_type: z.enum(['hcl', 'plan', 'github']).nullable(),
+  base_ref: z.string().nullable(), candidate_ref: z.string().nullable(),
+  base_sha: z.string().nullable(), candidate_sha: z.string().nullable(),
+  decision: z.string().nullable(), policy_snapshot: policySnapshotSchema.nullable(),
   result: reportSchema.nullable().optional(),
   summary: z.object({ decision: z.string(), score, verdict: z.string() }).optional(),
 });
@@ -82,8 +111,50 @@ export const scenariosSchema = z.object({
     id: z.string(), title: z.string(), root_cause: z.string(), change: z.string(), stages: z.array(z.string()),
   })),
 });
-export const billingSchema = z.object({
-  enabled: z.boolean(), test_mode: z.boolean(), plan: z.string(), subscription_status: z.string(), usage,
+export const plansSchema = z.object({
+  payments_enabled: z.literal(false), mode: z.literal('commercial_beta'),
+  plans: z.array(z.object({
+    code: z.string(), monthly_price_usd: z.number().nullable(), price_status: z.string(),
+    assignment: z.enum(['signup', 'operator_beta']), limits: limitsSchema, features: featuresSchema, configurable: z.boolean(),
+  })),
+});
+export const projectsSchema = z.object({ projects: z.array(projectSchema) });
+export const historySchema = z.object({ analyses: z.array(jobSchema), total: z.number(), limit: z.number(), offset: z.number() });
+export const sessionsSchema = z.object({ sessions: z.array(z.object({
+  id: z.string(), created_at: z.number().nullable(), expires_at: z.number(), current: z.boolean(),
+})) });
+export const membersSchema = z.object({ members: z.array(z.object({
+  user_id: z.string(), name: z.string(), email: z.string(), role: roleSchema,
+})) });
+const invitationSchema = z.object({
+  id: z.string(), organization_id: z.string(), email: z.string(), role: roleSchema,
+  created_at: z.number(), expires_at: z.number(), revoked_at: z.number().nullable(), accepted_at: z.number().nullable(),
+});
+export const invitationsSchema = z.object({ invitations: z.array(invitationSchema) });
+export const createdInvitationSchema = invitationSchema.extend({ invitation_url: z.string().url(), delivery: z.literal('manual') });
+export const acceptedInvitationSchema = z.object({ organization_id: z.string(), role: roleSchema });
+export const auditSchema = z.object({ events: z.array(z.object({
+  id: z.string(), actor: z.string().nullable(), action: z.string(), target_id: z.string().nullable(),
+  details: z.record(z.string(), z.unknown()), created_at: z.number(),
+})) });
+export const githubConfigSchema = z.object({
+  configured: z.boolean(), available: z.boolean(), mode: z.literal('operator_registration'), self_service: z.literal(false),
+  app_slug: z.string().nullable(), installation_url: z.string().nullable(), reason: z.string(),
+  permissions: z.record(z.string(), z.string()),
+});
+export const installationsSchema = z.object({ installations: z.array(z.object({
+  id: z.number().int(), account_id: z.number().int(), account_login: z.string(), status: z.string(), verified_at: z.number(),
+})) });
+export const githubProjectSchema = z.object({
+  connection: z.object({
+    id: z.string(), installation_id: z.number().int(), repository_id: z.number().int(),
+    full_name: z.string(), status: z.enum(['active', 'revoked', 'disconnected']), created_at: z.number(),
+  }).nullable(),
+  latest_run: z.object({
+    id: z.string(), analysis_id: z.string().nullable(), pull_number: z.number().int(),
+    base_sha: z.string(), head_sha: z.string(), base_ref: z.string(), head_ref: z.string(),
+    head_repository_id: z.number().int(), status: z.string(), error: z.string().nullable(), check_id: z.number().int().nullable(),
+  }).nullable(),
 });
 export type Report = z.infer<typeof reportSchema>;
 export type Snapshot = z.infer<typeof snapshot>;
@@ -92,6 +163,10 @@ export type Session = z.infer<typeof sessionSchema>;
 export type Organization = z.infer<typeof organization>;
 export type Job = z.infer<typeof jobSchema>;
 export type Project = z.infer<typeof projectSchema>;
+export type Policy = z.infer<typeof policySchema>;
+export type Role = z.infer<typeof roleSchema>;
+export function canManage(role?: Role) { return role === 'owner' || role === 'admin'; }
+export function canAnalyze(role?: Role) { return canManage(role) || role === 'developer'; }
 export type Stage = 'safe' | 'risky' | 'remediated';
 export type AnalysisInput = {
   project_id: string; base_label: string; candidate_label: string;
@@ -103,8 +178,17 @@ const errorMessages: Record<string, string> = {
   invalid_origin: 'This address does not match the server’s trusted origin. Ask the operator to set BR_PUBLIC_URL to this site’s exact origin, including scheme and port, then restart the service.',
   insufficient_role: 'Your workspace role does not allow this action. Ask a workspace owner for access.',
   organization_limit_exceeded: 'You already own the maximum of five workspaces. Use an existing workspace.',
-  use_billing_portal: 'A subscription already exists. Use the billing portal to manage it.',
-  billing_customer_missing: 'No billing customer exists yet. Start with a test checkout.',
+  invitation_unavailable: 'This invitation is unavailable. Sign in with the verified email it was sent to, or ask a workspace manager for a new link.',
+  last_owner: 'The last owner cannot be removed or demoted. Promote another member first.',
+  sarif_not_entitled: 'Saved SARIF exports require an operator-granted Pro, Team or Enterprise plan. Public demo exports remain available.',
+  advanced_policy_not_entitled: 'Project policy editing requires an operator-granted Pro, Team or Enterprise plan.',
+  organization_policy_not_entitled: 'Workspace policies require Team or Enterprise.',
+  team_not_entitled: 'Invitations and role changes require Team or Enterprise.',
+  audit_not_entitled: 'Audit visibility requires Team or Enterprise.',
+  project_archived: 'Restore this project before starting a new analysis.',
+  github_not_configured: 'The operator has not configured GitHub App credentials. Uploads and public demos remain available.',
+  github_connection_unavailable: 'This connection is unavailable. Check installation status and restore archived projects first.',
+  github_repository_unavailable: 'The GitHub App could not verify access to this repository. Ask the operator to check installation permissions.',
   analysis_timeout: 'The analysis exceeded its time limit. Try a smaller Terraform scope.',
   resource_limit_exceeded: 'The input exceeds the resource limit. Split it into smaller scopes.',
   invalid_analysis_input: 'The engine could not analyze this input. Check your HCL or Terraform plan.',
@@ -165,7 +249,7 @@ export async function request<T>(url: string, schema: z.ZodType<T>, options?: Re
   if (!parsed.success) throw new Error('The API response is incompatible with this app. Please refresh or contact the operator.');
   return parsed.data;
 }
-export async function mutate(url: string, method: 'POST' | 'DELETE', body?: unknown) {
+export async function mutate(url: string, method: 'POST' | 'DELETE' | 'PATCH' | 'PUT', body?: unknown) {
   await response(url, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 export function download(content: BlobPart, filename: string, type = 'application/json') {
@@ -178,10 +262,10 @@ export async function exportReport(id: string, format: 'json' | 'markdown' | 'sa
   const res = await response(`/api/analyses/${encodeURIComponent(id)}/report?format=${format}`);
   download(await res.blob(), `blastradius.${format === 'markdown' ? 'md' : format}`);
 }
-export function safeBillingUrl(value: string) {
+export function safeGitHubUrl(value: string) {
   const url = new URL(value);
-  if (url.protocol !== 'https:' || !['checkout.stripe.com', 'billing.stripe.com'].includes(url.hostname) || url.port || url.username || url.password) {
-    throw new Error('The billing redirect was rejected. Please contact the operator.');
+  if (url.protocol !== 'https:' || url.hostname !== 'github.com' || url.port || url.username || url.password) {
+    throw new Error('The GitHub link was rejected. Please contact the operator.');
   }
   return url.href;
 }

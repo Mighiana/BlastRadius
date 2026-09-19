@@ -4,19 +4,11 @@ import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import { SessionProvider } from '../session';
 import type { Session } from '../api';
-import { session } from '../test/fixtures';
+import { account, project, queued, session } from '../test/fixtures';
 import Workspace from './Workspace';
 
 const viewer: Session = {
-  ...session, authenticated: true, user: { id: 'reader', name: 'Read Only', email: '' },
-  organizations: [{ id: 'org', name: 'Example', role: 'viewer', plan: 'free', usage: {
-    period: '2026-09', plan: 'free', analyses: 1, limits: { analyses_per_month: 20, projects: 3, members: 1 },
-  } }],
-};
-const project = { id: 'project', organization_id: 'org', name: 'Infrastructure', created_at: 1 };
-const queued = {
-  id: 'job', project_id: 'project', organization_id: 'org', base_label: 'before', candidate_label: 'after',
-  created_at: 1, started_at: null, completed_at: null, status: 'queued', error: null, result: null,
+  ...account, organizations: account.organizations.map(org => ({ ...org, role: 'viewer' })),
 };
 function mount(route = '/dashboard') {
   return render(<MemoryRouter initialEntries={[route]}><SessionProvider><Workspace /></SessionProvider></MemoryRouter>);
@@ -44,7 +36,7 @@ describe('workspace roles and polling', () => {
       }
       const body = url === '/api/me' ? current
         : url === '/api/projects' ? { ...project, organization_id: 'new-org' }
-          : url.startsWith('/api/projects?') ? { projects: [] } : { analyses: [] };
+          : url.startsWith('/api/projects?') ? { projects: [] } : url === '/api/projects/project' ? { ...project, organization_id: 'new-org' } : { analyses: [], total: 0, limit: 50, offset: 0 };
       return new Response(JSON.stringify(body), { status: options?.method === 'POST' ? 201 : 200 });
     });
     vi.stubGlobal('fetch', fetcher);
@@ -62,7 +54,7 @@ describe('workspace roles and polling', () => {
   });
   it('keeps a viewer read-only instead of presenting unusable mutation controls', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(
-      url === '/api/me' ? viewer : url.startsWith('/api/projects?') ? { projects: [project] } : { analyses: [queued] },
+      url === '/api/me' ? viewer : url.startsWith('/api/projects?') ? { projects: [project] } : { analyses: [queued], total: 1, limit: 50, offset: 0 },
     ))));
     mount();
     expect(await screen.findByText(/Viewer access/)).toBeVisible();
@@ -76,7 +68,7 @@ describe('workspace roles and polling', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       const body = url === '/api/me' ? viewer
         : url.startsWith('/api/projects?') ? { projects: [project] }
-          : url.startsWith('/api/projects/') ? { analyses: [queued] }
+          : url === '/api/projects/project' ? project : url.startsWith('/api/projects/') ? { analyses: [queued], total: 1, limit: 50, offset: 0 }
             : ++polls === 1 ? queued : { ...queued, status: 'failed', error: '/home/operator/private/job.py Traceback' };
       return new Response(JSON.stringify(body));
     }));

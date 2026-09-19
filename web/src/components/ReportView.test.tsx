@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ReportView } from './ReportView';
 import { risky, safe } from '../test/fixtures';
 import { validateFiles, validatePlan } from './AnalysisForm';
@@ -44,6 +44,34 @@ describe('report evidence and graph', () => {
     expect(screen.getByText('SAFE TO MERGE')).toBeVisible();
     expect(screen.getAllByText('85')).toHaveLength(2);
     expect(screen.getByText(/does not prove safety/)).toBeVisible();
+  });
+  it('disables persisted SARIF when stripped by the server entitlement gate', () => {
+    render(<ReportView jobId="saved" report={{ ...risky, reports: { markdown: risky.reports.markdown } }} />);
+    expect(screen.getByRole('button', { name: 'SARIF' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'JSON' })).toBeEnabled();
+    expect(screen.getByText(/Saved SARIF exports require/)).toBeInTheDocument();
+  });
+  it('enables real SARIF for an entitled persisted report and public demo', () => {
+    const { rerender } = render(<ReportView report={risky} />);
+    expect(screen.getByRole('button', { name: 'SARIF' })).toBeEnabled();
+    rerender(<ReportView report={risky} jobId="saved" />);
+    expect(screen.getByRole('button', { name: 'SARIF' })).toBeEnabled();
+  });
+  it('inspects actual node evidence and bounds zoom with a reset', async () => {
+    Element.prototype.scrollTo = vi.fn();
+    Element.prototype.scrollBy = vi.fn();
+    render(<ReportView report={risky} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Inspect node Customer Data' }));
+    const inspector = screen.getByRole('region', { name: 'Selected node evidence' });
+    expect(within(inspector).getByText('acl = "public-read"')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Inspect node Customer Data' })).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+    expect(screen.getByRole('list', { name: 'Attack path' })).toHaveStyle({ width: '120%' });
+    await userEvent.click(screen.getByRole('button', { name: 'Pan graph right' }));
+    expect(Element.prototype.scrollBy).toHaveBeenCalledWith({ left: 200 });
+    await userEvent.click(screen.getByRole('button', { name: 'Fit / reset' }));
+    expect(screen.getByRole('list', { name: 'Attack path' })).toHaveStyle({ width: '100%' });
+    expect(screen.getByRole('button', { name: 'Pan graph right' })).toBeDisabled();
   });
 });
 describe('upload guardrails', () => {

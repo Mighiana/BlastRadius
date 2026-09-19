@@ -3,12 +3,14 @@ import { request, sessionSchema, setCsrf, type Session } from './api';
 
 const Context = createContext<{
   session: Session | null; error: Error | null; loading: boolean; originMismatch: boolean; refresh: () => Promise<void>;
+  organizationId: string; selectOrganization: (id: string) => void;
 } | null>(null);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [loading, setLoading] = useState(true);
+  const [organizationId, selectOrganization] = useState('');
   const pending = useRef<Promise<void> | null>(null);
   const refresh = useCallback(() => {
     if (pending.current) return pending.current;
@@ -34,10 +36,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('br:session-refresh', listener);
   }, [refresh]);
   const originMismatch = !!session && new URL(session.auth.public_url).origin !== window.location.origin;
-  return <Context value={{ session, error, loading, originMismatch, refresh }}>{children}</Context>;
+  return <Context value={{ session, error, loading, originMismatch, refresh, organizationId, selectOrganization }}>{children}</Context>;
 }
 export function useSession() {
   const context = useContext(Context);
   if (!context) throw new Error('Session provider missing.');
   return context;
+}
+export function useOrganization() {
+  const { session, organizationId, selectOrganization } = useSession();
+  return { organization: session?.organizations.find(org => org.id === organizationId) ?? session?.organizations[0], selectOrganization };
 }

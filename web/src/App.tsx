@@ -4,8 +4,14 @@ import { ArrowUpRight, GitBranch, Menu, Radar, X } from 'lucide-react';
 import Landing from './pages/Landing';
 import Demo from './pages/Demo';
 import Workspace from './pages/Workspace';
-import Billing from './pages/Billing';
+import Billing, { Pricing } from './pages/Billing';
 import Guide from './pages/Guide';
+import Account from './pages/Account';
+import Settings from './pages/Settings';
+import Team from './pages/Team';
+import Invitation from './pages/Invitation';
+import Integrations from './pages/Integrations';
+import Trust from './pages/Trust';
 import { mutate } from './api';
 import { useSession } from './session';
 import { ErrorNotice } from './components/UI';
@@ -45,8 +51,9 @@ function Header() {
   return <header className="site-header"><div className="container header-inner"><Link to="/" className="brand" aria-label="BlastRadius home"><span className="brand-icon"><Radar size={23} strokeWidth={1.8} /></span>BlastRadius</Link>
     <button className="icon-button mobile-menu" aria-label={open ? 'Close navigation' : 'Open navigation'} aria-expanded={open} aria-controls="main-navigation" onClick={() => setOpen(!open)}>{open ? <X /> : <Menu />}</button>
     <nav className={open ? 'main-nav is-open' : 'main-nav'} id="main-navigation" aria-label="Main navigation" onKeyDown={e => { if (e.key === 'Escape') setOpen(false); }}>
-      <NavLink to="/demo">Product demo</NavLink><NavLink to="/guide">Documentation</NavLink><NavLink to="/pricing">Pricing</NavLink>
+      <NavLink to="/demo">Product demo</NavLink><NavLink to="/guide">Documentation</NavLink><NavLink to="/pricing">Pricing</NavLink><NavLink to="/security">Security</NavLink>
       {session?.authenticated && <NavLink to="/history">History</NavLink>}
+      {!session?.authenticated && <NavLink to="/account">Sign in</NavLink>}
       <NavLink className="nav-cta" to="/dashboard">{session?.authenticated ? 'Workspace' : 'Get started'}<ArrowUpRight size={15} aria-hidden="true" /></NavLink>
       {session?.authenticated && <button className="text-button" disabled={busy || originMismatch} title={originMismatch ? 'Sign-out requires the configured application origin.' : undefined} onClick={() => { void logout(); }}>{busy ? 'Signing out…' : 'Sign out'}</button>}
     </nav>
@@ -56,8 +63,11 @@ export default function App() {
   return <><a className="skip-link" href="#main">Skip to content</a><Header /><RouteFocus /><main id="main" tabIndex={-1}>
     <ErrorBoundary><Routes><Route path="/" element={<Landing />} /><Route path="/demo" element={<Demo />} />
       <Route path="/dashboard" element={<Workspace />} /><Route path="/history" element={<Workspace />} />
-      <Route path="/pricing" element={<Billing publicPage />} /><Route path="/billing" element={<Billing />} /><Route path="/guide" element={<Guide />} />
+      <Route path="/pricing" element={<Pricing />} /><Route path="/billing" element={<Billing />} /><Route path="/guide" element={<Guide />} />
+      <Route path="/account" element={<Account />} /><Route path="/settings" element={<Settings />} /><Route path="/team" element={<Team />} />
+      <Route path="/invitations/accept" element={<Invitation />} /><Route path="/integrations" element={<Integrations />} />
+      <Route path="/security" element={<Trust kind="security" />} /><Route path="/privacy" element={<Trust kind="privacy" />} /><Route path="/terms" element={<Trust kind="terms" />} />
       <Route path="*" element={<div className="container page"><h1>Page not found</h1><p>This route does not exist.</p><Link to="/" className="button primary">Back to home</Link></div>} />
     </Routes></ErrorBoundary>
-  </main><footer className="site-footer"><div className="container footer-grid"><div><Link className="brand" to="/"><Radar size={23} aria-hidden="true" />BlastRadius</Link><p>Know the path before you merge.</p><span className="footnote">Static evidence. Explicit limitations.</span></div><nav aria-label="Footer navigation"><Link to="/demo">Product demo</Link><Link to="/guide">Documentation</Link><Link to="/pricing">Plans</Link><Link to="/guide#privacy">Privacy & security</Link><a href="https://github.com/Mighiana/BlastRadius" target="_blank" rel="noreferrer"><GitBranch size={15} aria-hidden="true" />GitHub<ArrowUpRight size={14} aria-hidden="true" /></a></nav></div><div className="container footer-bottom"><span>Built for infrastructure reviewers.</span><span>Billing: test mode only</span></div></footer></>;
+  </main><footer className="site-footer"><div className="container footer-grid"><div><Link className="brand" to="/"><Radar size={23} aria-hidden="true" />BlastRadius</Link><p>Know the path before you merge.</p><span className="footnote">Static evidence. Explicit limitations.</span></div><nav aria-label="Footer navigation"><Link to="/demo">Product demo</Link><Link to="/guide">Documentation</Link><Link to="/pricing">Plans</Link><Link to="/security">Security</Link><Link to="/privacy">Privacy</Link><Link to="/terms">Terms</Link><a href="https://github.com/Mighiana/BlastRadius" target="_blank" rel="noreferrer"><GitBranch size={15} aria-hidden="true" />GitHub<ArrowUpRight size={14} aria-hidden="true" /></a></nav></div><div className="container footer-bottom"><span>Built for infrastructure reviewers.</span><span>Commercial beta · Payments disabled</span></div></footer></>;
 }

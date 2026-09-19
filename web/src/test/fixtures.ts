@@ -1,8 +1,23 @@
-import type { Report, Session } from '../api';
+import type { Job, Organization, Project, Report, Session } from '../api';
 
 export const session: Session = {
   authenticated: false, user: null, organizations: [], csrf_token: 'test-csrf',
-  auth: { enabled: true, mode: 'demo', public_url: window.location.origin, login_url: null }, billing: { enabled: false, test_mode: true },
+  auth: { enabled: true, mode: 'demo', public_url: window.location.origin, login_url: null }, billing: { enabled: false, mode: 'commercial_beta' },
+};
+export const organization: Organization = {
+  id: 'org', name: 'Example', role: 'owner', plan: 'free', usage: {
+    period: '2026-09', plan: 'free', analyses: 1, exports: 0, projects: 0, members: 1, pending_invitations: 0,
+    limits: { analyses_per_month: 25, projects: 1, members: 1, retention_days: 7 },
+    features: { advanced_policy: false, sarif: false, team: false, organization_policy: false, audit: false, json: true, markdown: true, payments: false, priority_queue: false, saml: false },
+  },
+};
+export const account: Session = { ...session, authenticated: true, user: { id: 'owner', name: 'Owner', email: 'owner@example.test', email_verified: true, created_at: 1 }, organizations: [organization] };
+export const project: Project = { id: 'project', organization_id: 'org', name: 'Infrastructure', created_at: 1, updated_at: null, description: '', repository: '', repository_provider: 'manual', default_branch: 'main', environment: '', terraform_root: '.', archived_at: null };
+export const queued: Job = {
+  id: 'job', project_id: 'project', organization_id: 'org', base_label: 'before', candidate_label: 'after',
+  created_at: 1, started_at: null, completed_at: null, status: 'queued', error: null, result: null,
+  input_type: 'hcl', base_ref: null, candidate_ref: null, base_sha: null, candidate_sha: null,
+  decision: null, policy_snapshot: { source: 'default', version: 1, rules: null },
 };
 const edges = [{
   source: 'INTERNET', target: 'aws_s3_bucket.customer_data', relationship: 'public access',

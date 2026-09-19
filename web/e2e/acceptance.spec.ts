@@ -1,11 +1,13 @@
 import { readFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { test, expect, type Page } from '@playwright/test';
-import { reportSchema } from '../src/api';
+import { reportSchema, sessionSchema } from '../src/api';
 
 const widths = [320, 375, 430, 768, 1024, 1440, 1920];
 const pageHeadings = {
   'Product demo': 'A small diff. A new way in.',
-  Pricing: 'Start small. Review with your team.',
+  Pricing: 'A plan for every review.',
   Documentation: 'From Terraform to an informed decision.',
   'Get started': 'Know what this change opens.',
 };
@@ -38,9 +40,10 @@ async function navigate(page: Page, name: keyof typeof pageHeadings) {
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name, exact: true }).click();
   await expect(page.getByRole('heading', { level: 1, name: pageHeadings[name], exact: true })).toBeVisible();
 }
-async function exports(page: Page, prefix: string) {
+async function exports(page: Page, prefix: string, sarif = true) {
   for (const [label, suffix] of [['JSON', 'json'], ['MARKDOWN', 'md'], ['SARIF', 'sarif']]) {
     const button = page.getByRole('button', { name: label, exact: true });
+    if (label === 'SARIF' && !sarif) { await expect(button).toBeDisabled(); continue; }
     expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     const downloaded = page.waitForEvent('download');
     await button.click();
@@ -51,6 +54,14 @@ async function exports(page: Page, prefix: string) {
     else if (suffix === 'sarif') expect(JSON.parse(content).version).toBe('2.1.0');
     else expect(reportSchema.parse(JSON.parse(content)).schema_version).toBe(1);
   }
+}
+async function assignPlan(organizationId: string, plan: 'pro' | 'team') {
+  const root = fileURLToPath(new URL('../../', import.meta.url));
+  const database = await readFile(new URL('../.e2e/current-database', import.meta.url), 'utf8');
+  if (!database.startsWith(`sqlite:///${root}web/.e2e/run-`) || !database.endsWith('/test.db')) throw new Error('Refusing to grant a plan outside the isolated E2E database');
+  execFileSync(`${root}.venv/bin/python`, ['-m', 'blastradius.server.admin', 'assign-plan', organizationId, plan], {
+    cwd: root, env: { ...process.env, BR_ENV: 'test', BR_ADMIN_ENABLED: 'true', BR_DATABASE_URL: database, BR_PUBLIC_URL: 'http://127.0.0.1:5173' },
+  });
 }
 for (const width of widths) {
   test.describe(`${width}px responsive acceptance`, () => {
@@ -89,6 +100,12 @@ for (const width of widths) {
       }
       await exports(page, 'blastradius-demo');
       await navigate(page, 'Pricing'); await contained(page);
+      await expect(page.getByRole('button', { name: 'Coming soon' })).toHaveCount(3);
+      for (const route of ['/security', '/privacy', '/terms']) {
+        await page.goto(route);
+        await expect(page.getByText('LEGAL REVIEW REQUIRED BEFORE COMMERCIAL LAUNCH')).toBeVisible();
+        await contained(page);
+      }
       await navigate(page, 'Documentation'); await contained(page);
       if (width < 768) {
         await page.getByRole('button', { name: 'Open navigation' }).click();
@@ -133,7 +150,8 @@ for (const width of widths) {
       await page.getByRole('button', { name: 'Analyze change' }).click();
       await expect(page.getByLabel('Analysis decision').getByText('SAFE TO MERGE', { exact: true })).toBeVisible();
       await contained(page);
-      await exports(page, 'blastradius');
+      await exports(page, 'blastradius', false);
+      await expect(page.getByText(/Saved SARIF exports require/)).toBeVisible();
       await page.getByRole('button', { name: 'Plan JSON', exact: true }).click();
       const plan = await readFile(new URL('../../examples/plans/ssh_open_plan.json', import.meta.url), 'utf8');
       await page.getByLabel('Plan JSON', { exact: true }).fill(plan);
@@ -148,8 +166,41 @@ for (const width of widths) {
       await expect(page.getByRole('button', { name: 'Delete analysis plan-before to plan-after' })).toHaveCount(0);
       await page.getByRole('button', { name: /baseline-with-a-long-resource-name.*candidate/ }).first().click();
       await expect(page.getByLabel('Analysis decision')).toBeVisible();
-      await page.getByRole('link', { name: 'Usage & billing' }).click();
-      await expect(page.getByText('Stripe test billing is not configured.', { exact: false })).toBeVisible();
+      const workspaceNav = page.getByRole('navigation', { name: 'Workspace navigation' });
+      await workspaceNav.getByRole('link', { name: 'Settings & policy' }).click();
+      await expect(page.getByLabel('Project name')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Save policy', exact: true })).toHaveCount(0);
+      await contained(page);
+      await page.getByRole('button', { name: 'Archive project', exact: true }).click();
+      await page.getByRole('button', { name: 'Confirm archive', exact: true }).click();
+      await expect(page.getByRole('button', { name: 'Restore project', exact: true })).toBeVisible();
+      await workspaceNav.getByRole('link', { name: 'Analyze', exact: true }).click();
+      await expect(page.getByText(/This project is archived/)).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Analyze change' })).toHaveCount(0);
+      await workspaceNav.getByRole('link', { name: 'Settings & policy' }).click();
+      await page.getByRole('button', { name: 'Restore project', exact: true }).click();
+      await page.getByRole('button', { name: 'Confirm restore', exact: true }).click();
+      await expect(page.getByRole('button', { name: 'Archive project', exact: true })).toBeVisible();
+      await workspaceNav.getByRole('link', { name: 'History', exact: true }).click();
+      await page.getByLabel('Status', { exact: true }).selectOption('succeeded');
+      await page.getByLabel('Decision', { exact: true }).selectOption('SAFE TO MERGE');
+      await page.getByLabel('Input type', { exact: true }).selectOption('hcl');
+      await page.getByRole('button', { name: 'Apply filters' }).click();
+      await expect(page.getByText('Page 1 · 1 results')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Next', exact: true })).toBeDisabled();
+      await contained(page);
+      await workspaceNav.getByRole('link', { name: 'Team', exact: true }).click();
+      await expect(page.getByText(/Invitations and role changes require Team/)).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Create invitation' })).toHaveCount(0);
+      await contained(page);
+      await workspaceNav.getByRole('link', { name: 'GitHub', exact: true }).click();
+      await expect(page.getByText(/GitHub is unavailable/)).toBeVisible();
+      await contained(page);
+      await workspaceNav.getByRole('link', { name: 'Account', exact: true }).click();
+      await expect(page.getByRole('button', { name: 'Sign out this session' })).toBeVisible();
+      await contained(page);
+      await workspaceNav.getByRole('link', { name: 'Usage & plans' }).click();
+      await expect(page.getByText('Payments are disabled.', { exact: false })).toBeVisible();
       await expect(page.getByRole('progressbar', { name: 'Monthly analysis usage' })).toHaveAttribute('value', '3');
       await contained(page);
       if (width < 768) await page.getByRole('button', { name: 'Open navigation' }).click();
@@ -167,6 +218,47 @@ test('alternate origin offers an actionable configuration message instead of a b
   await expect(page.getByRole('button', { name: 'Create local demo workspace' })).toHaveCount(0);
   await page.getByRole('link', { name: 'Try the public demo', exact: true }).click();
   await expect(page.getByLabel('Analysis decision')).toBeVisible();
+});
+test('operator-granted Pro exports and Team policies/invitations use real workspace APIs', async ({ page }) => {
+  await page.goto('/dashboard');
+  await page.getByRole('button', { name: 'Create local demo workspace' }).click();
+  await page.getByLabel('Project name').fill('Beta entitlements');
+  await page.getByRole('button', { name: 'Create project', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Analyze change' })).toBeVisible();
+  const identity = sessionSchema.parse(await (await page.request.get('/api/me')).json());
+  const org = identity.organizations[0];
+  if (!org) throw new Error('Demo onboarding did not return a workspace');
+  await assignPlan(org.id, 'pro');
+  await page.reload();
+  await page.getByRole('button', { name: 'Plan JSON', exact: true }).click();
+  await page.getByLabel('Plan JSON', { exact: true }).fill(await readFile(new URL('../../examples/plans/ssh_open_plan.json', import.meta.url), 'utf8'));
+  await page.getByRole('button', { name: 'Analyze change' }).click();
+  await expect(page.getByLabel('Analysis decision').getByText('BLOCK CHANGE', { exact: true })).toBeVisible();
+  await exports(page, 'blastradius');
+  await assignPlan(org.id, 'team');
+  await page.reload();
+  const navigation = page.getByRole('navigation', { name: 'Workspace navigation' });
+  await navigation.getByRole('link', { name: 'Settings & policy' }).click();
+  const projectPolicy = page.locator('section.panel').filter({ has: page.getByRole('heading', { name: 'Project policy', exact: true }) });
+  await projectPolicy.getByLabel('Minimum security score (blank for no threshold)').fill('80');
+  await projectPolicy.getByRole('button', { name: 'Save policy', exact: true }).click();
+  await expect(projectPolicy.getByText(/Stored version 1/)).toBeVisible();
+  await contained(page);
+  await navigation.getByRole('link', { name: 'Team', exact: true }).click();
+  await page.getByLabel('Invite email').fill('reviewer@example.test');
+  await page.getByLabel('Invitation role').selectOption('viewer');
+  await page.getByRole('button', { name: 'Create invitation' }).click();
+  const link = await page.getByLabel('One-time invitation link').inputValue();
+  expect(new URL(link).hash).toMatch(/^#token=[A-Za-z0-9_-]{43}$/);
+  await page.getByRole('button', { name: 'Dismiss link' }).click();
+  await page.getByRole('button', { name: 'Revoke invitation', exact: true }).click();
+  await expect(page.getByText(/viewer · Revoked/)).toBeVisible();
+  await expect(page.getByText(/Ownership protection/)).toBeVisible();
+  await contained(page);
+  await page.goto(link);
+  await expect(page.getByText('Demo identities cannot accept invitations.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Accept invitation' })).toBeDisabled();
+  await expect(page).not.toHaveURL(/#token=/);
 });
 test('invalid input is actionable and never looks like a SAFE result', async ({ page }) => {
   await page.goto('/dashboard');
