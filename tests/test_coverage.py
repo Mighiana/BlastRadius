@@ -24,6 +24,28 @@ def codes(config):
     return {d.code for d in config_diagnostics(config)}
 
 
+@pytest.mark.parametrize("source", [
+    'module "external" { source = "./module" }',
+    '''resource "aws_security_group" "web" {
+      ingress {
+        protocol = "tcp"
+        from_port = 22
+        to_port = 22
+        cidr_blocks = ["0.0.0.0/0"]
+      }
+    }''',
+], ids=["incomplete-module", "new-public-exposure"])
+def test_markdown_review_heading_cannot_claim_success(tmp_path, source):
+    (tmp_path / "main.tf").write_text(source)
+    before = analyze(build_graph(ParsedConfig()))
+    after = analyze(build_graph(parse_directory(tmp_path)))
+    diff = compare(before, after)
+    assert decide(diff).decision is Decision.REVIEW
+    report = build_report(diff)
+    assert report.splitlines()[2] == "\u26a0 REVIEW REQUIRED"
+    assert "PASSED" not in report and "\u2705" not in report
+
+
 def test_hcl_unexpanded_constructs_and_jsonencode_are_explicit(tmp_path):
     (tmp_path / "main.tf").write_text('''
 module "external" { source = "./module" }

@@ -122,8 +122,12 @@ def build_report(
 ) -> str:
     """Render the full PR comment as markdown-ish plain text."""
     decision = decision or decide(diff)
-    status = "PASSED" if decision.passed else "FAILED"
-    mark = "\u2705" if decision.passed else "\u274c"
+    status = {
+        Decision.SAFE: "PASSED",
+        Decision.REVIEW: "REVIEW REQUIRED",
+        Decision.BLOCK: "FAILED",
+    }[decision.decision]
+    mark = "\u26a0" if decision.decision is Decision.REVIEW else "\u2705" if decision.passed else "\u274c"
 
     lines = [TITLE, "", f"{mark} {status}", ""]
 
