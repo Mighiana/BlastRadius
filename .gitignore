@@ -11,6 +11,7 @@ __pycache__/
 .devin/config.local.json
 .env
 .env.*
+!.env.example
 .terraform/
 *.tfstate
 *.tfstate.*
@@ -22,3 +23,16 @@ examples/generated_fix/
 
 # Local scratch
 _preview.html
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+web/node_modules/
+web/dist/
+web/playwright-report/
+web/test-results/
+.local/
+*.db
+*.db-shm
+*.db-wal
+reports/

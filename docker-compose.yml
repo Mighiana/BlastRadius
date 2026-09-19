@@ -1,0 +1,53 @@
+name: blastradius
+
+services:
+  db:
+    image: postgres:16.15-bookworm@sha256:efedf3595f1d6f415c08568ba171029bf54052e754cc9f030e3f2412b21f3d67
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-blastradius}
+      POSTGRES_USER: ${POSTGRES_USER:-blastradius}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a local database password in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  app:
+    build: .
+    env_file: .env
+    ports:
+      - "127.0.0.1:${BLASTRADIUS_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - app-data:/app/.local
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  migrate:
+    profiles: [tools]
+    build: .
+    env_file: .env
+    command: [migrate]
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - app-data:/app/.local
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+volumes:
+  postgres-data:
+  app-data:
