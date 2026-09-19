@@ -1,30 +1,44 @@
 # Documentation
 
-Start with the [README](../README.md), [demo](demo.md) or [GitHub onboarding](github-actions.md).
+Start with [getting started](getting-started.md) or the
+[product overview](../README.md). The [readiness assessment](readiness.md)
+separates verified implementation, external configuration and launch blockers.
 
-| Need | Guide |
-|---|---|
-| Analyze a Terraform diff | [CLI and policy](cli.md) |
-| Understand component boundaries | [Architecture](architecture.md) |
-| Review product threats | [Threat model](threat-model.md) |
-| Build a deployment | [Deployment](deployment.md) |
-| Integrate the application work | [Release integration](release-integration.md) |
-| Assess verified scope and launch prerequisites | [Product readiness](readiness.md) |
-| Monitor and recover | [Operations](operations.md) |
-| Understand retained data | [Data lifecycle](data-lifecycle.md) |
-| Evaluate repository connection | [Future GitHub App](github-app-design.md) |
-| Understand coverage priorities | [Roadmap](roadmap.md) |
-| Contribute | [Contributor guide](../CONTRIBUTING.md) |
-| Report a vulnerability | [Security policy](../SECURITY.md) |
+| Topic requested by the product brief | Guide |
+| --- | --- |
+| Getting started | [Local application and CLI](getting-started.md) |
+| Architecture and schema | [Architecture](architecture.md) |
+| Security model | [AWS model and decision semantics](security-model.md) |
+| Supported resources | [Coverage, diagnostics and budgets](coverage.md) |
+| GitHub | [GitHub App setup](github.md), [Actions onboarding](github-actions.md) |
+| CLI | [Inputs, output formats and exits](cli.md) |
+| API | [Routes, configuration and errors](api.md) |
+| Policies | [Trusted policy and inheritance](policy.md) |
+| Reports | [Evidence and exports](reports.md), [sample report](sample-report.md) |
+| Deployment | [Containers, migration and ingress](deployment.md) |
+| Authentication | [OIDC, sessions, CSRF and email](auth.md) |
+| Organizations | [Workspaces, roles, invitations and projects](organizations.md) |
+| Pricing | [Plans, entitlements and operator grants](billing.md) |
+| Billing future | [Disabled payment boundary](billing-future.md) |
+| Limitations | [Product and model boundaries](limitations.md) |
+| Security | [Threat model](threat-model.md), [vulnerability reporting](../SECURITY.md) |
 
-## Commercial documents
+## Operating and contributing
+
+[Operations and administration](operations.md) · [Data lifecycle](data-lifecycle.md) ·
+[Frontend contract](frontend.md) · [Integration acceptance](release-integration.md) ·
+[Development environment](environment-development.md) ·
+[Test environment](environment-test.md) · [Production environment](environment-production.md) ·
+[Contributor guide](../CONTRIBUTING.md) · [Roadmap](roadmap.md)
+
+The [guided demo](demo.md) and [legacy Streamlit guide](legacy-demo.md) remain
+separate from the private application. The [GitHub App design](github-app-design.md)
+records historical design context; [github.md](github.md) is authoritative.
+
+## Legal review required
 
 [Privacy](privacy.md), [terms](terms.md), [billing terms](billing-terms.md) and
-[support](support.md) are **LEGAL REVIEW templates**. They are not a statement
-that a paid service exists, that a legal entity has been identified, or that
-retention and response promises have been implemented.
-
-The API, authentication, billing implementation, coverage, model, legacy demo and
-final readiness documents are maintained by their implementation owners.
-Follow those documents once integrated; release scaffolding must not invent
-their configuration contracts.
+[support](support.md) are **LEGAL REVIEW templates**. Before commercial launch,
+the operator must approve the legal entity, jurisdiction, support/security
+contacts, subprocessors, data processing terms, retention/deletion promises and
+incident-response obligations. Proposed paid plans do not activate payments.

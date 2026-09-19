@@ -153,7 +153,8 @@ their JSON with null new summaries/snapshot/version; no evidence is fabricated.
 Succeeded means the analysis ran, **not** that the gate passed.
 
 * `GET /api/projects/{id}/analyses` → `{analyses,total,limit,offset}`. Optional
-  `status`, `decision` (exact engine value), `input_type`, `branch` (candidate_ref),
+  `status`, `decision` (exact engine value), `input_type` (`hcl|plan|github`),
+  `branch` (candidate_ref),
   `since`/`until` (Unix seconds). Default limit 50, max 100. History uses summary
   without full result. Ordered by creation descending and ID.
 * `DELETE /api/analyses/{id}` → 204; owner/admin/developer; usage is not refunded.

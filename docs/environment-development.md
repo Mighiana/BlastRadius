@@ -27,7 +27,7 @@ Runtime contract:
 | Identity | Each local demo login provisions a disposable user; use OIDC for persistent identities |
 | Browser origin/static assets | Same-origin assets at `/app/web/dist` in container |
 | Scratch/output | Per-job temporary directory, cleaned on success and failure |
-| Billing | Disabled by default; no live keys |
+| Payments | Unavailable; no payment configuration enables them |
 | Limits | Small finite input/resource/job limits, not unlimited |
 
 Compose overrides the database, data directory and static root for the container.

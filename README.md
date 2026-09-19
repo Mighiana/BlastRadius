@@ -2,227 +2,141 @@
 
 **Your Terraform diff shows what changed. BlastRadius shows what became reachable.**
 
-Attack-path diff for Terraform pull requests. Compare a baseline and proposed
-change, see new modeled paths to sensitive resources, inspect Terraform evidence,
-and export a review report.
+Attack-path diff for Terraform pull requests.
 
-[Try the legacy demo](https://blastradius.streamlit.app/) ·
-[Install](#installation) · [GitHub check](#github-actions) ·
-[Demo script](docs/demo.md) · [Readiness](docs/readiness.md) · [Documentation](docs/index.md)
+BlastRadius compares Terraform snapshots, models supported AWS relationships,
+and explains new paths to sensitive resources with evidence. The commercial-beta
+application adds private workspaces, projects, persistent analyses, history,
+policies and GitHub PR checks around the existing Python engine.
 
-```bash
-python -m blastradius.cli --before examples/safe --after examples/vulnerable
-# BLOCK CHANGE · one new modeled critical path · exit 1 (expected)
-```
+[Get started](docs/getting-started.md) · [Documentation](docs/index.md) ·
+[GitHub App](docs/github.md) · [Actions](docs/github-actions.md) ·
+[Readiness and launch blockers](docs/readiness.md)
 
-The network demo changes one SSH CIDR:
-`10.0.0.0/24 → 0.0.0.0/0 → Internet → EC2 → IAM role → sensitive S3 data`.
-Restore the restricted CIDR and re-analyze: **BLOCK CHANGE → SAFE TO MERGE**.
-“SAFE TO MERGE” means **No new modeled critical attack paths detected** under
-the selected policy. It does not prove AWS infrastructure is safe.
+The [public Streamlit demo](https://blastradius.streamlit.app/) is a separate
+legacy deployment. No new public deployment is claimed.
 
-The public URL is the **legacy Streamlit demonstration**, not the new application.
-No new public deployment is claimed. [Product screenshots and acceptance
-evidence](https://github.com/Mighiana/BlastRadius/pull/2) show the tested integrated
-application.
+## Quickstart
 
-## The problem
-
-A small network or IAM diff can connect resources that were previously
-unreachable. BlastRadius compares the resulting graphs so a reviewer can see the
-connection and its evidence.
-
-## Installation
-
-Use **Python 3.12** for the verified development baseline (the CLI supports 3.11+).
-Git is needed for repository comparisons; AWS credentials and Terraform are not.
+Use Python **3.12**, Node **24.19.0**, npm, Git and Make on Linux/macOS.
+Neither AWS credentials nor Terraform execution is required.
 
 ```bash
 git clone https://github.com/Mighiana/BlastRadius.git
 cd BlastRadius
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install .
-blastradius --before examples/safe --after examples/safe
-```
-
-On Windows, activate with `.venv\Scripts\Activate.ps1` in PowerShell.
-For the legacy demo, tests and quality tools, use `make install-core` on Linux/macOS.
-
-### Application workspace
-
-The delivery architecture is React/TypeScript + Vite in `web/`, FastAPI at
-`blastradius.server.app:app`, PostgreSQL for deployment, and SQLite for local use.
-The Python analysis engine remains reusable independently.
-
-```bash
+source "$HOME/.nvm/nvm.sh"
+nvm install "$(cat web/.nvmrc)"
+nvm use "$(cat web/.nvmrc)"
 cp .env.example .env
 make dev
 ```
 
-This installs `.[server,ui,dev]`, checks and builds the frontend, migrates SQLite,
-and serves the application at `http://localhost:8000`. It requires Python 3.12,
-Node 22.12+ or 24, npm and Make. The example enables disposable local demo
-accounts; OIDC and billing are disabled until explicitly configured.
-Run `make compose-up` instead for the local PostgreSQL container setup.
-See [deployment](docs/deployment.md) and the [integration contract](docs/release-integration.md).
+Open `http://localhost:8000`. This installs dependencies, checks/builds the React
+app, migrates a local SQLite database and starts one API process. Demo sign-in
+creates a disposable local identity and a Free workspace; public scenarios need
+no login. Use the exact configured browser origin. See
+[getting started](docs/getting-started.md) for uploads, plan assignment and checks.
 
-For the previously published CLI consumer revision:
+Production identity requires [OIDC configuration](docs/auth.md).
+**Payments are unavailable.** Pro/Team prices are proposals; operators can grant
+beta entitlements with an audited local CLI. There is no checkout, payment SDK,
+payment webhook, card collection or subscription activation.
+See [plans](docs/billing.md) and [future billing](docs/billing-future.md).
 
-```bash
-python -m pip install "git+https://github.com/Mighiana/BlastRadius.git@a72c04890640102b315506ab85e5f1ccbe91bb9f"
-```
+## What you can do
 
-No PyPI package or `v1` tag is published. This immutable historical source pin is
-retained until a new release is reviewed and approved.
+- Compare bounded HCL snapshots or saved Terraform plan JSON; inspect graphs,
+  path evidence, coverage diagnostics, findings and remediation guidance.
+- Organize private projects, archive/restore them, retain history, and export
+  JSON/Markdown plus entitled SARIF.
+- Manage owner/admin/developer/viewer roles, verified-email invitations,
+  sessions, trusted policies and plan usage.
+- Connect an operator-verified GitHub App installation for persistent PR
+  analysis, stale-commit checks and app-owned checks/comments.
+- Keep using the independent CLI, trusted Actions workflow and legacy demo.
 
-## Running
+Some capabilities require plan entitlements or operator/provider configuration.
+[Readiness](docs/readiness.md) distinguishes implementation from external
+acceptance and lists missing enterprise features.
 
-### Dashboard
+## CLI and GitHub Actions
 
-`make legacy` installs and starts the legacy Streamlit demo on loopback.
-Use the three bundled scenarios and the guided SAFE → BLOCK → SAFE flow.
-Do not upload confidential infrastructure to the public demonstration.
-
-### Streamlit Community Cloud
-
-The [existing demo](https://blastradius.streamlit.app/) uses `app.py` and the root
-`requirements.txt`. Its deployment is separate from this delivery.
-Dependency pins describe the checkout, not proof of what a hosted instance runs.
-New deployment and live publisher tests require owner approval.
-
-### CI mode
-
-CLI exits: **0** passes the configured gate; **1** blocks; **2** means invalid or
-incomplete analysis. REVIEW passes by default; `--fail-on-review` makes it fail.
-JSON, SARIF, Markdown and summary reports are supported.
-See the [CLI guide](docs/cli.md).
-
-### Analyze local Git changes
+For the CLI alone:
 
 ```bash
-blastradius --repo /path/to/repo --base main --head feature/change --terraform-dir infra
-```
-
-Committed snapshots are read without switching the working tree.
-Git mode trusts policy from the base revision.
-
-### Analyze Terraform plan JSON
-
-```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install .
+blastradius --before examples/safe --after examples/vulnerable
 blastradius --plan examples/plans/ssh_open_plan.json --format json
 ```
 
-The bundled plan returns exit 1. Supply already-produced plan JSON; BlastRadius
-does not run Terraform providers, download modules or contact AWS.
-
-### Repository policy
-
-Use a reviewed base-branch `blastradius.yml` to configure the Terraform root and
-gate. Invalid policy fails with exit 2. See [policy examples](docs/cli.md#repository-policy).
+Both examples intentionally block and return **1**. Exit **0** passes the
+selected gate; **2** means invalid input or usage. REVIEW passes by default;
+use `--fail-on-review` for strict gating. Git comparisons read committed data
+without switching the working tree and trust policy from the base revision.
+See the [CLI](docs/cli.md), [policy](docs/policy.md) and [report](docs/reports.md) guides.
 
 ### GitHub Actions
 
-Copy [the onboarding workflow](docs/github-action.yml) into your Terraform
-repository's `.github/workflows/blastradius.yml`, then follow
-[GitHub onboarding](docs/github-actions.md). It analyzes one root, preserves the
-reviewed analyzer pin, uploads reports, and updates one bot comment when permitted.
-Make the check required in branch protection yourself.
+Copy the [reviewed consumer workflow](docs/github-action.yml) using
+[Actions onboarding](docs/github-actions.md). Its immutable historical analyzer
+pin remains `a72c04890640102b315506ab85e5f1ccbe91bb9f` until a new release is
+approved; it does not automatically adopt this source branch. The
+[GitHub App](docs/github.md) is a separate operator-managed integration.
+Neither flow executes candidate code, providers or workflows.
 
-The analyzer runs from a trusted revision; the privileged reporting flow does
-not execute candidate code or providers.
-
-Hosted PR analysis and comment updates are verified **for the historical
-same-repository acceptance only**:
-[BLOCK run 35441550348](https://github.com/Mighiana/BlastRadius/actions/runs/35441550348),
-[SAFE run 35441968970](https://github.com/Mighiana/BlastRadius/actions/runs/35441968970),
-and [the same updated comment 5741664556](https://github.com/Mighiana/BlastRadius/pull/1#issuecomment-5741664556).
-Fork/read-only-token behavior remains locally tested, not hosted-verified.
-No fresh GitHub API write was used to prepare this handoff.
-
-### SARIF findings
-
-`--format sarif` emits SARIF 2.1.0 with resource evidence and known filenames,
-without guessed line numbers. A blocking result still emits a valid document
-and exits 1. Code-scanning uploads are not automatic.
-
-### Tests
-
-```bash
-make install
-make check
-```
-
-See [Contributing](CONTRIBUTING.md) for lint/types, frontend checks and audits.
-The original baseline has 239 tests; [product readiness](docs/readiness.md#test-results)
-records the final counts, browser evidence and remaining launch prerequisites.
+No PyPI package or `v1` tag is published.
+Hosted PR analysis and comment updates are verified for the historical
+same-repository [BLOCK run 35441550348](https://github.com/Mighiana/BlastRadius/actions/runs/35441550348)
+and [SAFE run 35441968970](https://github.com/Mighiana/BlastRadius/actions/runs/35441968970);
+[comment 5741664556](https://github.com/Mighiana/BlastRadius/pull/1#issuecomment-5741664556)
+was updated rather than duplicated. These are historical acceptance results,
+not a new integration run. Fork/read-only-token behavior remains locally tested.
 
 ## Architecture
 
-The [architecture guide](docs/architecture.md) separates the Python engine from
-API, identity, storage and browser concerns.
+React/TypeScript + Vite → FastAPI → SQLAlchemy/PostgreSQL (SQLite locally).
+Authenticated requests authorize workspace membership, reserve quota, and store
+an immutable policy snapshot before a bounded background job launches the
+installed engine with isolated Python. Results persist with normalized findings,
+paths, artifacts and provenance. Every read/export repeats tenant and retention
+checks. Node builds static assets; it is absent from the application runtime.
 
-### Pipeline
+Use **one ASGI process per database**. The queue is in memory; interrupted jobs
+fail closed on restart. This is not a distributed/high-availability service.
+See [architecture](docs/architecture.md), [deployment](docs/deployment.md) and
+[operations](docs/operations.md).
 
-HCL / plan / Git snapshots → normalized resources → evidence-bearing graph →
-before/after diff → policy decision → reports and remediation suggestions.
+## Security and model limits
 
-## Supported Terraform resources
+“SAFE TO MERGE” means no new modeled blocking findings under the selected policy.
+It does **not** prove infrastructure is secure. Incomplete coverage requires
+review even when no path is found. Scores are heuristics, not exploit probabilities.
 
-The baseline models security groups, EC2, instance profiles, IAM roles and
-selected S3 permissions/exposure. See [coverage priorities](docs/roadmap.md).
+Only the documented [AWS resources and relationships](docs/coverage.md) are
+modeled. No live cloud discovery, effective IAM authorization, full routing,
+provider execution, multi-cloud coverage or compliance certification is claimed.
+Terraform plans and reports can expose private architecture; use authorized
+inputs and protected storage. See [security model](docs/security-model.md),
+[limitations](docs/limitations.md) and [security reporting](SECURITY.md).
 
-## Attack-path logic
+## Development
 
-A path records a modeled connection from the internet to a resource tagged
-sensitive. A detected path is not evidence that exploitation occurred.
+```bash
+make check
+make frontend
+make docs
+make wheel
+```
 
-### Merge decision
-
-BLOCK identifies new modeled critical paths or configured policy violations.
-REVIEW identifies changes needing inspection. Inspect diagnostics with every report.
-
-### Security score
-
-The 0–100 score is a deterministic heuristic, not a probability of compromise.
-Higher is better within the same model version.
-
-## Demo workflow
-
-Follow the [three-scenario script](docs/demo.md) for network, IAM and storage
-examples, expected exits and remediation boundaries.
-
-### Demo scenarios
-
-All three use committed synthetic Terraform. Network and public bucket examples
-support local patch suggestions; IAM remediation needs a reviewer.
-
-### Screenshots
-
-Verified screenshots and recordings belong to the integrated release evidence.
-The parent release process owns that evidence.
-
-## Limitations
-
-The AWS model is intentionally incomplete. Unsupported inputs, IAM semantics and
-network topology require manual review. Sensitivity tags are declarations, not
-data discovery. No score or passing result guarantees safety.
-See [threat model](docs/threat-model.md), [roadmap](docs/roadmap.md), and
-[integration limits](docs/release-integration.md).
-
-## Implemented versus simulated
-
-The CLI, graph diff, reports and three synthetic scenarios perform real local
-analysis. The historical hosted Actions acceptance is linked above. React/API,
-authentication, persistence and sandbox billing need integrated verification.
-The release scaffolding does not establish that they work.
-The GitHub App is a [future design](docs/github-app-design.md).
+[Contributing](CONTRIBUTING.md) covers environment/tool versions and release
+checks. [Integration acceptance](docs/release-integration.md) covers disposable
+PostgreSQL, fresh installs, containers and the parent-owned browser checks.
+Legal, external-provider and operational acceptance remain launch prerequisites.
 
 ## Future roadmap
 
-Finish integrated acceptance and deployment validation; validate tenant isolation
-and retention; expand supported AWS relationships with evidence and tests; then
-review commercial launch and a versioned release. See [roadmap](docs/roadmap.md).
-
-[Security disclosure](SECURITY.md) · [Support](docs/support.md) ·
-[Privacy template](docs/privacy.md) · [Terms template](docs/terms.md)
+Complete external/browser acceptance and operational/security promotion gates
+before public beta. Durable jobs, deeper AWS coverage and enterprise capabilities
+are separate scopes; [the roadmap](docs/roadmap.md) does not promise shipping dates.

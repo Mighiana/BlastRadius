@@ -1,84 +1,96 @@
 # Architecture
 
-## Decision
-
-Keep the Python engine and CLI. Move the multi-user product interface to
-React/TypeScript with Vite and expose the engine through FastAPI. Streamlit
-remains a separate controlled legacy demo.
-
-React makes responsive navigation, accessible components and explicit
-loading/error states practical. FastAPI separates authenticated requests,
-tenant-scoped storage and bounded analysis jobs from rendering. This is not a
-reason to replace tested parsing or graph algorithms.
+## Components and flows
 
 ```mermaid
 flowchart LR
-    Browser["React and TypeScript"] --> API["FastAPI"]
-    API --> Identity["Identity and tenant authorization"]
-    API --> Store["PostgreSQL or local SQLite"]
-    API --> Engine["Python analysis engine"]
-    CLI["CLI and trusted Actions analyzer"] --> Engine
-    Legacy["Legacy Streamlit demo"] --> Engine
-    Engine --> Inputs["HCL or plan adapters"]
-    Inputs --> Resources["Normalized resources and diagnostics"]
-    Resources --> Rules["Rules and edge evidence"]
-    Rules --> Graph["NetworkX graph"]
-    Graph --> Diff["Path and exposure comparison"]
-    Diff --> Decision["Policy and heuristic score"]
-    Decision --> Reports["JSON SARIF and Markdown"]
+    Browser["React / TypeScript / Vite"] --> API["FastAPI / session / CSRF / RBAC"]
+    OIDC["OIDC provider"] --> API
+    GitHub["Signed GitHub App webhook"] --> API
+    API --> Store["SQLAlchemy / PostgreSQL or local SQLite"]
+    API --> Jobs["Bounded in-memory jobs"]
+    Jobs --> Worker["Isolated Python subprocess"]
+    Worker --> Engine["HCL / plan / graph / policy / reports"]
+    Jobs --> Store
+    Jobs --> Publisher["GitHub App publisher / freshness checks"]
+    CLI["CLI / trusted Actions"] --> Engine
+    Legacy["Separate Streamlit demo"] --> Engine
 ```
+
+Login provisions a user identified by OIDC issuer/subject and a Free workspace.
+Requests use a hashed-at-rest opaque server session and a separate CSRF token.
+Workspace membership is checked for each project, job, evidence and export route.
+No client-supplied tenant ID or plan name is treated as authority.
+
+Owners/admins configure projects and entitled policies. Developers also submit
+analyses; viewers read retained evidence. Submission locks the organization,
+checks active-project state, reserves monthly quota, snapshots the effective
+trusted policy and persists a queued analysis. A full queue or rejected request
+does not consume quota. Accepted failures and deleted jobs still count.
+
+The job manager runs the installed worker with `python -I`, bounded scratch,
+time/memory/file/CPU budgets and a minimal environment without service secrets.
+Input files are data; no candidate scripts, providers, modules or workflows run.
+Completed reports are persisted with sanitized source references, normalized
+findings, ordered path hops and artifacts. Raw uploads are temporary; reports
+still reveal architecture. See [data lifecycle](data-lifecycle.md).
+
+GitHub jobs use verified installation/repository IDs and the same tenant quota
+and policy model. Current PR base/head identities and refs are checked before
+analysis and publishing mutations. Publication touches only this App's checks
+and marked comments. Delivery hashes, run IDs and uncertain-write markers
+prevent blind duplicate publication. See [GitHub contracts](github.md).
+
+## Storage schema
+
+Alembic head is **0003**; readiness compares the database version to the packaged
+current head, rather than assuming the initial migration. Upgrades from populated
+0001 preserve reports and users and convert legacy `member` to `developer`.
+
+| Tables | Responsibility |
+| --- | --- |
+| `users`, `sessions` | Provider identity, verified email and revocable sessions |
+| `organizations`, `memberships`, `invitations` | Workspace, role, hashed one-time email-bound invitation |
+| `projects` | Metadata, explicit root, archive state and trusted project policy |
+| `analyses` | Status, provenance, immutable policy snapshot, summaries and result JSON |
+| `findings`, `attack_paths`, `attack_path_hops`, `analysis_artifacts` | Normalized evidence and exports |
+| `usage`, `audit_events` | UTC monthly reservations/export counters and audit events |
+| `github_installations`, `repository_connections` | Operator-verified tenant/provider identity mapping |
+| `github_deliveries`, `github_runs` | Idempotency, PR boundaries, publication reconciliation |
+| `billing_events` and legacy organization billing columns | Inert upgrade-preservation fields; no runtime payment authority |
+
+The models and migrations define foreign keys and cascades. Deleting analysis
+evidence preserves GitHub run tombstones by nulling the analysis link. Usage
+does not reset when evidence is deleted. Retention gates all evidence reads;
+physical cleanup is a bounded operator command, not an installed scheduler.
 
 ## Source boundaries
 
-Paths in this table are relative to `blastradius/` unless marked otherwise.
+| Boundary | Modules |
+| --- | --- |
+| Inputs | `gitsource.py`, `parser/terraform_parser.py`, `parser/plan_parser.py` |
+| Relationships / paths | `security/rules.py`, `graph/graph_builder.py`, `graph/attack_paths.py` |
+| Comparison / decision | `graph/diff_engine.py`, `policy.py`, `security/decision.py` |
+| Reports / CLI | `report.py`, `sarif.py`, `cli.py` |
+| Authentication / authorization | `server/auth.py`, `server/lifecycle.py` |
+| Plans / quota / persistence | `server/plans.py`, `server/quotas.py`, `server/persistence.py` |
+| Execution | `server/jobs.py`, `server/worker.py`, `server/analysis.py` |
+| GitHub | `server/github_routes.py`, `server/github_service.py`, `server/github_publish.py` |
+| Browser | `web/src/`; Zod validates API responses, Python owns decisions |
 
-| Boundary | Existing module or target |
-|---|---|
-| Local/Git/plan inputs | `gitsource.py`, `parser/inputs.py`, `parser/plan_parser.py` |
-| HCL and normalized model | `parser/terraform_parser.py`, `parser/models.py` |
-| Rules and graph | `security/rules.py`, `graph/graph_builder.py` |
-| Paths, comparison, policy | `graph/attack_paths.py`, `graph/diff_engine.py`, `security/decision.py`, `policy.py` |
-| Scores and explanations | `security/risk_score.py`, `security/explain.py` |
-| Local patch suggestions | `security/remediation.py`, `security/hcl_edit.py` |
-| Reports and CLI | `report.py`, `sarif.py`, `cli.py` |
-| Service target | `server/`, entry point `blastradius.server.app:app` |
-| Browser target | Repository-root `web/`, production assets `web/dist/` |
-| Legacy UI | Repository-root `app.py`, `visualization/graph_renderer.py` |
+Python paths above are relative to `blastradius/`. Plans have one authoritative
+catalog; UI pricing and entitlements consume it through the API.
 
-The service/browser rows are integration targets, not verified capabilities
-of the release-only branch.
+## Deployment boundary
 
-## Request and data flow
+One Uvicorn process and an in-memory queue are supported. A PostgreSQL advisory
+lock or local SQLite file lock rejects a second process; this is not horizontal
+scaling or a durable broker.
+Interrupted analyses fail closed on restart; GitHub deliveries need redelivery.
+An isolated subprocess is not a separate kernel/security boundary.
 
-An authenticated principal selects a tenant-scoped project and submits bounded
-input data, not a host path. The service validates requests, authorizes tenant
-membership, assigns job identifiers and runs the engine with isolated scratch
-storage. Stored results use the same tenant/project scope.
-Every later read, download and delete must repeat authorization.
-The service owner determines whether jobs are synchronous or backgrounded;
-do not claim a durable queue unless it survives restart testing.
-
-The engine must never acquire service credentials, query billing, or choose an
-organization. API/browser code must not reimplement policy decisions.
-Schema versions and coverage diagnostics travel with reports so a changed
-model is not mistaken for an infrastructure change.
-
-## Storage and process boundaries
-
-PostgreSQL is the deployment target. SQLite supports local evaluation; it does
-not verify multi-replica concurrency or PostgreSQL migrations.
-Unique job directories are temporary work space, not durable tenant history.
-Only application data volumes are writable in Compose.
-
-Node builds browser assets; the final Python runtime does not need Node.
-Static serving and SPA fallback belong to the service unit: confirm
-`/app/web/dist` is served and API routes cannot fall through to HTML.
-See [integration contract](release-integration.md).
-
-## Release boundaries
-
-The CLI consumer installs historical revision
-`a72c04890640102b315506ab85e5f1ccbe91bb9f`; it does not adopt this branch
-automatically. The legacy public demo is also a separate deployment.
-Record the engine revision, UI build, migration head and image digest used
-together in any new release.
+The runtime image contains the installed wheel and built frontend, runs as
+UID/GID 10001, and uses read-only root plus bounded writable storage. PostgreSQL
+is the production database target; SQLite supports local use. OIDC, TLS ingress,
+database TLS/PITR, backups, monitoring and retention scheduling remain operator
+configuration. See [deployment](deployment.md) and [readiness](readiness.md).

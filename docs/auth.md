@@ -116,6 +116,28 @@ stored. Acceptance is atomic, email-bound and requires the OIDC provider's
 Demo/local identities cannot accept invitations. No email provider is installed;
 authorized creators manually deliver the one-time copyable link.
 
+## Configure verified email and invitation delivery
+
+In the provider's application configuration, include `email` and the boolean
+`email_verified` in the signed ID token. Require the provider's email-verification
+flow for accounts that will accept invitations; an email string alone is
+insufficient. Use `openid email profile`, register the exact callback above, and
+restrict signup in provider policies if the beta is invite-only.
+
+For a real acceptance check, sign in as a manager in an operator-granted Team
+workspace, create an invitation to the recipient's verified provider email, and
+send the one-time copied link through your existing approved private channel.
+The recipient signs in with that identity and opens the link. The fragment is
+cleared immediately and the token submitted once in the authenticated POST body.
+Do not put invitation URLs in tickets, analytics, access logs or public chat.
+Lost/expired links require revocation and a new invitation.
+
+No SMTP/API-key setting is consumed and no email delivery service is installed.
+Adding automatic mail requires a separate transport, secret configuration,
+delivery/retry design and abuse controls; merely configuring an email provider
+does not make this release send messages. Local tests use signed provider mocks
+and exercise identity mismatch, unverified email, expiration, replay and races.
+
 Tests verify session rotation, hash-at-rest, logout revocation, CSRF/origin
 rejection, disabled/production configuration, Authlib's real JWT validation via
 mocked HTTP, tenant IDOR and role restrictions. Live provider setup, TLS/proxy

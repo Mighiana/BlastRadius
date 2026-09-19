@@ -1,6 +1,6 @@
 # Deployment and local environments
 
-Read the [readiness assessment](readiness.md#security-limitations) before promoting
+Read the [readiness assessment](readiness.md#known-security--model-limitations) before promoting
 images. Both the application and local Compose database have outstanding upstream
 scan findings; a working local stack is not production security approval.
 
@@ -71,7 +71,7 @@ Do not call this a bit-reproducible build.
 
 ## Scan evidence and promotion gate
 
-Local Linux/amd64 scan on 2026-09-19: Trivy **0.74.0**, vulnerability database
+Operations handoff Linux/amd64 scan on 2026-09-19: Trivy **0.74.0**, vulnerability database
 updated **2026-09-19T07:03:12Z**. Counts include findings without available fixes;
 no ignore files, severity overrides, or vulnerability suppressions were added.
 
@@ -82,7 +82,9 @@ no ignore files, severity overrides, or vulnerability suppressions were added.
 | Original PostgreSQL bundled `gosu` | 1 | 21 | 21 | 2 | 1 | 46 |
 | Final PostgreSQL 16.15 Trixie, OS | 1 | 61 | 88 | 119 | 2 | 0 |
 
-Final images have no detected secrets or language-package vulnerabilities.
+Those operations images had no detected secrets or language-package vulnerabilities.
+This historical scan does not cover subsequent application integration; rescan
+the final integrated images before promotion.
 The remaining database critical finding is `CVE-2026-6653` in
 `libxml2 2.12.7+dfsg+really2.9.14-2.1+deb13u3`; the scanner lists no fix.
 The Python image was retained because replacing the tested runtime does not

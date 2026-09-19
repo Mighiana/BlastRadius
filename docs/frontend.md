@@ -224,32 +224,19 @@ SARIF, Team policy save, invitation creation/revocation and demo-acceptance
 rejection. Successful OIDC invite acceptance and live GitHub publication still
 need separate configured-provider acceptance. Failure artifacts stay ignored.
 
-## Parent integration requirements and limitations
+## Integrated routing and remaining limitations
 
-This frontend scope leaves backend files unchanged. At upstream commit
-`1110797b10cde8d2bc931f44b8190e170f5254da`:
+The backend now allowlists every product route above, including all seven new
+lifecycle/trust routes. Unknown `/api` and `/health` paths cannot enter the
+static mount; they return 404, while unsupported methods on existing API routes
+retain 405. Regressions run with production assets present.
 
-1. `blastradius/server/static.py` must add `account`, `settings`, `team`,
-   `integrations`, `security`, `privacy`, `terms` to the known SPA route allowlist.
-   `invitations/accept` is already included. Client navigation/Vite works; direct
-   production deep links to the seven new paths return 404 until corrected.
-   Do not add a catch-all that serves HTML for missing API routes.
-2. History’s `input_type` query literal accepts only `hcl|plan`, while GitHub
-   records have `input_type=github`. The UI therefore offers HCL/plan filters and
-   “All inputs (including GitHub)”; a dedicated GitHub filter awaits the focused
-   server correction. No unsupported request is fabricated.
-3. With built static assets present, unknown API POST requests reach the mounted
-   `StaticFiles` handler and return **405**, not the **404** required by
-   `test_tenant_isolation_reports_history_and_mutations` and
-   `test_payments_cannot_be_activated_and_catalog_is_authoritative`. Both failures
-   reproduce on the unchanged upstream commit with a static build present.
-   The integration stage must reserve unknown `/api/*` paths before the SPA
-   static mount; do not loosen security tests or revive removed billing routes.
-   The API-only suite passes before assets are built. Always verify again with
-   production assets present after correcting routing.
-4. Invitations/audit lists expose limit/offset but no total; those pagers use
-   returned row count, so an exact multiple can lead to one empty final page.
-   Analysis history has a total and does not have this limitation.
+History supports `input_type=hcl|plan|github`; the UI exposes all three filters.
+GitHub filtering is verified with real worker results under Free/Pro/Team plans.
+
+Invitations/audit lists expose limit/offset but no total; those pagers use
+returned row count, so an exact multiple can lead to one empty final page.
+Analysis history has a total and does not have this limitation.
 
 Build output is `web/dist`, served by `BR_STATIC_DIR`. Set `BR_PUBLIC_URL` to the
 production HTTPS origin. Bundle icons/fonts locally; never put secrets in

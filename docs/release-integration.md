@@ -1,173 +1,158 @@
-# Integrated release contract
+# Integrated release verification and acceptance
 
-Baseline: `787b0402d5d51acd5fcd437b2be455cd20e19da3`. Five implementation handoffs
-are integrated in engine, legacy, server, release and frontend order.
-Original tests remain unchanged.
+This commercial-beta integration preserves frontend commit
+`36df10877fd9a1d141805f7a7d160acfa4f61b8e` and operations commit
+`6364e1f7fb2b2553a93272ae276a31fb28ea898c` through a normal merge.
+Historical release-only/browser results are not current acceptance evidence.
 
-## Contracts that the build uses
+## Contracts
 
-| Contract | Consumer | Confirmation |
-|---|---|---|
-| `web/package.json` and `web/package-lock.json` | `npm ci`, Node image | Frontend unit |
-| npm scripts `lint`, `typecheck`, `build` | Make, CI, Docker frontend stage | Frontend unit |
-| Vite output `web/dist` | Image `/app/web/dist` | Frontend + server units |
-| Python optional extra `server` | Image and Make install | Server-owned `pyproject.toml` |
-| `blastradius.server.app:app` | Uvicorn startup | Server unit |
-| SQLite local and PostgreSQL production | Environment worksheets/Compose | Server unit |
-| Alembic config + migration files available in image | One-shot migration command | Server unit; no path assumed |
-| API/static route separation and SPA fallback | Same-origin frontend | Server + frontend units |
+- `GET /api/plans` is the only pricing/limits source. Payments are always false.
+- `/api/me` uses `owner|admin|developer|viewer` and embeds effective workspace
+  usage/features. Organization policy is Team/Enterprise; project policy and
+  saved SARIF are Pro/Team/Enterprise. All saved reads enforce current retention.
+- History accepts `status`, `decision`, `input_type=hcl|plan|github`, candidate
+  `branch`, epoch `since/until`, `limit/offset` and returns `total`.
+- Invitation fragments contain 43-character one-time tokens; acceptance POSTs
+  only `{token}` and requires matching verified OIDC email. Demo users cannot join.
+- Project PATCH supplies complete metadata/archive fields; `updated_at` is nullable.
+- Worker inputs include a trusted persisted policy snapshot; candidate files
+  cannot supply policy or execute code. GitHub checks verify current base/head
+  repository/ref/SHA boundaries and belong to the configured App.
+- Alembic head **0003** is packaged; readiness compares actual heads.
+- Built assets live in `web/dist`; all documented product routes support direct
+  navigation. Unknown `/api` and `/health` routes never fall through to assets.
+  Unsupported methods on existing API routes retain 405.
+- Runtime uses one Uvicorn process, installed-package isolated Python,
+  non-root UID/GID10001, read-only root and explicit bounded writable storage.
 
-`scripts/check_integration.py` fails clearly for missing app/module/package
-contracts. It does not verify server behavior, migrations or all imported
-dependencies. Build/runtime validation must follow.
+## Verification commands
 
-## Runtime settings
+Use Python 3.12.14 and Node 24.19.0:
 
-`BR_DATABASE_URL` selects SQLite locally or `postgresql+psycopg://` in Compose.
-`BR_DATA_DIR` is `.local` locally and `/app/.local` in the container.
-`BR_STATIC_DIR` defaults to `web/dist`; known browser routes return its index,
-while unknown API, health and asset requests remain errors.
-`BLASTRADIUS_ALEMBIC_CONFIG=alembic.ini` names the committed config, whose script
-location uses packaged resources. The CLI and module migrations share database
-settings. `make start` migrates first; `make compose-up` runs a migration job before
-the application, with automatic migrations disabled. Readiness is `/health/ready`.
+```bash
+source "$HOME/.nvm/nvm.sh"
+nvm use "$(cat web/.nvmrc)"
+make check
+make frontend
+make audit
+.venv/bin/python -m ruff format --check --exclude fixtures.py blastradius/server scripts \
+  tests/test_spa_integration.py tests/test_github_app.py
+make wheel
+make integration-check
+docker compose config --quiet
+sh -n scripts/container-entrypoint.sh
+bash -n scripts/verify-demo.sh
+```
 
-See [auth](auth.md), [API](api.md), [billing](billing.md), and
-[deployment](deployment.md) for service and operator responsibilities.
+`make check` runs all engine/server/legacy/Actions tests plus release migration
+and package-tool tests, Ruff, mypy and local documentation links. Optional
+PostgreSQL cases must also run, using a **disposable database**:
 
-## Required checks after integration
+```bash
+BR_TEST_DATABASE_URL=postgresql+psycopg://USER:PASSWORD@localhost:55432/TEST_DB \
+  .venv/bin/python -m pytest -o addopts='' -q
+```
 
-1. Fresh checkout: copy/configure `.env`, `make dev`; confirm static UI and API.
-2. Run all original and added tests; no existing test edits to mask changes.
-3. `make lint typecheck docs`, `make frontend`, `make audit`.
-4. Validate YAML and actionlint; preserve trusted-base analysis and all original
-   workflow trust-boundary tests.
-5. Build container, migrate real PostgreSQL, run as UID 10001 with read-only root,
-   confirm health/readiness, data persistence and clean shutdown.
-6. Test migrations from empty/current DB; exercise backup and restore.
-7. Verify UI at 320/375/768/1024/1440 widths, graph clipping, errors, history,
-   identity and tenant isolation. Parent owns browser evidence.
-8. Reconcile README feature/setup claims with the verified final implementation;
-   remove pending-integration wording only when verified.
+These tests cover fresh schemas, populated 0001 upgrades through 0003, model
+parity, idempotence, readiness, atomic quota/export counters, invitation races
+and bounded cleanup. Do not point them at a live database.
+
+After `make wheel`, install the wheel into a fresh venv outside the checkout and
+run `python -I -m blastradius.cli` for all three fixture flows and plan JSON/SARIF.
+Check expected exit codes and parse a single output document. Repeat with the
+server extra, verify packaged migrations and readiness outside the checkout.
+The core wheel does not require FastAPI or Streamlit.
+
+For local container verification, copy the development `.env.example`, then
+build app/db, start the DB, run migrations twice and start app:
+
+```bash
+docker compose build app db
+docker compose up -d --wait db
+docker compose run --rm migrate
+docker compose run --rm migrate
+docker compose up -d --wait app
+```
+
+Assert container UID/read-only/resource settings, readiness and a real HTTP
+analysis/export. Demo auth here is explicitly development-only; it is not
+production OIDC acceptance. If Docker Hub rate-limits anonymous pulls, use a
+trusted mirror with the **same digests** for local verification and record that
+deviation; do not alter the pinned Dockerfile or dependency policy.
+
+## Parent browser acceptance setup
+
+From a clean integration checkout:
+
+```bash
+source "$HOME/.nvm/nvm.sh"
+nvm install "$(cat web/.nvmrc)"
+nvm use "$(cat web/.nvmrc)"
+cp .env.example .env
+make dev
+```
+
+Use `http://localhost:8000` exactly. For a preview origin, set `BR_PUBLIC_URL` to
+that exact scheme/host/port and restart before testing; never disable Origin/CSRF.
+Do not run two app processes against the same DB.
+
+Create the test user by demo sign-in; it creates a Free workspace. Public demos
+require no seed. Create a project and upload `examples/safe/main.tf` before and
+`examples/vulnerable/main.tf` after, or upload
+`examples/plans/ssh_open_plan.json`. Verify the expected BLOCK report, provenance,
+history, graph/path evidence and JSON/Markdown exports.
+
+For Team acceptance, keep the browser session and run in a second terminal,
+from the same checkout/database:
+
+```bash
+set -a; . ./.env; set +a
+export BR_ADMIN_ENABLED=true
+.venv/bin/blastradius-admin inspect organizations --limit 100
+.venv/bin/blastradius-admin inspect users --limit 100
+.venv/bin/blastradius-admin inspect projects --limit 100
+.venv/bin/blastradius-admin inspect failures --limit 100
+.venv/bin/blastradius-admin inspect usage --limit 100
+.venv/bin/blastradius-admin assign-plan WORKSPACE_UUID team
+```
+
+Replace `WORKSPACE_UUID` with the inspected workspace ID. Refresh the session
+in the browser. Test policies, manual invitation creation/revocation, audit,
+SARIF and downgrade behavior. Repeat assignment with `free` to restore default
+limits. This changes only the disposable test DB and never activates payment.
+
+Demo login intentionally cannot impersonate an invited identity. Test real
+acceptance only with [configured OIDC](auth.md), or use the existing
+provider-mocked server regressions for identity binding. Do not add fake
+email/role grant endpoints or pretend local demo acceptance worked.
+
+For automated browser acceptance:
+
+```bash
+npm --prefix web run test:e2e -- --list
+npm --prefix web run test:e2e
+```
+
+The existing Playwright harness owns its isolated database/server and operator
+plan command. The parent testing agent owns actual browser execution/recording,
+including the seven widths, sessions, roles, state/error handling and trust pages.
+This integration does not claim browser results.
+
+## Evidence and remaining boundaries
+
+The final integration handoff records exact test counts, image IDs, clean-wheel
+and clean-clone checks. Provider tests use mocked HTTP; no live App/OIDC writes
+are part of these commands. External TLS, managed PostgreSQL/PITR, production
+retention jobs, email delivery and load/SLO acceptance remain unverified.
+The [readiness report](readiness.md) is authoritative for launch blockers.
 
 ## Tooling scope
 
-Ruff's default rules detect fatal/static issues across the existing engine and
-legacy app. `make lint` additionally runs E4/E7/E9/F on new scripts and server.
-Strict mypy checks scripts. The engine, legacy app and server use checked function
-bodies with silent imports and ignored missing third-party stubs, matching their
-handoff contracts; this is not a claim that the whole product is strictly typed.
-No audit findings are suppressed.
-
-The baseline had ten standard Ruff findings (unused imports and ambiguous `l`
-names). They are outside this unit's source ownership. The default fatal rules
-do not pretend these are fixed. Engine/UI owners can remove them independently.
-The combined tooling pins agree with `pyproject.toml`.
-
-## Release boundaries
-
-Keep historical CLI consumer pin
-`a72c04890640102b315506ab85e5f1ccbe91bb9f` until release approval.
-The polished onboarding copy is `docs/github-action.yml`; the existing example
-remains unchanged because it is outside this unit's ownership.
-No App, live provider calls, merge, public deployment, screenshots or new support
-domain/email are claimed.
-
-Parent owns final readiness report, PR, environment blueprint and UI evidence.
-No pre-commit configuration was present at baseline. The unit used Python 3.12.13;
-tool pins and action pins are documented for the parent's environment setup.
-
-## Handoff verification
-
-On the isolated release branch against the original source baseline:
-
-- All **239 original tests** passed, with **16 additional release-tooling tests**.
-- Ruff baseline/strict-new-code checks, strict mypy on three scripts and local
-  links/anchors in 23 Markdown documents passed.
-- actionlint 1.7.7 with ShellCheck 0.10.0 passed for both repository workflows and
-  the new onboarding copy; shell syntax/ShellCheck passed for both scripts.
-- Compose configuration and `docker build --check` passed. The latter validates
-  Dockerfile rules and metadata, **not a full image build or running service**.
-- The pinned PostgreSQL 16.15 service became healthy in an isolated Compose
-  project. A SQL row survived stopping and recreating the container through its
-  named volume. The isolated test container, network and volume were removed.
-- All three synthetic scenarios returned CLI exit sequence 0/1/0; the IAM
-  restored baseline still requires review and passes the default gate.
-- Wheel build and fresh-venv installation passed; isolated `python -I` loaded
-  site-packages and produced safe exit 0 and plan exit 1 without Streamlit.
-- The architecture Mermaid diagram parsed successfully with Mermaid 11.9.0 in
-  an isolated local documentation-check workspace, not a frontend dependency.
-- The [sample report](sample-report.md) was generated by the CLI from the
-  repository's safe/vulnerable fixtures, returning the expected exit 1.
-- `pip-audit --skip-editable` reported no known vulnerabilities after updating
-  development pip to 26.2 and pytest to 9.0.3. Both releases were checked on PyPI
-  and older than seven days. No vulnerability ignores were added.
-
-Initial audit found seven advisories across pip 25.0.1 and pytest 8.4.2.
-The fixed tool pins are in `requirements-dev.txt`; the Docker build also upgrades
-its virtualenv pip. Re-audit the integrated server's dependencies and actual image.
-The audit result is a point-in-time check, not a guarantee of no vulnerabilities.
-
-The preceding results describe the isolated release handoff only. Integrated
-verification is recorded separately below; parent owns final browser acceptance.
-
-## Integration fixes
-
-- Path deltas check graph edges when analyzer target selection changes from
-  sensitive data to compute. An existing public compute prefix is not a new
-  path merely because remediation removed its sensitive-data suffix.
-- API schema v1 carries `analysis_complete`, per-snapshot coverage/work limits,
-  structured phase diagnostics and edge confidence/category/source/remediation.
-  Older stored schema v1 reports remain readable; new incomplete results have
-  a visible warning and expanded diagnostics. All results come from the engine.
-- Static serving, migrations, settings, Compose and readiness share one contract.
-- Dependency audits found advisories in Authlib 1.6.5 and Starlette 0.47.3.
-  Authlib 1.6.12, Starlette 1.3.1 and compatible FastAPI 0.136.3 are pinned.
-  PyPI publication timestamps for these pins are at least seven days old.
-
-## Integrated verification, 2026-09-19
-
-Linux, Python 3.12.13, Node 24.19.0, Docker 29.7.2, Compose 5.4.0:
-
-| Command / check | Result |
-| --- | --- |
-| `make check` | 438 tests passed, one optional PostgreSQL case skipped; 16 release tests; Ruff, strict script mypy, engine/legacy/server mypy and links in 30 Markdown documents passed |
-| `BR_TEST_DATABASE_URL=<disposable PostgreSQL URL> .venv/bin/python -m pytest -o addopts='' -q` | 439 passed, including schema parity, service lease, concurrent quotas, worker execution and tenant cascade deletion on PostgreSQL 16.15 |
-| `make frontend` | Clean npm install, ESLint, TypeScript, 34 Vitest tests and Vite production build passed |
-| `.venv/bin/python -m pip_audit --skip-editable` and `npm --prefix web audit --audit-level=moderate` | No known vulnerabilities; local editable project was outside the dependency audit, with no advisory suppressions |
-| `.venv/bin/python -m pip check` | No broken requirements |
-| `.venv/bin/python scripts/check_integration.py` | Passed |
-| `.venv/bin/python -m pip wheel . --no-deps --wheel-dir dist` | Wheel built and installed in a fresh venv outside the checkout |
-| Isolated `python -I -m blastradius.cli` from the core-only wheel | All three scenarios: baseline 0, risky 1, restored 0; plan JSON and SARIF 1, each one parseable document without checkout paths; no FastAPI/Streamlit installed |
-| Same installed wheel with server extra | Packaged migrations and all nine real demo states passed outside the checkout without Streamlit; auth disabled by default |
-| `docker compose config --quiet` and `docker build --check .` | Passed |
-| Compose app/migration image builds, `up -d --wait db`, `run --build --rm migrate`, `up --build -d --wait app` | Non-root/read-only application and PostgreSQL healthy; migrations ran through committed Alembic config |
-| Real HTTP requests against Compose | Health, SPA routes, all nine demos, CSRF/demo login, project creation, subprocess job and JSON/Markdown/SARIF exports passed |
-| Compose app recreation | Stored report and session survived; project deletion removed its analyses |
-| `cp .env.example .env` then `make dev` | Installed, checked/built frontend, migrated SQLite, started Uvicorn; HTTP health/static routes and demo login passed, billing disabled |
-
-The only Python suite warning is Starlette's deprecation of the httpx-backed
-TestClient; its current compatibility path remains working. npm also reports
-ESLint 9's support deprecation; lint passes and npm audit reports no vulnerability.
-
-## Remaining acceptance and operational boundaries
-
-- Final acceptance is recorded in [product readiness](readiness.md). The unchanged
-  Playwright suite passed 12/12; React checks covered all five requested widths,
-  real uploads/exports and tenant isolation. Legacy functional/session checks
-  passed with separately documented presentation limitations.
-- Real OIDC browser authentication and configured Stripe provider flows remain
-  unverified. Their local signature/state/nonce/PKCE/webhook and authorization
-  tests pass; provider calls are mocked. Billing accepts test keys only.
-- Static coverage is not a cloud-safety proof. IAM reviewed baseline/restored
-  score is 85, preserving public compute exposure; no automatic IAM patch exists.
-- Exactly one ASGI process per database, in-memory queue, no distributed HA,
-  scheduled retention, membership-administration UI or project-deletion UI.
-  The underlying membership and deletion APIs enforce ownership/roles.
-- Final container scanning drove a Trixie application base and removal of runtime
-  Python installers. Remaining application OS and PostgreSQL OS/Go findings are
-  listed in the readiness report and require review before deployment.
-- Production TLS, persistent identity, secrets, database encryption/backups,
-  reverse-proxy limits, legal/license decisions and public release remain owner
-  responsibilities. No PR, merge, public deployment, purchase, registry
-  publication or live provider write was performed during integration.
+Ruff checks fatal/static errors and E4/E7/E9/F in server/scripts. Mypy checks
+scripts strictly and engine/server/legacy function bodies under the existing
+configuration; the entire product is not claimed to be strictly typed.
+Formatting checks cover server/scripts and the integration regression files.
+The generated `server/fixtures.py` retains its generator's canonical formatting;
+regenerate it with `python -m blastradius.server.bundle_demos`, not a formatter.
+No advisory suppressions, hook bypasses or weakened security tests are used.

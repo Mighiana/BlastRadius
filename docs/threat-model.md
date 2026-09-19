@@ -12,7 +12,7 @@ installation/Actions credentials, backups and service availability.
 Actors include authenticated users, malicious tenants, fork contributors,
 unauthenticated clients, compromised dependencies and privileged operators.
 Trust boundaries: browser → API, API → tenant storage, input → parser/worker,
-worker → publisher, webhook → billing/integration state, and operator → backups.
+worker → publisher, webhook → GitHub integration state, and operator → backups.
 
 ## Abuse cases and controls
 
@@ -28,15 +28,16 @@ worker → publisher, webhook → billing/integration state, and operator → ba
 | Input/graph denial of service | Body/file/resource/path limits, timeouts, concurrency quotas | Large HCL/plans, cycles, explosive path counts, cancellation |
 | Archive/file bombs | Reject unsupported archives; bound compressed and expanded sizes if introduced | Zip-slip, symlinks, decompression ratios |
 | Webhook forgery/replay | Raw-body signatures, identity mapping, deduplication | Forged body, wrong tenant/provider, duplicate delivery |
-| Billing entitlement tampering | Server-owned usage and verified test-mode events | Replay, conflicting events, concurrent quota consumption |
+| Entitlement tampering | Singular server plan catalog, audited operator grants; no HTTP/payment plan mutation | Removed-route tests, plan/role combinations, concurrent quotas |
 | Report/secret leakage | Redacted logs, tenant-scoped downloads, limited artifact retention | Secret canaries in logs/errors/exports |
 | Supply-chain compromise | Exact dependency/action revisions, audits, no candidate installs in privileged jobs | CI audits, reviewed updates, clean image build |
 | Data surviving deletion | Explicit live data/backup/external artifact lifecycle | Delete/read denial, restore with deletion replay |
 
 Controls already present in the baseline include trusted Git snapshot extraction,
 base-policy selection, isolated consumer Python and local publisher identity/stale
-checks. API/identity/storage/billing controls must be confirmed after their units
-integrate. The release branch alone cannot certify tenant safety.
+checks. Integrated API/identity/storage/entitlement controls have negative tests
+for tenant IDs, roles, quotas, verified-email invitations and read/export
+retention. These tests do not certify a production deployment's tenant safety.
 
 ## Residual limits
 
