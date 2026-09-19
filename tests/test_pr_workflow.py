@@ -28,7 +28,8 @@ def test_workflow_uses_trusted_base_and_sha_inputs():
     assert '${{ github.base_ref }}' not in scripts
     assert ' -I -m blastradius.' in scripts
     assert 'git checkout' not in scripts
-    assert data['jobs']['blast-radius']['defaults']['run']['working-directory'] == '${{ runner.temp }}'
+    assert 'working-directory' not in data['jobs']['blast-radius']['defaults']['run']
+    assert all(s.get('working-directory') == '${{ runner.temp }}' for s in steps if 'run' in s)
 
 
 def test_comment_is_best_effort_but_gate_is_not():
@@ -63,6 +64,8 @@ def test_hosted_acceptance_uses_pinned_production_path():
     assert '--terraform-dir examples/hosted-pr' in scripts
     assert ' -I -m blastradius.github_pr' in scripts
     assert steps[-1]['if'] == 'always()'
+    assert 'working-directory' not in data['jobs']['blast-radius']['defaults']['run']
+    assert all(s.get('working-directory') == '${{ runner.temp }}' for s in steps if 'run' in s)
     ci = yaml.safe_load((ROOT / '.github/workflows/blastradius.yml').read_text(encoding='utf-8'))
     assert any(s.get('run') == 'python -m pytest -q' for s in ci['jobs']['tests']['steps'])
 

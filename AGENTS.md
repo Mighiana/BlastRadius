@@ -110,3 +110,8 @@ python -m blastradius.cli --plan examples/plans/ssh_open_plan.json --format sari
   from conftest (exit 4); this was reproduced during hosted CI bring-up.
 * Published, install-verified analyzer pin: a72c04890640102b315506ab85e5f1ccbe91bb9f.
   The consumer workflow uses this immutable default; overrides must be full SHAs.
+* GitHub rejects `runner.temp` in job-level defaults.run. Specify it in each
+  shell step's working-directory instead. Plain YAML parsing misses this contextual
+  validation error; the hosted workflow validator exposed it.
+* Linux tests and gate verified in Actions run 35441042287. This is not evidence
+  that the separate PR-comment acceptance workflow has completed.

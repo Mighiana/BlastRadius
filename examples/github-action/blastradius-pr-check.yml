@@ -47,7 +47,6 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: ${{ runner.temp }}
     steps:
       - name: Checkout trusted Terraform base
         uses: actions/checkout@v4
@@ -64,6 +63,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install reviewed BlastRadius revision
+        working-directory: ${{ runner.temp }}
         run: |
           if [[ ! "$BLASTRADIUS_REVISION" =~ ^[0-9a-fA-F]{40}$ ]]; then
             echo "::error::Set BLASTRADIUS_REVISION to a reviewed, published packaging-enabled commit SHA."
@@ -75,12 +75,14 @@ jobs:
       - name: Fetch candidate objects without checkout
         env:
           GH_TOKEN: ${{ github.token }}
+        working-directory: ${{ runner.temp }}
         run: |
           auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
           git -C "$GITHUB_WORKSPACE/terraform-repo" -c "http.extraHeader=AUTHORIZATION: basic $auth" fetch --no-tags origin "refs/pull/$PR_NUMBER/head"
 
       - name: Analyze Terraform change
         id: analysis
+        working-directory: ${{ runner.temp }}
         run: |
           mkdir -p "$RUNNER_TEMP/blastradius-reports"
           set +e
@@ -107,6 +109,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PR_REPOSITORY: ${{ github.repository }}
+        working-directory: ${{ runner.temp }}
         run: |
           "$RUNNER_TEMP/blastradius-env/bin/python" -I -m blastradius.github_pr \
             --repository "$PR_REPOSITORY" --pr "$PR_NUMBER" --head-sha "$HEAD_SHA" \
@@ -116,6 +119,7 @@ jobs:
         if: always()
         env:
           ANALYSIS_EXIT: ${{ steps.analysis.outputs.exit_code }}
+        working-directory: ${{ runner.temp }}
         run: |
           case "$ANALYSIS_EXIT" in
             0) exit 0 ;;

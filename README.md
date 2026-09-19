@@ -463,7 +463,10 @@ it is **not** executed by local tests. Use only with an authorized Actions bot t
 `.github/workflows/blastradius.yml` is this project's own CI/test workflow; its
 internal gate uses bundled `examples/safe`. The external-install workflow is the
 example above. YAML, shell syntax, gate exits, installation, and event inputs are
-locally tested. Hosted GitHub execution/comment publication remains unverified.
+locally tested. Hosted PR analysis/comment publication remains unverified.
+The repository's Linux test suite and CLI gate passed in
+[GitHub CI run 35441042287](https://github.com/Mighiana/BlastRadius/actions/runs/35441042287).
+That push-triggered run does not verify PR comments or the BLOCK → SAFE transition.
 
 For this repository's live acceptance test, `.github/workflows/blastradius-hosted-test.yml`
 uses the same published analyzer and bot-comment path against `examples/hosted-pr`.
@@ -586,7 +589,7 @@ remediation and score formula are preserved.
 synthetic inputs. Simulation edits real Terraform text and reuses the same engine;
 it does not fake reachability. Fixes are local recommendations, not AWS changes.
 
-**Supplied, hosted execution unverified:** the installation and GitHub Actions
+**Supplied, hosted PR acceptance unverified:** the installation and GitHub Actions
 workflow, idempotent bot-comment publisher, fork fallback, and summaries are
 implemented and locally validated. No hosted PR was created and no successful
 hosted comment/run is claimed. API tests use a fake client; analysis tests use
