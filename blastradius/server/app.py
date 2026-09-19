@@ -42,7 +42,7 @@ from blastradius.server.schemas import (
     OrganizationInput,
     ProjectInput,
 )
-from blastradius.server.static import FrontendFiles
+from blastradius.server.static import FrontendFiles, FrontendMount
 
 
 def project_payload(project: Project) -> dict:
@@ -556,7 +556,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
 
     if (settings.static_dir / "index.html").is_file():
-        app.mount("/", FrontendFiles(directory=settings.static_dir), name="frontend")
+        app.router.routes.append(
+            FrontendMount("/", app=FrontendFiles(directory=settings.static_dir), name="frontend")
+        )
 
     return app
 

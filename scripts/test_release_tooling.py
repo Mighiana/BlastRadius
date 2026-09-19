@@ -3,13 +3,15 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
+import zipfile
 from pathlib import Path
 
 import pytest
 import yaml
 
 from check_docs import anchors, check_file
-from check_integration import check
+from check_integration import check, check_wheel
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -103,11 +105,66 @@ def test_startup_rejects_unrecognized_command() -> None:
     assert result.returncode == 2
 
 
+def test_wheel_checks_future_migrations_and_server_modules(tmp_path: Path) -> None:
+    root = tmp_path / "source"
+    module = root / "blastradius/server/future.py"
+    revision = root / "blastradius/server/migrations/versions/0002_future.py"
+    revision.parent.mkdir(parents=True)
+    module.write_text("value = 1\n", encoding="utf-8")
+    revision.write_text("revision = '0002'\n", encoding="utf-8")
+    wheel = tmp_path / "package.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.write(module, module.relative_to(root))
+    assert check_wheel(root, wheel) == [
+        "Wheel is missing blastradius/server/migrations/versions/0002_future.py."
+    ]
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for source in (module, revision):
+            archive.write(source, source.relative_to(root))
+    assert check_wheel(root, wheel) == []
+    module.write_text("value = 2\n", encoding="utf-8")
+    assert check_wheel(root, wheel) == ["Wheel has stale content for blastradius/server/future.py."]
+
+
+def test_container_defaults_fail_closed_without_production_configuration() -> None:
+    env = {key: value for key, value in os.environ.items() if not key.startswith("BR_")}
+    env.update(BR_ENV="production", BR_AUTO_MIGRATE="false")
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", "from blastradius.server.config import Settings; Settings.from_env()"],
+        env=env, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert "Session secret" in result.stderr
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "BR_ENV=production" in dockerfile
+    assert "BR_AUTO_MIGRATE=false" in dockerfile
+    assert "COPY --chown=blastradius:blastradius . ." not in dockerfile
+
+
+def test_compose_applies_nonroot_readonly_and_bounded_resources() -> None:
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    for name in ("app", "migrate", "db"):
+        service = compose["services"][name]
+        assert service["read_only"] is True
+        assert service["cap_drop"] == ["ALL"]
+        assert service["security_opt"] == ["no-new-privileges:true"]
+        assert service["cpus"] > 0
+        assert service["mem_limit"]
+        assert service["pids_limit"] > 0
+        assert service["logging"]["options"]["max-size"]
+    assert compose["services"]["db"]["user"] == "postgres"
+    assert "ports" not in compose["services"]["db"]
+    assert compose["services"]["app"]["ports"] == [
+        "127.0.0.1:${BLASTRADIUS_PORT:-8000}:8000"
+    ]
+
+
 @pytest.mark.parametrize(
     "name",
     [
         ".github/workflows/blastradius.yml",
         ".github/workflows/blastradius-hosted-test.yml",
+        ".github/workflows/release-images.yml",
         "docs/github-action.yml",
     ],
 )

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 import tomllib
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,10 +39,35 @@ def check(root: Path) -> list[str]:
     return errors
 
 
+def check_wheel(root: Path, wheel: Path) -> list[str]:
+    errors = []
+    with zipfile.ZipFile(wheel) as archive:
+        names = set(archive.namelist())
+        for source in sorted((root / "blastradius").rglob("*.py")):
+            name = source.relative_to(root).as_posix()
+            if name not in names:
+                errors.append(f"Wheel is missing {name}.")
+            elif archive.read(name) != source.read_bytes():
+                errors.append(f"Wheel has stale content for {name}.")
+    return errors
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--wheel", nargs="?", const="",
+        help="Verify package contents; defaults to the single dist/*.whl file.",
+    )
+    args = parser.parse_args()
     try:
         errors = check(ROOT)
-    except (OSError, ValueError) as exc:
+        if args.wheel is not None:
+            wheels = [Path(args.wheel)] if args.wheel else sorted((ROOT / "dist").glob("*.whl"))
+            if len(wheels) != 1:
+                errors.append("Provide one wheel path, or leave exactly one wheel in dist/.")
+            else:
+                errors.extend(check_wheel(ROOT, wheels[0]))
+    except (OSError, ValueError, zipfile.BadZipFile) as exc:
         print(f"Invalid application build metadata: {exc}", file=sys.stderr)
         return 2
     for error in errors:
