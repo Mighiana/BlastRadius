@@ -1,0 +1,104 @@
+# BlastRadius pull-request security check.
+#
+# Copy this file to .github/workflows/blastradius.yml in the repository that
+# holds your Terraform, and adjust TERRAFORM_DIR.
+#
+#   Pull request opened/updated
+#        -> checkout (full history, so the base ref exists locally)
+#        -> BlastRadius compares base vs PR head
+#        -> attack-path analysis
+#        -> exit 0 = safe, exit 1 = security regression
+#        -> the check passes or fails, and the report is saved in the job summary
+#
+# No AWS account, credentials or cloud access is required: the analysis is
+# static and uses only the repository contents.
+name: BlastRadius
+
+on:
+  pull_request:
+    paths:
+      - "**/*.tf"
+      - "blastradius.yml"
+      - ".github/workflows/blastradius.yml"
+
+permissions:
+  contents: read
+  pull-requests: read # report publication uses artifacts, not PR comments
+
+env:
+  # Directory holding the .tf files to analyze (repo-relative).
+  TERRAFORM_DIR: infra
+  BASE_SHA: ${{ github.event.pull_request.base.sha }}
+  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+
+jobs:
+  blast-radius:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout with full history
+        uses: actions/checkout@v4
+        with:
+          # BlastRadius reads the base ref straight out of Git, so the history
+          # must be present. A shallow clone would fail with "Ref not found".
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install BlastRadius
+        run: |
+          pip install -r requirements.txt
+
+      - name: Fetch candidate without checkout
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c "http.extraHeader=AUTHORIZATION: basic $auth" fetch --no-tags origin "refs/pull/$PR_NUMBER/head"
+
+      - name: Analyze blast radius
+        id: analysis
+        continue-on-error: true
+        working-directory: .
+        run: |
+          python -m blastradius.cli \
+            --repo "$GITHUB_WORKSPACE" \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --terraform-dir "$TERRAFORM_DIR" \
+            --format pr | tee "$GITHUB_WORKSPACE/blastradius-report.md"
+          exit "${PIPESTATUS[0]}"
+
+      - name: Publish report in job summary
+        if: always()
+        run: cat blastradius-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate SARIF artifact
+        if: always()
+        continue-on-error: true
+        working-directory: .
+        run: |
+          python -m blastradius.cli \
+            --repo "$GITHUB_WORKSPACE" \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --terraform-dir "$TERRAFORM_DIR" \
+            --format sarif > "$GITHUB_WORKSPACE/blastradius.sarif" || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: blastradius-security-report
+          path: |
+            blastradius-report.md
+            blastradius.sarif
+
+      - name: Fail the check on a security regression
+        if: steps.analysis.outcome == 'failure'
+        run: |
+          echo "::error::BlastRadius blocked this change - a new attack path reaches sensitive data."
+          exit 1

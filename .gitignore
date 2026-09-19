@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.streamlit/secrets.toml
+.devin/config.local.json
+.env
+.env.*
+.terraform/
+*.tfstate
+*.tfstate.*
+plan.out
+
+# Terraform written by the remediation and simulation features at runtime
+examples/generated_fix/
+.blastradius_sim/
+
+# Local scratch
+_preview.html

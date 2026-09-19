@@ -1,0 +1,113 @@
+# BlastRadius CI for this repository.
+#
+# Two jobs:
+#   tests  - the full pytest suite
+#   gate   - proves the merge gate itself still works, by running the CLI
+#            against the bundled scenarios and asserting the exit codes
+#
+# For the copy-paste workflow that guards *your* Terraform pull requests, see
+# examples/github-action/blastradius-pr-check.yml
+name: BlastRadius
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pytest -q
+
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: A risky change must fail the gate (expect exit 1)
+        run: |
+          set +e
+          python -m blastradius.cli --before examples/safe --after examples/vulnerable --format pr
+          code=$?
+          set -e
+          test "$code" -eq 1 || { echo "::error::expected exit 1, got $code"; exit 1; }
+
+      - name: A safe change must pass the gate (expect exit 0)
+        run: python -m blastradius.cli --before examples/safe --after examples/safe
+
+      - name: Remediated config must pass the gate (expect exit 0)
+        run: python -m blastradius.cli --before examples/vulnerable --after examples/safe
+
+      - name: Terraform plan JSON mode must fail the gate (expect exit 1)
+        run: |
+          set +e
+          python -m blastradius.cli --plan examples/plans/ssh_open_plan.json
+          code=$?
+          set -e
+          test "$code" -eq 1 || { echo "::error::expected exit 1, got $code"; exit 1; }
+
+  terraform-pr-gate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      TERRAFORM_DIR: examples/safe
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          path: trusted
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install trusted analyzer
+        working-directory: trusted
+        run: pip install -r requirements.txt
+      - name: Fetch candidate objects without checkout
+        working-directory: trusted
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c "http.extraHeader=AUTHORIZATION: basic $auth" fetch --no-tags origin "refs/pull/$PR_NUMBER/head"
+      - name: Analyze Terraform pull request
+        id: analysis
+        working-directory: trusted
+        run: |
+          set +e
+          python -m blastradius.cli --repo . --base "$BASE_SHA" --head "$HEAD_SHA" --terraform-dir "$TERRAFORM_DIR" --format pr > ../blastradius-report.md
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          python -m blastradius.cli --repo . --base "$BASE_SHA" --head "$HEAD_SHA" --terraform-dir "$TERRAFORM_DIR" --format sarif > ../blastradius.sarif
+          cat ../blastradius-report.md >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blastradius-security-report
+          path: |
+            blastradius-report.md
+            blastradius.sarif
+      - name: Enforce merge gate
+        env:
+          ANALYSIS_EXIT: ${{ steps.analysis.outputs.exit_code }}
+        run: |
+          test "$ANALYSIS_EXIT" = "0" || exit "${ANALYSIS_EXIT:-2}"

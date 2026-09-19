@@ -1,0 +1,13 @@
+# Pinned theme: the dashboard is designed as a dark security console, and the
+# demo must look identical on any machine regardless of the viewer's OS or
+# Streamlit light/dark preference.
+[theme]
+base = "dark"
+backgroundColor = "#070c17"
+secondaryBackgroundColor = "#0f172a"
+textColor = "#e8eef8"
+primaryColor = "#38bdf8"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
