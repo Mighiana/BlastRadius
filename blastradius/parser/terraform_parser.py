@@ -148,6 +148,7 @@ def parse_directory(path: PathLike) -> ParsedConfig:
 
 def _parse_files(files: Iterable[Path], source_dir: str) -> ParsedConfig:
     resources: List[TerraformResource] = []
+    unsupported = set()
     for file_path in files:
         with file_path.open("r", encoding="utf-8") as handle:
             document = hcl2.load(handle)
@@ -155,6 +156,7 @@ def _parse_files(files: Iterable[Path], source_dir: str) -> ParsedConfig:
             for raw_type, bodies in block.items():
                 resource_type = _unquote(raw_type)
                 if resource_type not in SUPPORTED_TYPES:
+                    unsupported.add(resource_type)
                     continue
                 for raw_name, body in bodies.items():
                     resources.append(
@@ -167,4 +169,4 @@ def _parse_files(files: Iterable[Path], source_dir: str) -> ParsedConfig:
                     )
     # Deterministic ordering keeps graphs and screenshots stable across runs.
     resources.sort(key=lambda r: (SUPPORTED_TYPES.index(r.type), r.name))
-    return ParsedConfig(resources=resources, source_dir=source_dir)
+    return ParsedConfig(resources=resources, source_dir=source_dir, unsupported=sorted(unsupported))

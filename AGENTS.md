@@ -3,7 +3,7 @@
 ## Commands
 
 ```bash
-pip install -r requirements.txt   # setup (Python 3.10+; verified on 3.14)
+pip install ".[ui,dev]"          # setup (Python 3.11+; verified on 3.14)
 streamlit run app.py              # dashboard (http://localhost:8501)
 pytest                            # all tests (must be green before any commit)
 
@@ -79,7 +79,29 @@ python -m blastradius.cli --plan examples/plans/ssh_open_plan.json --format sari
   colliding with root resource addresses. Plan mode is currently CLI-only.
 * SARIF includes logical resource addresses and known files, not guessed lines.
 * Tests must set Git author identity per command (`git -c`), not via git config.
-* Actions run the analyzer from the base revision and only read candidate objects.
-  Install the analyzer on the base branch before bootstrapping the required check.
+* Internal repo CI runs the base-revision analyzer. The external example installs
+  a reviewed upstream commit into a venv and uses isolated Python from runner.temp;
+  only the target repo's base is checked out, and candidate objects are read as data.
 * Demo Mode removes advanced widgets. Preserve before/after session state when
   hiding those widgets; test toggling back after remediation.
+
+## Installation and GitHub PR delivery
+
+* Build a wheel with `python -m pip wheel . --no-deps --wheel-dir dist`.
+  Install it in a fresh venv and use `python -I -m blastradius.cli` to avoid falsely
+  testing imports from the source tree. CLI core does not require Streamlit.
+* `--github-action` reads a validated pull_request event. Never accept
+  pull_request_target, event branch names in shell code, or mismatched base repos.
+* `terraform_dir` comes from explicit override or trusted base policy; multiple
+  roots must fail clearly. Do not read candidate policy to weaken its own gate.
+* `--report-dir` emits all formats from one analysis. CLI exit 0/1/2 is independent
+  of comment publication. Action outputs use fixed keys and scalar values only.
+* Publication updates only the GitHub Actions bot's marked comment and checks the
+  head SHA. Never modify a human's look-alike comment. Tests use a fake API client;
+  do not run the publisher against a live PR without explicit authorization.
+* GitHub permissions failures leave the report in summary/artifacts. No token is
+  embedded in command arguments or logs; use the step-scoped GITHUB_TOKEN env var.
+* This integration and packaging are locally verified, not a published PyPI
+  package, Action release or verified hosted GitHub run. Publication needs approval.
+* Tests with very large parametrized strings need short explicit IDs: Windows
+  environment variables (including PYTEST_CURRENT_TEST) have a 32767-char limit.

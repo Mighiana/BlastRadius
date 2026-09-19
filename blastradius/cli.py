@@ -13,6 +13,7 @@ This is what a CI pipeline would call on a pull request.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -40,6 +41,11 @@ def _build_parser() -> argparse.ArgumentParser:
             "opens a new path from the internet to sensitive data."
         ),
     )
+    parser.add_argument("--github-action", action="store_true", help="Read PR base/head SHAs from the GitHub pull_request event")
+    parser.add_argument("--report-dir", type=Path, help="Write Markdown, JSON, SARIF and summary artifacts together")
+    parser.add_argument("--github-output", type=Path, help="Append safe scalar step outputs to this Actions output file")
+    parser.add_argument("--github-summary", type=Path, help="Append the check summary and report to this file")
+    parser.add_argument("--comment-file", type=Path, help="Write a marked, concise PR report for publication")
     parser.add_argument("--policy", help="Explicit trusted blastradius.yml policy file")
     parser.add_argument("--before", help="Terraform directory before the change")
     parser.add_argument("--after", help="Terraform directory after the change")
@@ -143,6 +149,37 @@ def run(argv: Optional[Sequence[str]] = None, stream: Optional[TextIO] = None) -
             pass
 
     args = _build_parser().parse_args(argv)
+    try:
+        code = _run_analysis(args, out)
+    except OSError as error:
+        print(f"error: {error}", file=sys.stderr)
+        code = EXIT_USAGE
+    if code == EXIT_USAGE:
+        from blastradius.actions_output import deliver_error
+
+        try:
+            deliver_error(args)
+        except OSError as error:
+            print(f"error: cannot write failure artifacts: {error}", file=sys.stderr)
+    return code
+
+
+def _run_analysis(args, out):
+    if args.github_action:
+        from blastradius.github_context import GitHubContextError, PullRequestContext
+
+        args.github_output = args.github_output or os.environ.get("GITHUB_OUTPUT")
+        args.github_summary = args.github_summary or os.environ.get("GITHUB_STEP_SUMMARY")
+        if args.base or args.head or args.before or args.after or args.plan:
+            print("error: --github-action obtains base/head from the event; do not mix input modes", file=out)
+            return EXIT_USAGE
+        try:
+            context = PullRequestContext.from_environment()
+        except GitHubContextError as error:
+            print(f"error: {error}", file=out)
+            return EXIT_USAGE
+        args.repo = args.repo or str(context.workspace)
+        args.base, args.head = context.base_sha, context.head_sha
     args.diagnostics = []
     args.resolved_policy = None
     if args.policy:
@@ -184,7 +221,8 @@ def run(argv: Optional[Sequence[str]] = None, stream: Optional[TextIO] = None) -
         if git_mode:
             try:
                 comparison = gitsource.prepare_comparison(
-                    args.repo, args.base, args.head, workdir, args.terraform_dir
+                    args.repo, args.base, args.head, workdir,
+                    args.terraform_dir or (args.resolved_policy.terraform_dir if args.resolved_policy else None)
                 )
                 args.resolved_policy = args.resolved_policy or gitsource.base_policy(comparison)
             except (gitsource.GitAnalysisError, PolicyError) as error:
@@ -226,18 +264,33 @@ def _report(
         print(f"error: {error}", file=out)
         return EXIT_USAGE
     decision = decide(diff, policy)
+    if args.comment_file:
+        from blastradius.report import build_pr_comment
+
+        try:
+            args.comment_file.write_text(build_pr_comment(diff, decision, before_dir, after_dir), encoding="utf-8")
+        except OSError as error:
+            print(f"error: cannot write PR report: {error}", file=sys.stderr)
+            return EXIT_USAGE
     if args.format not in ("json", "sarif"):
         for message in args.diagnostics:
             print(f"# {message}", file=out)
+
+    from blastradius.actions_output import deliver_success, step_outputs
+
+    exit_code = (0 if decision.decision.value == "SAFE TO MERGE" else 1) if args.fail_on_review else decision.exit_code
+    payload = _json_payload(diff, decision)
+    payload.update(step_outputs(diff, decision, exit_code))
+    payload["diagnostics"] = args.diagnostics
+    payload["unsupported_resource_types"] = sorted(set(diff.before.graph.graph.get("unsupported", [])) | set(diff.after.graph.graph.get("unsupported", [])))
+    if args.report_dir or args.github_output or args.github_summary:
+        deliver_success(args, diff, decision, payload, before_dir, after_dir, exit_code)
 
     if args.format == "pr":
         print(build_report(diff, decision, before_dir, after_dir), file=out)
     elif args.format == "json":
         import json
 
-        payload = _json_payload(diff, decision)
-        payload["diagnostics"] = args.diagnostics
-        payload["unsupported_resource_types"] = diff.after.graph.graph.get("unsupported", [])
         print(json.dumps(payload, indent=2), file=out)
     elif args.format == "sarif":
         import json
@@ -247,9 +300,7 @@ def _report(
     else:
         print("\n".join(_summary_lines(diff, decision)), file=out)
 
-    if args.fail_on_review:
-        return 0 if decision.decision.value == "SAFE TO MERGE" else 1
-    return decision.exit_code
+    return exit_code
 
 
 def main() -> None:  # pragma: no cover - thin wrapper

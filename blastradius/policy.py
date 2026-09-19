@@ -26,7 +26,7 @@ standalone administrative-ingress blocking by default.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional
 
 POLICY_FILENAMES = ("blastradius.yml", "blastradius.yaml")
@@ -64,6 +64,7 @@ class Policy:
     minimum_security_score: Optional[int] = None
     source: Optional[str] = None
     warnings: List[str] = field(default_factory=list)
+    terraform_dir: Optional[str] = None
 
     @property
     def is_default(self) -> bool:
@@ -104,7 +105,7 @@ def load_policy_data(data: Any, source: Optional[str] = None) -> Policy:
         raise PolicyError(f"Policy must be a mapping, got {type(data).__name__}")
 
     warnings: List[str] = []
-    unknown = set(data) - {"version", "gate", "allowed", "thresholds"}
+    unknown = set(data) - {"version", "gate", "allowed", "thresholds", "terraform_dir"}
     if unknown:
         raise PolicyError(f"Unknown policy keys: {sorted(unknown)}")
 
@@ -126,8 +127,17 @@ def load_policy_data(data: Any, source: Optional[str] = None) -> Policy:
     if minimum is not None and (type(minimum) is not int or not 0 <= minimum <= 100):
         raise PolicyError("minimum_security_score must be an integer from 0 to 100")
 
+    terraform_dir = data.get("terraform_dir")
+    if terraform_dir is not None:
+        if not isinstance(terraform_dir, str) or not terraform_dir.strip():
+            raise PolicyError("terraform_dir must be a nonempty repository-relative directory")
+        terraform_dir = terraform_dir.replace("\\", "/")
+        if terraform_dir.startswith("/") or ":" in terraform_dir or ".." in terraform_dir.split("/"):
+            raise PolicyError("terraform_dir must stay within the repository")
+        terraform_dir = str(PurePosixPath(terraform_dir))
     defaults = DEFAULTS["gate"]
     return Policy(
+        terraform_dir=terraform_dir,
         block_new_critical_paths=_coerce_bool(
             gate.get("block_new_critical_paths", defaults["block_new_critical_paths"]),
             "block_new_critical_paths",

@@ -150,3 +150,46 @@ def build_report(
         "no infrastructure was deployed or accessed."
     )
     return "\n".join(lines)
+
+
+def _safe_markdown(value):
+    import html
+
+    text = html.escape(str(value), quote=False).replace('@', '@\u200b')
+    for character in ('\\', '`', '*', '_', '[', ']', '|', '#'):
+        text = text.replace(character, '\\' + character)
+    return text.replace('\r', ' ').replace('\n', ' ')
+
+
+def build_pr_comment(diff, decision=None, before_dir=None, after_dir=None):
+    from blastradius.github_pr import MARKER
+
+    decision = decision or decide(diff)
+    paths = diff.new_critical_paths or diff.new_attack_paths
+    coverage = sorted(set(diff.before.graph.graph.get('unsupported', [])) |
+                      set(diff.after.graph.graph.get('unsupported', [])))
+    lines = [MARKER, '## BlastRadius Security Check', '',
+             f'**Decision: {decision.icon} {decision.decision.value}**', '',
+             f'**Security score:** {diff.before.score} → {diff.after.score}',
+             f'**New critical attack paths:** {len(diff.new_critical_paths)}',
+             f'**Newly reachable sensitive resources:** {len(diff.newly_reachable_sensitive)}',
+             f'**Newly internet-reachable resources:** {len(diff.newly_exposed)}', '']
+    if paths:
+        lines.append('**Attack path:**')
+        for path in paths[:3]:
+            lines.append('- ' + ' → '.join(_safe_markdown(n) for n in diff.display_path(path)))
+        if len(paths) > 3:
+            lines.append(f'- {len(paths) - 3} additional paths; see artifacts.')
+    else:
+        lines.append('No new modeled critical attack paths detected.')
+    change = responsible_change(before_dir, after_dir)
+    if change:
+        lines.extend(['', '**Responsible infrastructure change:**', _safe_markdown(change)[:2000]])
+    if decision.policy_notes:
+        lines.extend(['', '**Policy:**'] + ['- ' + _safe_markdown(note) for note in decision.policy_notes[:8]])
+    lines.extend(['', '**Recommendation:**', _recommendation(diff, decision)])
+    if coverage:
+        lines.extend(['', '**Outside current model coverage:** ' + ', '.join(_safe_markdown(c) for c in coverage)[:2000]])
+    lines.extend(['', '_Simplified static AWS model, not proof of infrastructure safety. '
+                  'Unsupported relationships and unknown values can hide paths. No AWS access or deployment._'])
+    return '\n'.join(lines)

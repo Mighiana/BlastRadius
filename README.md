@@ -1,16 +1,30 @@
 # BlastRadius
 
-**Know the blast radius before you merge.**
+**Attack-path diff for Terraform pull requests.**
 
-BlastRadius is an infrastructure security gate for pull requests. It models your
-Terraform as an **attack graph**, diffs the graph before and after a change, and
-answers the question a misconfiguration scanner cannot:
+Your Terraform diff shows what changed. **BlastRadius shows what became reachable.**
 
-> If a developer changes cloud infrastructure, what new attack paths or sensitive
-> resources become reachable?
+Install the GitHub check, open a Terraform PR, and receive one updated security
+comment explaining the modeled attack-path change and merge decision.
 
-A one-line security-group edit is not reported as "port 22 is open". It is
-reported as a merge decision:
+```text
+Terraform PR → Attack graph diff → New path to sensitive data → 🚫 BLOCK CHANGE
+Fix Terraform → Re-analyze → No new modeled critical paths → ✅ SAFE TO MERGE
+```
+
+**Know the blast radius before you merge.** BlastRadius is a simplified static
+security model—not proof that infrastructure is safe. It requires no AWS account,
+credentials, deployment, or paid service.
+
+**Availability:** installable packaging and the PR workflow are prepared and tested
+locally. No PyPI package, `v1` tag, or hosted PR success is claimed. Before using
+GitHub installation, publish a reviewed commit containing `pyproject.toml` and this
+integration. The earlier initial MVP commit is not packaging-enabled.
+
+[Add the GitHub check](#github-actions) · [Install locally](#installation) ·
+[Coverage and limitations](#limitations)
+
+A routine-looking CIDR change can produce:
 
 ```
 🚫 BLOCK CHANGE
@@ -25,8 +39,9 @@ New attack path:
   Internet → Web SG → Web Server → App Role → Customer Data → Sensitive Data
 ```
 
-Everything runs locally against sample Terraform files. **No AWS credentials are
-read, no infrastructure is provisioned, and nothing is attacked.**
+Analysis runs locally against Terraform source, Git snapshots, or plan JSON.
+Bundled scenarios are controlled examples, not the only supported inputs.
+**No AWS credentials are read, no infrastructure is provisioned, and nothing is attacked.**
 
 ---
 
@@ -189,19 +204,41 @@ is what makes the before/after comparison trustworthy.
 
 ## Installation
 
-Requires Python 3.10+ (verified on 3.14).
+Requires **Python 3.11+** and Git (verified locally on Windows / Python 3.14).
+The CLI has three direct dependencies: NetworkX, python-hcl2, and PyYAML. The
+Streamlit dashboard is optional. Packaging uses `pyproject.toml`; the wheel was
+built and installed in a fresh virtual environment and tested with isolated Python
+imports. Nothing was uploaded to PyPI or released.
+
+From this local checkout, available now:
 
 ```bash
-git clone <this-repo> && cd BlastRadius
-
 python -m venv .venv
 # Windows
 .venv\Scripts\activate
 # macOS / Linux
 source .venv/bin/activate
 
-pip install -r requirements.txt
+python -m pip install .
+blastradius --help
 ```
+
+For dashboard development and tests, use `python -m pip install ".[ui,dev]"` and
+run `streamlit run app.py` from the source checkout. The CLI wheel intentionally
+does not bundle the dashboard entry file, demo Terraform, or test suite.
+
+After a packaging-enabled commit has been reviewed and published to this GitHub
+repository, install it without vendoring source:
+
+```bash
+python -m pip install "git+https://github.com/Mighiana/BlastRadius.git@FULL_REVIEWED_COMMIT_SHA"
+blastradius --repo /path/to/terraform-repo --base main --head feature/network-change
+```
+
+Replace `FULL_REVIEWED_COMMIT_SHA` with a real published 40-character commit SHA.
+This is an explicit placeholder, not an existing release. Do **not** use plain
+`pip install blastradius` or `uses: Mighiana/BlastRadius@v1`: no such distribution
+or Action release is asserted by this project.
 
 ## Running
 
@@ -240,6 +277,11 @@ Risk     : LOW -> CRITICAL
 | `--format sarif` | SARIF 2.1.0 findings, resource/file evidence and remediation |
 | `--policy PATH` | Explicit trusted policy file (overrides discovery) |
 | `--fail-on-review` | Also fail on REVIEW REQUIRED, not just BLOCK |
+| `--github-action` | Read PR SHAs from the validated `pull_request` event |
+| `--report-dir PATH` | Generate marked Markdown, JSON, SARIF and summary together |
+| `--github-output PATH` | Append safe scalar outputs for later workflow steps |
+| `--github-summary PATH` | Append the result and report to the Actions summary |
+| `--comment-file PATH` | Write a concise marked PR comment without publishing it |
 
 Exit codes: **0** = gate passes (SAFE or REVIEW by default), **1** = gate blocks
 (including configured policy violations), **2** = usage/input/policy error.
@@ -303,6 +345,7 @@ Optional `blastradius.yml`:
 
 ```yaml
 version: 1
+terraform_dir: infra
 gate:
   block_new_critical_paths: true
   block_new_sensitive_exposure: true
@@ -312,6 +355,13 @@ allowed:
 thresholds:
   minimum_security_score: 70
 ```
+
+`terraform_dir` is optional and repository-relative. Git/Actions mode reads it
+from the **base commit**, not an unreviewed candidate change. Precedence is an
+explicit `--terraform-dir` / workflow variable, then trusted configuration, then
+single-root discovery. Multiple roots without a selection are an error, never a
+silent choice. Add root configuration to the base branch before relying on it in
+PRs. Candidate policy changes need separate review.
 
 No file preserves the existing secure, context-aware gate: new critical paths and
 sensitive exposure block; noncritical exposure (including public SSH) requires
@@ -330,31 +380,92 @@ Protect policy changes with review and branch protection outside this tool.
 
 ### GitHub Actions
 
-`.github/workflows/blastradius.yml` runs tests and demo contract checks. Its
-`terraform-pr-gate` job also compares the **actual PR base/head SHAs** for
-`examples/safe`. Change `TERRAFORM_DIR` to the root you intend to protect.
+**New-repository setup** (after publishing a reviewed packaging-enabled analyzer
+commit; no vendoring of Python source is required):
 
-For a Terraform repository, use `examples/github-action/blastradius-pr-check.yml`:
+1. Copy `examples/github-action/blastradius-pr-check.yml` into your Terraform
+   repository as `.github/workflows/blastradius.yml`.
+2. In repository **Settings → Secrets and variables → Actions → Variables**, set
+   `BLASTRADIUS_REVISION` to that analyzer commit's full 40-character SHA. This
+   mandatory pin prevents installing an unreviewed moving branch. The workflow
+   fails clearly if the pin is absent, invalid, or not installable.
+3. With one Terraform root, no root setting is needed. For multiple roots, set
+   optional repository variable `BLASTRADIUS_TERRAFORM_DIR=infra`, or add
+   `terraform_dir: infra` to the base branch's `blastradius.yml`.
+4. Open or update a Terraform PR. Base/head inputs come from GitHub automatically;
+   users do not provide BEFORE/AFTER directories or branch names.
+5. Inspect **BlastRadius** in the PR's checks, the Actions job summary, the report
+   artifact, and (where permissions permit) the single updated PR comment.
+6. Configure the check as required in GitHub branch protection yourself. Running
+   a workflow does not by itself prevent merges.
 
-1. Vendor the `blastradius/` package and its requirements into the repository root
-   on the trusted base branch first (or use this repository as the starting point).
-2. Copy the example into `.github/workflows/`, and set `TERRAFORM_DIR` to your
-   Terraform root. No placeholder external clone URL is needed.
-3. The workflow checks out the **base SHA**, installs its analyzer, and fetches
-   candidate commit objects without executing candidate code. It passes SHAs via
-   environment variables, never interpolated branch names in shell commands.
-4. It runs the existing CLI, retains Markdown and SARIF artifacts, and publishes
-   the report to the Actions job summary. A blocking decision or analysis error
-   fails the check. Fork PRs do not require write-permission tokens.
-5. Configure this check as required in branch protection yourself. The workflow
-   cannot prevent merging unless GitHub repository settings require it.
+The workflow runs on `pull_request` opened/synchronize/reopened/ready-for-review.
+It intentionally has no Terraform-only path filter, so a required check does not
+stay pending when other files change. It analyzes one Terraform root per run.
 
-There is no automatic PR comment or code-scanning upload. The report is ready to
-copy; SARIF is an artifact usable by security tooling. Optional code-scanning
-upload can be configured where available, but no paid feature is required.
-Workflow YAML and CLI behavior are locally tested; hosted GitHub execution has
-not been verified in this environment. The analyzer must already exist on the
-base branch before the first protected PR (bootstrap it separately).
+**Trust boundaries:** it checks out the consumer repository's trusted **base SHA**,
+fetches PR head objects without checking out the candidate, installs BlastRadius
+from the reviewed upstream SHA into an isolated venv, and runs Python with `-I`
+from the runner temp directory. Candidate Python, workflows, shell scripts,
+Terraform providers, and module downloads are never executed. Untrusted branch
+names are never interpolated into shell commands. The analysis runs without an
+exported GitHub write token; only fetch and comment steps receive scoped tokens.
+
+**Permissions:** `contents: read` is required for private-repository fetches;
+`pull-requests: write` permits comments. The standard Actions `GITHUB_TOKEN` is
+sufficient—no personal access token, AWS secret, or paid service is needed.
+Fork/Dependabot policies may downgrade it to read-only or require maintainer
+approval. Do not bypass those controls with `pull_request_target`. With no write
+permission, analysis still runs, artifacts and the job summary remain available,
+and comment publication fails nonfatally with a clear message.
+
+**One comment:** publication uses `<!-- blastradius-report -->` and verifies the
+`github-actions[bot]` author before updating. It searches paginated comments,
+skips an unchanged body, and rejects stale PR-head results. A per-PR concurrency
+group serializes/cancels overlapping runs to avoid duplicate or outdated comments.
+It does not modify a contributor's look-alike comment or delete any comments.
+The built-in publisher targets GitHub.com with the Actions bot token, not arbitrary
+PAT authors or GitHub Enterprise API endpoints.
+
+**Outputs and exit behavior:** one analysis produces all report formats and these
+step/job outputs:
+
+| Output | Meaning |
+|---|---|
+| `decision` | `BLOCK CHANGE`, `REVIEW REQUIRED`, `SAFE TO MERGE`, or `ERROR` |
+| `security_score_before` | Baseline heuristic score |
+| `security_score_after` | Candidate heuristic score |
+| `critical_paths_added` | Count of new modeled critical paths |
+| `sensitive_resources_added` | Count of newly reachable sensitive resources |
+| `exit_code` | 0 passes, 1 blocks, 2 means incomplete/invalid analysis |
+
+Use `steps.analysis.outputs.decision` in later steps, or the corresponding
+`needs['blast-radius'].outputs` values in dependent jobs. Error counts are blank
+(unknown), never zero masquerading as a successful scan. The final gate preserves
+exit 0/1/2 regardless of comment permissions. `--fail-on-review` can enforce review
+findings as well. Setup failures never result in a successful check.
+
+Artifacts: `report.md` (marked comment), `summary.md`, `result.json`, and
+`results.sarif`. The summary begins **BlastRadius — BLOCKED / PASSED / REVIEW
+REQUIRED / ERROR** with the critical-path count. A passing report says **No new
+modeled critical attack paths detected**, not that AWS infrastructure is safe.
+SARIF is uploaded as an artifact, not automatically submitted to code scanning.
+
+For trusted local automation, the publisher can also be invoked explicitly:
+
+```bash
+blastradius --repo /path/to/repo --base main --head feature/change --report-dir reports
+blastradius-comment --repository owner/repo --pr 123 --head-sha FULL_HEAD_SHA --report-file reports/report.md
+```
+
+Publication reads `GITHUB_TOKEN` from the environment and never accepts or prints
+it as a command-line argument. This second command makes a real GitHub API write;
+it is **not** executed by local tests. Use only with an authorized Actions bot token.
+
+`.github/workflows/blastradius.yml` is this project's own CI/test workflow; its
+internal gate uses bundled `examples/safe`. The external-install workflow is the
+example above. YAML, shell syntax, gate exits, installation, and event inputs are
+locally tested. Hosted GitHub execution/comment publication remains unverified.
 
 ### SARIF findings
 
@@ -430,12 +541,8 @@ intentionally public 443 listener, because "fixing" it would cause an outage.
 
 ### Screenshots
 
-| | |
-|---|---|
-| Deployment decision and before/after attack graph | _`docs/screenshot-decision.png` (placeholder)_ |
-| New attack path with per-hop reasoning | _`docs/screenshot-path.png` (placeholder)_ |
-| PR security report | _`docs/screenshot-report.png` (placeholder)_ |
-| Generated remediation diff | _`docs/screenshot-fix.png` (placeholder)_ |
+No current screenshot files are bundled. Run the dashboard to see the actual
+UI; this README does not substitute mock images for verified screenshots.
 
 ---
 
@@ -466,17 +573,26 @@ operates on controlled Terraform configurations.
 
 **Implemented and locally tested:** HCL/plan normalization, NetworkX traversal,
 base/head Git extraction, graph comparison, policy decisions, CLI exit codes,
-JSON/SARIF/Markdown reports, and Streamlit interactions. The existing engine,
-scenarios, remediation and score formula are preserved.
+JSON/SARIF/Markdown reports, and Streamlit interactions. Also verified: wheel
+installation into a clean environment, real local Git risky/fixed commits, Actions
+input/output handling, shell exit behavior, and mocked create/update/permission
+failure GitHub API cases. The attack-path engine, AWS coverage, scenarios,
+remediation and score formula are preserved.
 
 **Controlled demonstrations:** the three Terraform scenarios and plan fixture are
 synthetic inputs. Simulation edits real Terraform text and reuses the same engine;
 it does not fake reachability. Fixes are local recommendations, not AWS changes.
 
+**Supplied, hosted execution unverified:** the installation and GitHub Actions
+workflow, idempotent bot-comment publisher, fork fallback, and summaries are
+implemented and locally validated. No hosted PR was created and no successful
+hosted comment/run is claimed. API tests use a fake client; analysis tests use
+real Git and the real graph engine. Packaging is prepared locally, not published
+as a PyPI package, `v1` Action, or release.
+
 **Not production assurance:** AWS reachability and IAM are simplified; incomplete
-coverage can miss paths. CI workflows are supplied and locally validated, but not
-run on hosted GitHub here. No GitHub check installation, branch protection,
-cloud deployment, hosted service, or automatic PR remediation is performed.
+coverage can miss paths. No branch protection, cloud deployment, hosted service,
+or automatic PR remediation is configured by running the local tool.
 
 ## Future roadmap
 
@@ -487,8 +603,8 @@ Not implemented:
 * Azure and GCP providers
 * Live AWS account import (read-only) for drift-aware graphs
 * Checkov and Trivy integration to enrich nodes with existing findings
-* A GitHub Action wrapping the existing CLI to post the report as a PR comment
-  automatically
+* Hosted GitHub acceptance testing and a reviewed versioned distribution release
+* GitHub Enterprise API support and multi-root aggregation into one report
 * AI-agent remediation that opens the fix PR directly
 * MITRE ATT&CK technique mapping per edge
 * Broader plan support: module/count/for_each addresses, unknown-value tracking,

@@ -175,18 +175,22 @@ class GitComparison:
 
 
 def base_policy(comparison: GitComparison):
+    return policy_at_ref(comparison.repo, comparison.base_sha)
+
+
+def policy_at_ref(repo, base_sha):
     import yaml
     from blastradius.policy import POLICY_FILENAMES, Policy, PolicyError, load_policy_data
 
-    paths = str(_run(comparison.repo, [
-        "ls-tree", "-rz", "--name-only", comparison.base_sha
+    paths = str(_run(repo, [
+        "ls-tree", "-rz", "--name-only", base_sha
     ])).split("\0")
     for filename in POLICY_FILENAMES:
         if filename not in paths:
             continue
-        text = _run(comparison.repo, ["show", f"{comparison.base_sha}:{filename}"])
+        text = _run(repo, ["show", f"{base_sha}:{filename}"])
         try:
-            return load_policy_data(yaml.safe_load(text), f"{comparison.base_sha}:{filename}")
+            return load_policy_data(yaml.safe_load(text), f"{base_sha}:{filename}")
         except yaml.YAMLError as error:
             raise PolicyError(f"Invalid policy at base ref: {error}") from error
     return Policy()
@@ -209,7 +213,9 @@ def prepare_comparison(
     base_sha = resolve_ref(repository, base_ref)
     head_sha = resolve_ref(repository, head_ref)
 
-    directory = _select_directory(repository, base_sha, head_sha, terraform_dir)
+    directory = _select_directory(
+        repository, base_sha, head_sha, terraform_dir or policy_at_ref(repository, base_sha).terraform_dir
+    )
 
     root = Path(workdir)
     before_dir = root / "before"
