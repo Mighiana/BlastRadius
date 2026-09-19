@@ -19,6 +19,12 @@ services:
   app:
     build: .
     env_file: .env
+    environment: &app-environment
+      BR_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-blastradius}:${POSTGRES_PASSWORD:?Set a local database password in .env}@db:5432/${POSTGRES_DB:-blastradius}
+      BR_DATA_DIR: /app/.local
+      BR_STATIC_DIR: /app/web/dist
+      BR_AUTO_MIGRATE: "false"
+      BLASTRADIUS_ALEMBIC_CONFIG: /app/alembic.ini
     ports:
       - "127.0.0.1:${BLASTRADIUS_PORT:-8000}:8000"
     depends_on:
@@ -39,6 +45,7 @@ services:
     profiles: [tools]
     build: .
     env_file: .env
+    environment: *app-environment
     command: [migrate]
     depends_on:
       db:

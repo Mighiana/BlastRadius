@@ -7,11 +7,11 @@ NPM ?= npm
 
 help:
 	@printf '%s\n' \
-	  'make dev          Install and start the integrated local app (Python 3.12, Node 22)' \
+	  'make dev          Install and start the integrated local app (Python 3.12, Node 22/24)' \
 	  'make install-core Install CLI, legacy demo and test/quality tools' \
 	  'make legacy       Start the legacy bundled Streamlit demo' \
 	  'make check        Tests, Python lint/types and local documentation links' \
-	  'make frontend     npm ci, lint, typecheck and production build' \
+	  'make frontend     npm ci, lint, typecheck, unit tests and production build' \
 	  'make audit        Audit installed Python and locked frontend dependencies' \
 	  'make migrate      Run the configured Alembic migration once' \
 	  'make compose-up   Build/start the local PostgreSQL and app containers'
@@ -33,6 +33,7 @@ frontend:
 	$(NPM) --prefix web ci
 	$(NPM) --prefix web run lint
 	$(NPM) --prefix web run typecheck
+	$(NPM) --prefix web test
 	$(NPM) --prefix web run build
 
 dev: install
@@ -40,7 +41,7 @@ dev: install
 
 start: integration-check
 	@test -f .env || { echo 'Copy .env.example to .env and configure the documented server settings.'; exit 2; }
-	@set -a; . ./.env; set +a; exec $(PY) -m uvicorn blastradius.server.app:app --host 127.0.0.1 --port "$${BLASTRADIUS_PORT:-8000}"
+	@set -a; . ./.env; set +a; $(PY) -m blastradius.server.migrate && exec $(PY) -m uvicorn blastradius.server.app:app --host 127.0.0.1 --port "$${BLASTRADIUS_PORT:-8000}" --workers 1 --no-access-log --no-proxy-headers
 
 legacy: install-core
 	$(PY) -m streamlit run app.py --server.address 127.0.0.1
@@ -55,8 +56,9 @@ lint:
 	@if test -d blastradius/server; then $(PY) -m ruff check --select E4,E7,E9,F blastradius/server; fi
 
 typecheck:
-	$(PY) -m mypy scripts
+	$(PY) -m mypy --strict scripts
 	@if test -d blastradius/server; then $(PY) -m mypy blastradius/server; fi
+	$(PY) -m mypy blastradius/parser blastradius/graph blastradius/security app.py blastradius/session_storage.py
 
 docs:
 	$(PY) scripts/check_docs.py
@@ -72,6 +74,8 @@ migrate:
 	@set -a; . ./.env; set +a; PATH="$(abspath $(VENV))/bin:$$PATH" sh scripts/container-entrypoint.sh migrate
 
 compose-up:
+	docker compose up -d --wait db
+	docker compose run --build --rm migrate
 	docker compose up --build -d --wait
 
 compose-down:

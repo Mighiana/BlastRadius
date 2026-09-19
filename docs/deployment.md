@@ -1,8 +1,7 @@
 # Deployment and local environments
 
-**Status:** release scaffolding prepared for integration. Building the complete
-application requires the server/frontend units. No new public deployment,
-provider write or purchase has been performed.
+The integrated application serves Vite assets and the API from one FastAPI
+process. No new public deployment, provider write or purchase has been performed.
 
 ## Environments
 
@@ -12,15 +11,15 @@ provider write or purchase has been performed.
 | Test | Disposable isolated database per test run | Test credentials/mocks; cross-tenant negative tests | Mocks or approved Stripe test mode | No live write APIs |
 | Production | PostgreSQL, encrypted storage/backups, dedicated application role | Verified production identity provider; fail closed | Disabled until explicit commercial approval | TLS through reviewed ingress |
 
-The root [.env.example](../.env.example) contains tooling variables only.
+The root [.env.example](../.env.example) contains local development settings.
 The [development](environment-development.md), [test](environment-test.md), and
 [production](environment-production.md) sheets identify what must be configured.
-Use the **server owner's actual variable names**, not plausible substitutes.
+The full service setting contract is in [authentication](auth.md).
 No Vite variable can hold a secret: `VITE_*` values are public browser assets.
 
 ## Local commands
 
-Prerequisites: Python 3.12, Node 22, npm, Make; Docker/Compose for PostgreSQL.
+Prerequisites: Python 3.12, Node 22.12+ or 24, npm, Make; Docker/Compose for PostgreSQL.
 
 ```bash
 cp .env.example .env
@@ -28,8 +27,8 @@ make dev
 ```
 
 `make dev` installs optional server/UI/dev extras and pinned quality tooling,
-runs `npm ci`, lint, types and build, then serves on loopback. Missing integration
-files fail before installation. `.env` is a trusted local shell-style file when
+runs `npm ci`, lint, types, unit tests and build, migrates SQLite, then serves at
+`http://localhost:8000`. `.env` is a trusted local shell-style file when
 using Make; never source environment files from a contributor's PR or upload.
 
 For CLI/legacy-only work, `make install-core` and `make legacy` work independently.
@@ -39,7 +38,10 @@ Do not interpret CLI success as authentication/database/frontend verification.
 
 The multi-stage [Dockerfile](../Dockerfile) builds Vite assets with Node, installs
 `.[server]` into a virtual environment, and runs Python as UID/GID 10001.
-The build copies assets to `/app/web/dist`; the server must serve that directory.
+The build copies assets to `/app/web/dist`, served through `BR_STATIC_DIR`.
+Known browser routes return the application shell; missing API, health and asset
+paths remain 404. A wheel contains the engine, service, fixtures and migrations;
+it does not bundle the frontend, which must be built separately.
 The final stage does not require Node, Terraform, AWS credentials or root.
 
 Image versions and multi-platform manifest digests are explicit. The handoff uses
@@ -54,29 +56,28 @@ Do not call this a bit-reproducible build.
 
 ## PostgreSQL Compose
 
-Before running the application, configure its actual database setting to point
-at `db:5432`, using values matching `POSTGRES_DB`, `POSTGRES_USER` and
-`POSTGRES_PASSWORD`. The root example's password is local-only.
-The server setting must **not** silently fall back to SQLite in Compose.
+Compose explicitly overrides `BR_DATABASE_URL` to PostgreSQL at `db:5432` using
+`POSTGRES_DB`, `POSTGRES_USER` and `POSTGRES_PASSWORD`. The example password is
+local-only; use URL-safe values in this local Compose template. Production should
+provide a properly encoded managed PostgreSQL URL, TLS, separate roles and secrets.
 
 ```bash
 docker compose config --quiet
-docker compose up -d --wait db
-docker compose build app
-docker compose run --rm migrate
 make compose-up
 ```
 
-`migrate` requires a real `BLASTRADIUS_ALEMBIC_CONFIG` path supplied by the server
-unit. Until reconciled, it exits 2 with a clear message. Do not invent a path or
-replace migrations with ad-hoc schema creation.
+`make compose-up` starts PostgreSQL, runs one migration job, then starts the
+application. `BLASTRADIUS_ALEMBIC_CONFIG=/app/alembic.ini` uses packaged migration
+resources and the same `Settings` as `python -m blastradius.server.migrate`.
+`BR_AUTO_MIGRATE=false` ensures the service checks the schema instead of changing it.
 
 The database uses `pg_isready`, persists in `postgres-data`, and exposes no host
 port. App traffic binds only to `127.0.0.1:8000` by default. The app filesystem is
 read-only except `/app/.local` and a bounded `/tmp`; capabilities are dropped.
-`app-data` holds local persistent application state if needed by the service.
-Confirm the server actually writes only there. Named volume permissions must
-be tested with UID 10001.
+`app-data` holds the `BR_DATA_DIR` job directories with UID 10001 permissions.
+Database records live in PostgreSQL. Exactly one ASGI process per database is
+supported; the service lease rejects a second instance. Jobs use a bounded memory
+queue and isolated subprocesses, not a distributed durable queue.
 
 `make compose-down` stops containers while retaining data volumes.
 Do not use `down -v` unless explicitly deleting local test data.
@@ -100,10 +101,9 @@ production privilege design.
 
 ## Health, proxy and rollout
 
-The supplied image checks TCP port 8000 only. This verifies that a listener exists,
-not authentication, database readiness or healthy analysis.
-The integration owner must wire the real liveness/readiness endpoint and ensure
-readiness fails when required dependencies are unavailable.
+The image checks `/health/ready`: the database schema must be at revision `0001`
+and all nine real-engine demo reports must be loaded. `/health/live` is liveness.
+Production host checks use the host from `BR_PUBLIC_URL` in the internal probe.
 
 The entrypoint disables forwarded-header trust. A production TLS ingress needs
 explicit trusted-proxy settings, allowed host/origin checks, request-body limits,

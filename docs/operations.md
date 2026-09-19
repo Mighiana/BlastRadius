@@ -8,7 +8,7 @@ or code integration are requirements, not claims of installed monitoring.
 Use the [deployment procedure](deployment.md): migrate once, then start traffic.
 Separate liveness (process can respond) from readiness (required DB/schema and
 configuration are usable). Never mark failed analysis as a healthy zero-finding
-result. The supplied image TCP check is not production readiness.
+result. The supplied image uses `/health/ready` for schema/demo readiness.
 
 Set finite worker/concurrency/time/input limits. If the implementation uses
 in-process work, explicitly document loss on restart; do not promise durable

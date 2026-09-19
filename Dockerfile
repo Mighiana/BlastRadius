@@ -30,6 +30,6 @@ COPY --chown=blastradius:blastradius . .
 USER 10001:10001
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD ["python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8000), timeout=3).close()"]
+    CMD ["python", "-c", "import os, urllib.request; from urllib.parse import urlsplit; request = urllib.request.Request('http://127.0.0.1:8000/health/ready', headers={'Host': urlsplit(os.environ.get('BR_PUBLIC_URL', 'http://localhost:8000')).netloc}); urllib.request.urlopen(request, timeout=3).close()"]
 ENTRYPOINT ["sh", "/app/scripts/container-entrypoint.sh"]
 CMD ["serve"]

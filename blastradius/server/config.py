@@ -12,6 +12,7 @@ class Settings:
     environment: str = "development"
     database_url: str = "sqlite:///./.blastradius/server.db"
     data_dir: Path = Path(".blastradius")
+    static_dir: Path = Path("web/dist")
     public_url: str = "http://localhost:8000"
     session_secret: str = field(default_factory=lambda: secrets.token_urlsafe(48))
     auth_mode: str = "disabled"
@@ -139,6 +140,7 @@ class Settings:
                 "BR_DATABASE_URL", "sqlite:///./.blastradius/server.db"
             ),
             data_dir=Path(env.get("BR_DATA_DIR", ".blastradius")),
+            static_dir=Path(env.get("BR_STATIC_DIR", "web/dist")),
             public_url=env.get("BR_PUBLIC_URL", "http://localhost:8000").rstrip("/"),
             session_secret=env.get(
                 "BR_SESSION_SECRET", "" if production else secrets.token_urlsafe(48)

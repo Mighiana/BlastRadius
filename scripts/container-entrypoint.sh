@@ -4,7 +4,7 @@ set -eu
 case "${1:-serve}" in
   serve)
     exec python -m uvicorn blastradius.server.app:app \
-      --host 0.0.0.0 --port 8000 --no-proxy-headers
+      --host 0.0.0.0 --port 8000 --workers 1 --no-access-log --no-proxy-headers
     ;;
   migrate)
     if [ -z "${BLASTRADIUS_ALEMBIC_CONFIG:-}" ] || [ ! -f "$BLASTRADIUS_ALEMBIC_CONFIG" ]; then

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowRight, Download, GitBranch, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { ArrowRight, Download, GitBranch, ShieldAlert, ShieldCheck, ShieldQuestion } from 'lucide-react';
 import { download, exportReport, type Report } from '../api';
 import { Decision, ErrorNotice } from './UI';
 import { Graph } from './Graph';
@@ -21,8 +21,9 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
     <section className={`verdict-panel ${report.decision === 'BLOCK CHANGE' ? 'blocked' : ''}`} aria-label="Analysis decision">
       <div><Decision decision={report.decision} /><h2>{report.headline}</h2>
         <p>{report.decision === 'BLOCK CHANGE' ? 'Review the new exposure, supporting evidence and remediation before merging.' : 'No new modeled critical paths does not prove safety. Review evidence and coverage before merging.'}</p></div>
-      <div className="verdict-mark">{report.decision === 'BLOCK CHANGE' ? <ShieldAlert size={40} aria-hidden="true" /> : <ShieldCheck size={40} aria-hidden="true" />}</div>
+      <div className="verdict-mark">{report.decision === 'BLOCK CHANGE' ? <ShieldAlert size={40} aria-hidden="true" /> : report.decision === 'SAFE TO MERGE' ? <ShieldCheck size={40} aria-hidden="true" /> : <ShieldQuestion size={40} aria-hidden="true" />}</div>
     </section>
+    {report.analysis_complete === false && <div role="alert" className="notice error">Analysis incomplete. Counts are lower bounds within the modeled coverage. Resolve the coverage diagnostics before treating this change as safe.</div>}
     <div className="metrics">
       <div className="metric score"><span>Security score</span><div><span>{report.score.before}</span><ArrowRight size={20} aria-hidden="true" /><strong>{report.score.after}<small>/100</small></strong></div>
         <small>Heuristic · not a risk probability</small></div>
@@ -70,7 +71,7 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
     </section>
     <section className="panel"><h2>Coverage & scoring</h2>
       {report.limitations.map(text => <p key={text}>{text}</p>)}
-      <details><summary>Coverage diagnostics ({report.diagnostics.length})</summary><ul className="findings">{report.diagnostics.map((d, i) => <li key={i}><strong>{d.code}</strong><p>{d.message}</p></li>)}</ul></details>
+      <details open={report.analysis_complete === false}><summary>Coverage diagnostics ({report.diagnostics.length})</summary><ul className="findings">{report.diagnostics.map((d, i) => <li key={i}><strong>{d.code}</strong><p>{d.message}</p>{d.phase && <p>{d.phase}: <code>{d.resource}</code>{d.attribute && ` · ${d.attribute}`}{d.source_file && ` · ${d.source_file}`}</p>}</li>)}</ul></details>
       <details><summary>How the heuristic score was calculated</summary><div className="code-pair">{(['before', 'after'] as const).map(key => <div key={key}><h3>{key === 'before' ? 'Before' : 'After'}: {report[key].score}/100</h3><ul className="findings">{report[key].score_breakdown.map(item => <li key={item.finding}>{item.finding}: {item.points} points ({item.count})</li>)}</ul>{!report[key].score_breakdown.length && <p>No score penalties in this model.</p>}</div>)}</div><p className="muted">Scores start at 100 and subtract capped findings. The score is not a calibrated measure of real-world risk.</p></details>
     </section>
     <section className="panel export-panel"><div><p className="eyebrow">TAKE THE EVIDENCE WITH YOU</p><h2>Export this analysis</h2></div>

@@ -21,6 +21,7 @@
 .mypy_cache
 .ruff_cache
 .local
+.blastradius
 **/*.db
 **/*.db-*
 **/.terraform

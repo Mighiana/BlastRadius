@@ -5,6 +5,8 @@ const edge = z.object({
   source: z.string(), target: z.string(), relationship: z.string(), reason: z.string(),
   evidence: z.string(), severity: z.string(), terraform_resource: z.string(),
   metadata: z.record(z.string(), z.unknown()).optional(),
+  confidence: z.string().optional(), category: z.string().optional(),
+  source_file: z.string().optional(), remediation: z.string().optional(),
 });
 const node = z.object({
   id: z.string(), name: z.string(), type: z.string(), sensitive: z.boolean(), risk: z.string(),
@@ -15,12 +17,14 @@ const path = z.object({
 });
 const snapshot = z.object({
   label: z.string(), score: z.number(), risk_level: z.string(),
+  complete: z.boolean().optional(), paths_truncated: z.boolean().optional(), path_work: z.number().optional(),
   score_breakdown: z.array(z.object({ finding: z.string(), count: z.number(), points: z.number() })),
   exposed_resources: z.array(z.string()), reachable_sensitive: z.array(z.string()),
   attack_paths: z.array(path), graph: z.object({ nodes: z.array(node), edges: z.array(edge) }),
 });
 export const reportSchema = z.object({
   schema_version: z.literal(1), decision: z.string(), passed: z.boolean(),
+  analysis_complete: z.boolean().optional(),
   headline: z.string(), verdict: z.string(), score, before: snapshot, after: snapshot,
   new_attack_paths: z.array(path), removed_attack_paths: z.array(path),
   new_critical_paths: z.array(path), removed_critical_paths: z.array(path),
@@ -29,7 +33,11 @@ export const reportSchema = z.object({
   new_edges: z.array(edge), removed_edges: z.array(edge),
   findings: z.array(z.object({ label: z.string(), detail: z.string(), delta: z.number(), severity: z.string() })),
   responsible_change: z.string(), responsible_changes: z.array(z.object({ file: z.string(), diff: z.string() })),
-  diagnostics: z.array(z.object({ code: z.string(), severity: z.string(), message: z.string() })),
+  diagnostics: z.array(z.object({
+    code: z.string(), severity: z.string(), message: z.string(),
+    phase: z.string().optional(), resource: z.string().optional(),
+    attribute: z.string().optional(), source_file: z.string().optional(), blocks_analysis: z.boolean().optional(),
+  })),
   limitations: z.array(z.string()),
   remediation: z.object({
     recommendations: z.array(z.object({

@@ -69,38 +69,38 @@ def recommend(config: ParsedConfig, graph=None) -> List[Recommendation]:
             )
 
     for bucket in config.of_type("aws_s3_bucket"):
-        for finding in rules.public_bucket_findings(bucket, config.resources):
+        for public_bucket in rules.public_bucket_findings(bucket, config.resources):
             sensitive = " It is also tagged as holding sensitive data." if rules.is_sensitive_bucket(bucket) else ""
             recommendations.append(
                 Recommendation(
                     title=f"Remove public access from {bucket.address}",
                     detail=(
-                        f"{finding.reason}, so its objects can be read by anyone on the "
-                        f"internet without credentials.{sensitive} Use a private ACL and serve "
+                        f"{public_bucket.reason}. Review the modeled public grant and its "
+                        f"conditions.{sensitive} Use a private ACL and serve "
                         "public content through CloudFront with an origin access identity."
                     ),
-                    current=finding.evidence,
+                    current=public_bucket.evidence,
                     recommended='acl = "private"',
-                    severity=Risk.CRITICAL if rules.is_sensitive_bucket(bucket) else finding.risk,
-                    resource=finding.terraform_resource,
+                    severity=Risk.CRITICAL if rules.is_sensitive_bucket(bucket) else public_bucket.risk,
+                    resource=public_bucket.terraform_resource,
                 )
             )
 
     for policy in config.of_type("aws_iam_role_policy", "aws_iam_policy"):
-        for finding in rules.s3_access_findings(policy.get("policy")):
-            if not (finding.targets_all_buckets or finding.has_wildcard_action):
+        for s3_access in rules.s3_access_findings(policy.get("policy")):
+            if not (s3_access.targets_all_buckets or s3_access.has_wildcard_action):
                 continue
             recommendations.append(
                 Recommendation(
                     title=f"Narrow S3 permissions on {policy.address}",
                     detail=(
-                        "The policy grants broad S3 access, so compromising any principal that "
-                        "can assume this role exposes every bucket. Scope the statement to the "
+                        "The policy contains a broad S3 grant; effective access also depends "
+                        "on unmodeled denies, conditions and boundaries. Scope the statement to the "
                         "specific bucket ARNs and the minimum actions required."
                     ),
-                    current=f'"Action": {finding.actions}, "Resource": "*"',
+                    current=f'"Action": {s3_access.actions}, "Resource": "*"',
                     recommended='"Action": ["s3:GetObject"], "Resource": ["<specific-bucket-arn>/*"]',
-                    severity=finding.risk,
+                    severity=s3_access.risk,
                     resource=policy.address,
                 )
             )

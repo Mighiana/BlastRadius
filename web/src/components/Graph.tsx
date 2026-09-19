@@ -15,7 +15,10 @@ function Evidence({ edge, index }: { edge: Edge; index: number }) {
     </span><span className="evidence-severity">{edge.severity}</span></summary>
     <div className="evidence-body"><p>{edge.reason}</p>
       <p className="muted">Source resource: <code>{edge.terraform_resource || 'Modeled relationship'}</code></p>
+      {edge.confidence && <p className="muted">Confidence: {edge.confidence} · {edge.category}</p>}
+      {edge.source_file && <p>Source file: <code>{edge.source_file}</code></p>}
       <pre><code>{edge.evidence || 'No additional source text supplied by the engine.'}</code></pre>
+      {edge.remediation && <p>{edge.remediation}</p>}
     </div>
   </details>;
 }

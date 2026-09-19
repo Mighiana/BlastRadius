@@ -99,6 +99,10 @@ def _edges(result: AnalysisResult) -> Dict[Tuple[str, str], GraphEdge]:
     return {_edge_key(data["edge"]): data["edge"] for _, _, data in result.graph.edges(data=True)}
 
 
+def _contains_path(result: AnalysisResult, path: AttackPath) -> bool:
+    return all(result.graph.has_edge(a, b) for a, b in zip(path.nodes, path.nodes[1:]))
+
+
 def _determine_verdict(diff: GraphDiff) -> Verdict:
     """Prioritise sensitive-data reachability, then paths, then score."""
     if diff.newly_reachable_sensitive or diff.new_critical_paths:
@@ -137,8 +141,14 @@ def compare(before: AnalysisResult, after: AnalysisResult) -> GraphDiff:
 
     before_paths = {p.key: p for p in before.attack_paths}
     after_paths = {p.key: p for p in after.attack_paths}
-    diff.new_attack_paths = [after_paths[k] for k in after_paths if k not in before_paths]
-    diff.removed_attack_paths = [before_paths[k] for k in before_paths if k not in after_paths]
+    diff.new_attack_paths = [
+        p for k, p in after_paths.items()
+        if k not in before_paths and not _contains_path(before, p)
+    ]
+    diff.removed_attack_paths = [
+        p for k, p in before_paths.items()
+        if k not in after_paths and not _contains_path(after, p)
+    ]
     diff.new_attack_paths.sort(key=lambda p: (-p.severity.rank, len(p)))
     diff.removed_attack_paths.sort(key=lambda p: (-p.severity.rank, len(p)))
 

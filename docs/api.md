@@ -45,6 +45,7 @@ All application environment variables:
 | `BR_ENV` | `development` | `development`, `test`, or `production` |
 | `BR_DATABASE_URL` | `sqlite:///./.blastradius/server.db` | SQLite locally; `postgresql+psycopg://…` in production |
 | `BR_DATA_DIR` | `.blastradius` | Private local working directory; create with owner-only access |
+| `BR_STATIC_DIR` | `web/dist` | Built frontend; served when index.html exists, with fallback only for known app routes |
 | `BR_PUBLIC_URL` | `http://localhost:8000` | Exact browser origin, no path, query, credentials or fragment |
 | `BR_SESSION_SECRET` | Random per process outside production | At least 32 characters; required and stable in production |
 | `BR_AUTH_MODE` | `disabled` | `disabled`, `demo` (development/test only), or `oidc` |
@@ -257,16 +258,18 @@ the subprocess may run until its normal timeout.
 Both demos and successful analyses share this shape:
 
 * `schema_version: 1`, `decision` (engine display string), `passed` (boolean),
+  `analysis_complete` (boolean within the documented static model),
   `headline`, `verdict`, `score:{before,after,delta}`.
 * Decisions include `SAFE TO MERGE`, `BLOCK CHANGE`, and `REVIEW REQUIRED`.
   The engine is the source of truth; use `passed` for acceptance and treat unknown
   future display strings conservatively.
 * `before` and `after`: `{label,score,risk_level,score_breakdown,exposed_resources,
-  reachable_sensitive,attack_paths,graph}`.
+  reachable_sensitive,attack_paths,graph,complete,paths_truncated,path_work}`.
 * `graph.nodes`: `{id,name,type,sensitive,risk}`; stable IDs are resource addresses,
   synthetic sensitive-data addresses or `INTERNET`.
 * `graph.edges`: `{source,target,relationship,reason,evidence,severity,
-  terraform_resource,metadata}`. Do not infer real exploitability from an edge.
+  terraform_resource,metadata,confidence,category,source_file,remediation}`.
+  Do not infer real exploitability from an edge.
 * Paths: `{id,nodes,labels,edges,severity,explanation,reaches_sensitive}`.
 * Delta lists: `new_attack_paths`, `removed_attack_paths`, `new_critical_paths`,
   `removed_critical_paths`, `newly_exposed`, `newly_reachable_sensitive`,
@@ -275,6 +278,8 @@ Both demos and successful analyses share this shape:
 * `responsible_change`: engine summary; `responsible_changes`: `{file,diff}` for
   changed source files. Plans have no source patches/diffs.
 * `diagnostics`: `{code,severity,message}` including unsupported model items.
+  Engine diagnostics additionally include `{phase,resource,attribute,source_file,
+  blocks_analysis}`; resource/attribute/file may be empty when unknown.
   `limitations`: string list.
 * `remediation`: `{recommendations,patched_files,diff,can_autofix}`;
   recommendations contain `{title,detail,current,recommended,severity,resource}`.
@@ -284,6 +289,11 @@ Both demos and successful analyses share this shape:
 * `reports:{markdown,sarif}`: existing engine report and SARIF 2.1.0 payload.
 * Public demos additionally contain
   `demo:{scenario_id,stage,remediation_kind,note}`.
+
+These coverage/evidence fields are additive within schema version 1. Older stored
+reports may omit them. A missing coverage field is not evidence of completeness.
+Incomplete analysis never receives `SAFE TO MERGE`; the frontend exposes the
+diagnostics rather than substituting a safe result.
 
 `GET /api/analyses/{id}/report?format=web|json|markdown|sarif` requires membership
 and a succeeded job, otherwise `409 report_not_ready`. Default `web` returns the

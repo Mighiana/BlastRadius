@@ -159,27 +159,27 @@ Verified on Linux with Node 24.19.0 and Python 3.12.11:
 | Python regression suite, including legacy Streamlit smoke tests | 293 passed, 1 optional PostgreSQL test skipped |
 | Playwright real-engine acceptance | 11 passed, 1 backend requirement failure below |
 
-### Integration blocker found against the server handoff
+### IAM remediation integration
 
-At server commit `afaa7893b6c1fcd06e67f02bced7bbba5ba851fe`,
+At the isolated server commit `afaa7893b6c1fcd06e67f02bced7bbba5ba851fe`,
 `GET /api/demo/broad_iam?stage=remediated` returns **REVIEW REQUIRED**, not SAFE.
 Its score improves from 20 to 85, one critical path is removed, and the engine
 reports one new noncritical path. The UI preserves that backend verdict and the
 existing exposure. It must never relabel it SAFE.
 
-The responsive UI tests assert the actual backend remediation report, zero new
-critical paths and zero sensitive reachability. A separate mandatory acceptance
-test, `required IAM remediation ends in SAFE`, retains the original product
-requirement and fails on this inherited backend. This is an engine/demo
-comparison integration task for the parent, outside `web/**` ownership.
-The requested three complete SAFE → BLOCK → SAFE loops remain unfulfilled until
-that backend requirement is resolved. Do not omit this test from final acceptance.
+Integration fixes the path delta: the noncritical compute path already exists as
+a prefix of the risky graph, but was not an enumeration target while sensitive
+data was reachable. Graph edge membership now prevents reporting it as a new path.
+The reviewed fixture restores SAFE at score 85, preserving the existing public
+compute exposure. The mandatory `required IAM remediation ends in SAFE` test
+remains unchanged for final parent browser acceptance. Python integration tests
+assert all three SAFE → BLOCK → SAFE report sequences directly.
 
 ## Production integration and current boundaries
 
-`npm run build` produces `web/dist/`. Serve these static assets over HTTPS with
-SPA fallback to `index.html` for app routes; reverse-proxy `/api` and `/health`
-to FastAPI under the same origin **before** the fallback. Never return the SPA
+`npm run build` produces `web/dist/`. FastAPI serves `BR_STATIC_DIR` (default
+`web/dist`) with shell fallback for the known browser routes, after API and health
+routes. Use HTTPS for production. Never return the SPA
 HTML for a missing API route. Set `BR_PUBLIC_URL` to that HTTPS origin. Cache
 hashed assets, but do not cache HTML/session/API responses across releases/users.
 All icons and fonts are bundled locally; no external font/analytics request is

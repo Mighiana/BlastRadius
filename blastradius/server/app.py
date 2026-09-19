@@ -46,6 +46,7 @@ from blastradius.server.schemas import (
     OrganizationInput,
     ProjectInput,
 )
+from blastradius.server.static import FrontendFiles
 
 
 def project_payload(project: Project) -> dict:
@@ -612,6 +613,9 @@ def create_app(
                 return apply_event(session, event, settings)
         except IntegrityError:
             return {"received": True, "duplicate": True}
+
+    if (settings.static_dir / "index.html").is_file():
+        app.mount("/", FrontendFiles(directory=settings.static_dir), name="frontend")
 
     return app
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import difflib
 import json
+from dataclasses import asdict
 from pathlib import Path
 
 from blastradius.graph import analyze, build_graph, compare
@@ -32,6 +33,10 @@ def edge_payload(edge: GraphEdge) -> dict:
         "severity": edge.risk.value,
         "terraform_resource": edge.terraform_resource,
         "metadata": edge.metadata,
+        "confidence": edge.confidence,
+        "category": edge.category,
+        "source_file": edge.source_file,
+        "remediation": edge.remediation,
     }
 
 
@@ -51,6 +56,9 @@ def snapshot(result: AnalysisResult) -> dict:
     nodes = [result.node(node_id) for node_id in sorted(result.graph.nodes)]
     return {
         "label": result.label,
+        "complete": result.complete,
+        "paths_truncated": result.paths_truncated,
+        "path_work": result.path_work,
         "score": result.score,
         "risk_level": result.risk_level.value,
         "score_breakdown": result.score_breakdown,
@@ -115,6 +123,11 @@ def analyze_input(payload: AnalysisInput, workdir: Path, max_resources: int) -> 
         {"code": "unsupported", "severity": "warning", "message": item}
         for item in unsupported
     ]
+    diagnostics.extend(
+        {"phase": phase, **asdict(diagnostic)}
+        for phase, result in (("before", before), ("after", after))
+        for diagnostic in result.diagnostics
+    )
     diagnostics.append(
         {"code": "model_limitations", "severity": "info", "message": LIMITATION}
     )
@@ -142,6 +155,7 @@ def analyze_input(payload: AnalysisInput, workdir: Path, max_resources: int) -> 
             )
     return {
         "schema_version": 1,
+        "analysis_complete": diff.complete,
         "decision": decision.decision.value,
         "passed": decision.passed,
         "headline": decision.headline,

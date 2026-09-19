@@ -32,6 +32,7 @@ web/dist/
 web/playwright-report/
 web/test-results/
 .local/
+.blastradius/
 *.db
 *.db-shm
 *.db-wal

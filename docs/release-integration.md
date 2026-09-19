@@ -1,8 +1,8 @@
-# Release-unit integration contract
+# Integrated release contract
 
-This document is the handoff for the parent integrator. Baseline:
-`787b0402d5d51acd5fcd437b2be455cd20e19da3`. No source engine, app, frontend,
-server, packaging metadata or original tests are modified by this unit.
+Baseline: `787b0402d5d51acd5fcd437b2be455cd20e19da3`. Five implementation handoffs
+are integrated in engine, legacy, server, release and frontend order.
+Original tests remain unchanged.
 
 ## Contracts that the build uses
 
@@ -21,26 +21,19 @@ server, packaging metadata or original tests are modified by this unit.
 contracts. It does not verify server behavior, migrations or all imported
 dependencies. Build/runtime validation must follow.
 
-## Unresolved settings — do not guess
+## Runtime settings
 
-The source baseline has no service settings. Fill these from the integrated
-implementation and replace this section with verified values:
+`BR_DATABASE_URL` selects SQLite locally or `postgresql+psycopg://` in Compose.
+`BR_DATA_DIR` is `.local` locally and `/app/.local` in the container.
+`BR_STATIC_DIR` defaults to `web/dist`; known browser routes return its index,
+while unknown API, health and asset requests remain errors.
+`BLASTRADIUS_ALEMBIC_CONFIG=alembic.ini` names the committed config, whose script
+location uses packaged resources. The CLI and module migrations share database
+settings. `make start` migrates first; `make compose-up` runs a migration job before
+the application, with automatic migrations disabled. Readiness is `/health/ready`.
 
-- Actual environment-mode and database setting names; PostgreSQL URL/driver
-  compatible with the service's SQLAlchemy configuration.
-- Auth issuer/audience/key handling, explicit local mode, production fail-closed
-  checks, allowed origins/hosts and cookie/CSRF policy.
-- Static root setting or fixed path; readiness/liveness paths and dependencies.
-- Alembic config location, script location and packaging of migration revisions.
-- Durable data and scratch locations compatible with UID 10001, read-only root,
-  writable `/app/.local` and bounded `/tmp`.
-- Billing disabled/test-mode settings; concurrency and request-size limits.
-
-`BLASTRADIUS_ALEMBIC_CONFIG` is a **release-tooling** variable used by
-`scripts/container-entrypoint.sh`, not an invented server setting. It must name
-a real file. The app TCP healthcheck is intentionally only liveness.
-Compose currently supplies generic PostgreSQL values; it must be connected
-explicitly to the service's actual database setting before acceptance.
+See [auth](auth.md), [API](api.md), [billing](billing.md), and
+[deployment](deployment.md) for service and operator responsibilities.
 
 ## Required checks after integration
 
@@ -61,14 +54,15 @@ explicitly to the service's actual database setting before acceptance.
 
 Ruff's default rules detect fatal/static issues across the existing engine and
 legacy app. `make lint` additionally runs E4/E7/E9/F on new scripts and server.
-Strict mypy checks scripts and the server once present; it is not a claim that
-all historical engine code is strictly typed. No audit findings are suppressed.
+Strict mypy checks scripts. The engine, legacy app and server use checked function
+bodies with silent imports and ignored missing third-party stubs, matching their
+handoff contracts; this is not a claim that the whole product is strictly typed.
+No audit findings are suppressed.
 
 The baseline had ten standard Ruff findings (unused imports and ambiguous `l`
 names). They are outside this unit's source ownership. The default fatal rules
 do not pretend these are fixed. Engine/UI owners can remove them independently.
-Type-checking the server may reveal legacy imported-code issues; resolve them
-with the owning unit rather than adding global ignores.
+The combined tooling pins agree with `pyproject.toml`.
 
 ## Release boundaries
 
@@ -114,7 +108,64 @@ The fixed tool pins are in `requirements-dev.txt`; the Docker build also upgrade
 its virtualenv pip. Re-audit the integrated server's dependencies and actual image.
 The audit result is a point-in-time check, not a guarantee of no vulnerabilities.
 
-Frontend npm checks/audit, full image build, real PostgreSQL migrations, service
-health/auth/static serving, billing and browser acceptance cannot be verified
-without the parallel implementation. CI intentionally requires those contracts
-after integration; it does not silently skip a missing frontend.
+The preceding results describe the isolated release handoff only. Integrated
+verification is recorded separately below; parent owns final browser acceptance.
+
+## Integration fixes
+
+- Path deltas check graph edges when analyzer target selection changes from
+  sensitive data to compute. An existing public compute prefix is not a new
+  path merely because remediation removed its sensitive-data suffix.
+- API schema v1 carries `analysis_complete`, per-snapshot coverage/work limits,
+  structured phase diagnostics and edge confidence/category/source/remediation.
+  Older stored schema v1 reports remain readable; new incomplete results have
+  a visible warning and expanded diagnostics. All results come from the engine.
+- Static serving, migrations, settings, Compose and readiness share one contract.
+- Dependency audits found advisories in Authlib 1.6.5 and Starlette 0.47.3.
+  Authlib 1.6.12, Starlette 1.3.1 and compatible FastAPI 0.136.3 are pinned.
+  PyPI publication timestamps for these pins are at least seven days old.
+
+## Integrated verification, 2026-09-19
+
+Linux, Python 3.12.13, Node 24.19.0, Docker 29.7.2, Compose 5.4.0:
+
+| Command / check | Result |
+| --- | --- |
+| `make check` | 438 tests passed, one optional PostgreSQL case skipped; 16 release tests; Ruff, strict script mypy, engine/legacy/server mypy and links in 30 Markdown documents passed |
+| `BR_TEST_DATABASE_URL=<disposable PostgreSQL URL> .venv/bin/python -m pytest -o addopts='' -q` | 439 passed, including schema parity, service lease, concurrent quotas, worker execution and tenant cascade deletion on PostgreSQL 16.15 |
+| `make frontend` | Clean npm install, ESLint, TypeScript, 34 Vitest tests and Vite production build passed |
+| `.venv/bin/python -m pip_audit --skip-editable` and `npm --prefix web audit --audit-level=moderate` | No known vulnerabilities; local editable project was outside the dependency audit, with no advisory suppressions |
+| `.venv/bin/python -m pip check` | No broken requirements |
+| `.venv/bin/python scripts/check_integration.py` | Passed |
+| `.venv/bin/python -m pip wheel . --no-deps --wheel-dir dist` | Wheel built and installed in a fresh venv outside the checkout |
+| Isolated `python -I -m blastradius.cli` from the core-only wheel | All three scenarios: baseline 0, risky 1, restored 0; plan JSON and SARIF 1, each one parseable document without checkout paths; no FastAPI/Streamlit installed |
+| Same installed wheel with server extra | Packaged migrations and all nine real demo states passed outside the checkout without Streamlit; auth disabled by default |
+| `docker compose config --quiet` and `docker build --check .` | Passed |
+| Compose app/migration image builds, `up -d --wait db`, `run --build --rm migrate`, `up --build -d --wait app` | Non-root/read-only application and PostgreSQL healthy; migrations ran through committed Alembic config |
+| Real HTTP requests against Compose | Health, SPA routes, all nine demos, CSRF/demo login, project creation, subprocess job and JSON/Markdown/SARIF exports passed |
+| Compose app recreation | Stored report and session survived; project deletion removed its analyses |
+| `cp .env.example .env` then `make dev` | Installed, checked/built frontend, migrated SQLite, started Uvicorn; HTTP health/static routes and demo login passed, billing disabled |
+
+The only Python suite warning is Starlette's deprecation of the httpx-backed
+TestClient; its current compatibility path remains working. npm also reports
+ESLint 9's support deprecation; lint passes and npm audit reports no vulnerability.
+
+## Remaining acceptance and operational boundaries
+
+- Parent must run the unchanged Playwright suite and final browser/mobile/legacy
+  recordings on the integrated revision. This integration session did not drive
+  a browser or produce screenshots.
+- Real OIDC browser authentication and configured Stripe provider flows remain
+  unverified. Their local signature/state/nonce/PKCE/webhook and authorization
+  tests pass; provider calls are mocked. Billing accepts test keys only.
+- Static coverage is not a cloud-safety proof. IAM reviewed baseline/restored
+  score is 85, preserving public compute exposure; no automatic IAM patch exists.
+- Exactly one ASGI process per database, in-memory queue, no distributed HA,
+  scheduled retention, membership-administration UI or project-deletion UI.
+  The underlying membership and deletion APIs enforce ownership/roles.
+- Container OS/base-image vulnerability scanning is still required before
+  deployment; Python/npm dependency audits do not cover OS packages.
+- Production TLS, persistent identity, secrets, database encryption/backups,
+  reverse-proxy limits, legal/license decisions and public release remain owner
+  responsibilities. No PR, merge, public deployment, purchase, registry
+  publication or live provider write was performed during integration.

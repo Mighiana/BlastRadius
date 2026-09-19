@@ -59,11 +59,12 @@ cp .env.example .env
 make dev
 ```
 
-This installs `.[server,ui,dev]`, builds the frontend, and starts the local service.
-It requires Node 22, npm and Make. **The server/frontend are parallel integration
-work:** this release handoff fails early if their files are missing. Reconcile
-server settings and migrations using the [integration checklist](docs/release-integration.md)
-before advertising a verified full-product quickstart.
+This installs `.[server,ui,dev]`, checks and builds the frontend, migrates SQLite,
+and serves the application at `http://localhost:8000`. It requires Python 3.12,
+Node 22.12+ or 24, npm and Make. The example enables disposable local demo
+accounts; OIDC and billing are disabled until explicitly configured.
+Run `make compose-up` instead for the local PostgreSQL container setup.
+See [deployment](docs/deployment.md) and the [integration contract](docs/release-integration.md).
 
 For the previously published CLI consumer revision:
 
@@ -147,7 +148,7 @@ and exits 1. Code-scanning uploads are not automatic.
 ### Tests
 
 ```bash
-make install-core
+make install
 make check
 ```
 
