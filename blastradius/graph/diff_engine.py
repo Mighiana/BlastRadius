@@ -20,6 +20,7 @@ class Verdict(str, Enum):
     REGRESSION = "SECURITY REGRESSION"
     IMPROVED = "SECURITY IMPROVED"
     UNCHANGED = "NO SECURITY CHANGE"
+    INCOMPLETE = "INCOMPLETE ANALYSIS"
 
 
 @dataclass
@@ -46,6 +47,10 @@ class GraphDiff:
     summary: str = ""
 
     # --- convenience for the UI -------------------------------------------
+    @property
+    def complete(self) -> bool:
+        return self.before.complete and self.after.complete
+
     @property
     def new_critical_paths(self) -> List[AttackPath]:
         return [p for p in self.new_attack_paths if p.reaches_sensitive]
@@ -98,6 +103,8 @@ def _determine_verdict(diff: GraphDiff) -> Verdict:
     """Prioritise sensitive-data reachability, then paths, then score."""
     if diff.newly_reachable_sensitive or diff.new_critical_paths:
         return Verdict.REGRESSION
+    if not diff.complete:
+        return Verdict.INCOMPLETE
     if diff.no_longer_reachable_sensitive or diff.removed_critical_paths:
         return Verdict.IMPROVED
     if diff.after.score < diff.before.score or diff.new_attack_paths or diff.newly_exposed:
@@ -141,6 +148,8 @@ def compare(before: AnalysisResult, after: AnalysisResult) -> GraphDiff:
         len(before.reachable_sensitive),
         len(after.reachable_sensitive),
     )
+    if not diff.complete:
+        diff.summary += " Analysis is incomplete; absent or removed paths do not establish safety."
     return diff
 
 
