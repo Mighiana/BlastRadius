@@ -32,7 +32,6 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: ${{ runner.temp }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,17 +43,20 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install published analyzer
+        working-directory: ${{ runner.temp }}
         run: |
           python -m venv "$RUNNER_TEMP/blastradius-env"
           "$RUNNER_TEMP/blastradius-env/bin/python" -m pip install "git+https://github.com/Mighiana/BlastRadius.git@$BLASTRADIUS_REVISION"
       - name: Fetch candidate without checkout
         env:
           GH_TOKEN: ${{ github.token }}
+        working-directory: ${{ runner.temp }}
         run: |
           auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
           git -C "$GITHUB_WORKSPACE/terraform-repo" -c "http.extraHeader=AUTHORIZATION: basic $auth" fetch --no-tags origin "refs/pull/$PR_NUMBER/head"
       - name: Analyze controlled Terraform change
         id: analysis
+        working-directory: ${{ runner.temp }}
         run: |
           set +e
           "$RUNNER_TEMP/blastradius-env/bin/python" -I -m blastradius.cli \
@@ -77,6 +79,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PR_REPOSITORY: ${{ github.repository }}
+        working-directory: ${{ runner.temp }}
         run: |
           "$RUNNER_TEMP/blastradius-env/bin/python" -I -m blastradius.github_pr \
             --repository "$PR_REPOSITORY" --pr "$PR_NUMBER" --head-sha "$HEAD_SHA" \
@@ -85,6 +88,7 @@ jobs:
         if: always()
         env:
           ANALYSIS_EXIT: ${{ steps.analysis.outputs.exit_code }}
+        working-directory: ${{ runner.temp }}
         run: |
           case "$ANALYSIS_EXIT" in
             0) exit 0 ;;

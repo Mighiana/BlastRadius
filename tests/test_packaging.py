@@ -30,7 +30,7 @@ def test_readme_distinguishes_prepared_local_and_hosted_status():
     readme = (ROOT / 'README.md').read_text(encoding='utf-8')
     assert 'Attack-path diff for Terraform pull requests.' in readme
     assert 'No PyPI package, `v1` tag, or hosted PR success is claimed.' in readme
-    assert 'Hosted GitHub execution/comment publication remains unverified.' in readme
+    assert 'Hosted PR analysis/comment publication remains unverified.' in readme
     assert 'docs/screenshot-' not in readme
     assert 'Vendor the `blastradius/` package' not in readme
     roadmap = readme.split('## Future roadmap', 1)[1]
