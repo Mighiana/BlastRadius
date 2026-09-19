@@ -40,7 +40,10 @@ cookies and request bodies from logs. See [all configuration](api.md).
 service rotates the application session and redirects to `/dashboard`. Failure
 returns `400 authentication_failed`, omitting provider exception text. A user is
 identified by `(issuer, subject)`, never email alone. Only provider-verified email
-is retained. First successful login creates one free workspace with that user
+with a valid mailbox shape and at most 320 characters is retained. Missing,
+malformed, non-string and overlong claims leave the account without a verified
+email; they are never coerced or truncated into a different mailbox. First
+successful login creates one free workspace with that user
 as its only owner. Subsequent logins to the same identity reuse it.
 
 The transient `br_oidc` cookie holds Authlib authorization state/nonce/PKCE data
@@ -113,8 +116,20 @@ Users can create up to five owned Free workspaces. Team-only invitations replace
 arbitrary user-ID grants. Links contain 256-bit random tokens; only hashes are
 stored. Acceptance is atomic, email-bound and requires the OIDC provider's
 `email_verified: true`. Reauthentication refreshes email and verification state.
+Invitation matching ignores ASCII letter case and preserves every non-ASCII
+character exactly. It does not merge Unicode spellings such as `straße` and
+`strasse`, or translate Unicode domains to ASCII aliases. Invite the exact
+provider-verified spelling for internationalized addresses.
 Demo/local identities cannot accept invitations. No email provider is installed;
 authorized creators manually deliver the one-time copyable link.
+
+If upgrading a database that already accepted email claims under the previous
+truncation/Unicode-casefold rules, revoke pending invitations and reissue them
+using the intended address. Clear existing users' `email_verified` flags before
+reopening invitation acceptance and have recipients sign in again. Previously
+truncated claims and normalized invitation spellings cannot be reconstructed
+from the stored values. Review previously accepted invitations if that release
+was exposed; this change does not remove existing memberships.
 
 ## Configure verified email and invitation delivery
 

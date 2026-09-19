@@ -50,6 +50,7 @@ from blastradius.server.models import (
     Organization,
     Project,
     Usage,
+    User,
 )
 from blastradius.server.persistence import cleanup
 from blastradius.server.plans import PLANS
@@ -428,6 +429,70 @@ def test_oidc_callback_verifies_signed_claims(settings, demo_results, monkeypatc
         if invalid is None:
             assert me["user"]["email"] == "test@example.invalid"
             assert me["organizations"][0]["role"] == "owner"
+
+
+@pytest.mark.parametrize(
+    ("email", "verified", "expected"),
+    [
+        (["invited@example.test"], True, ""),
+        ({"address": "invited@example.test"}, True, ""),
+        (None, True, ""),
+        ("a" * 321 + "@example.test", True, ""),
+        ("invited@example.test\x00", True, ""),
+        ("invited@example.test", "true", ""),
+        ("invited@example.test", False, ""),
+        ("INVITED@example.test", True, "invited@example.test"),
+        ("Straße@example.test", True, "straße@example.test"),
+    ],
+    ids=[
+        "list",
+        "mapping",
+        "missing",
+        "overlong",
+        "control",
+        "string-flag",
+        "unverified",
+        "ascii-case",
+        "unicode",
+    ],
+)
+def test_oidc_callback_keeps_only_valid_literal_verified_email(
+    settings, demo_results, monkeypatch, email, verified, expected
+):
+    monkeypatch.setattr("blastradius.server.app.build_demos", lambda _: demo_results)
+    settings = replace(
+        settings,
+        auth_mode="oidc",
+        oidc_issuer="https://issuer.example",
+        oidc_client_id="client",
+        oidc_client_secret="test",
+    )
+    app = create_app(settings)
+    oauth = app.state.oauth.create_client("oidc")
+
+    async def state_data(*args):
+        return {"nonce": "test-nonce"}
+
+    async def authorized_token(*args):
+        return {
+            "userinfo": {
+                "iss": settings.oidc_issuer,
+                "sub": "stable-subject",
+                "nonce": "test-nonce",
+                "email": email,
+                "email_verified": verified,
+            }
+        }
+
+    monkeypatch.setattr(oauth.framework, "get_state_data", state_data)
+    monkeypatch.setattr(oauth, "authorize_access_token", authorized_token)
+    with TestClient(app) as client:
+        response = client.get("/api/auth/callback?state=test-state", follow_redirects=False)
+        assert response.status_code == 303
+        me = client.get("/api/me").json()
+        assert me["authenticated"]
+        assert me["user"]["email"] == expected
+        assert me["user"]["email_verified"] is bool(expected)
 
 
 def test_tenant_isolation_reports_history_and_mutations(client, app):
@@ -1034,6 +1099,58 @@ def test_invitation_hash_single_use_verified_binding_and_manual_delivery(client,
         ).status_code
         == 422
     )
+
+
+@pytest.mark.parametrize(
+    ("recipient", "different_mailbox"),
+    [
+        ("straße@example.test", "strasse@example.test"),
+        ("strasse@example.test", "straße@example.test"),
+        ("member@faß.test", "member@fass.test"),
+        ("ſtaff@example.test", "staff@example.test"),
+    ],
+)
+def test_invitation_binding_does_not_merge_unicode_mailboxes(
+    client, app, recipient, different_mailbox
+):
+    org_id = login(client)["organizations"][0]["id"]
+    assign_plan(app.state.db, org_id, "team")
+    invite, token = create_invitation(client, org_id, recipient)
+    other, other_id = identity_client(app, different_mailbox)
+    response = other.post("/api/invitations/accept", json={"token": token})
+    assert response.status_code == 404
+    with app.state.db.session() as session:
+        assert session.get(Membership, (other_id, org_id)) is None
+        assert session.get(Invitation, invite["id"]).accepted_at is None
+    intended, _ = identity_client(app, recipient)
+    assert intended.post("/api/invitations/accept", json={"token": token}).status_code == 200
+
+
+def test_verified_email_is_not_truncated_into_invited_identity(client, app):
+    org_id = login(client)["organizations"][0]["id"]
+    assign_plan(app.state.db, org_id, "team")
+    recipient = "a" * (320 - len("@example.test")) + "@example.test"
+    invite, token = create_invitation(client, org_id, recipient)
+    actor, user_id = identity_client(app, recipient + ".different")
+    assert actor.post("/api/invitations/accept", json={"token": token}).status_code == 404
+    with app.state.db.session() as session:
+        user = session.get(User, user_id)
+        assert not user.email_verified and user.email == ""
+        assert session.get(Invitation, invite["id"]).accepted_at is None
+        assert session.get(Membership, (user_id, org_id)) is None
+
+
+@pytest.mark.parametrize("email", ["", "invalid", "name@example.test\x00", "a" * 321])
+def test_reauthentication_clears_invalid_verified_email(client, app, email):
+    with app.state.db.session(write=True) as session:
+        user = provision(session, "issuer", "subject", "User", "valid@example.test", True)
+        assert user.email_verified
+        again = provision(session, "issuer", "subject", "User", email, True)
+        assert again.id == user.id
+        assert again.email == "" and not again.email_verified
+        restored = provision(session, "issuer", "subject", "User", "valid@example.test", True)
+        assert restored.id == user.id and restored.email_verified
+        assert restored.email == "valid@example.test"
 
 
 @pytest.mark.parametrize("state", ["expired", "revoked", "downgraded"])

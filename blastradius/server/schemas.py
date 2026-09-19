@@ -2,9 +2,20 @@ from __future__ import annotations
 
 import json
 import re
+import string
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
+
+
+def email_identity(value: str) -> str | None:
+    if (
+        not 3 <= len(value) <= 320
+        or not value.isprintable()
+        or not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value)
+    ):
+        return None
+    return value.translate(str.maketrans(string.ascii_uppercase, string.ascii_lowercase))
 
 
 class StrictModel(BaseModel):
@@ -71,7 +82,10 @@ class InvitationInput(StrictModel):
     @field_validator("email")
     @classmethod
     def normalize_email(cls, value: str) -> str:
-        return value.casefold()
+        identity = email_identity(value)
+        if identity is None:
+            raise ValueError("invalid email")
+        return identity
 
 
 class AcceptInvitation(StrictModel):

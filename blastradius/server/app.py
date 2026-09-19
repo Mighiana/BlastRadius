@@ -261,6 +261,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             subject = claims["sub"]
             if not isinstance(subject, str) or len(subject) > 255:
                 raise ValueError("Invalid identity")
+            email = claims.get("email")
             response = RedirectResponse(settings.public_url + "/dashboard", status_code=303)
             with db.session(write=True) as session:
                 user = provision(
@@ -268,7 +269,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     settings.oidc_issuer,
                     subject,
                     str(claims.get("name", "")),
-                    str(claims.get("email", "")) if claims.get("email_verified") is True else "",
+                    email if isinstance(email, str) else "",
                     email_verified=claims.get("email_verified") is True,
                 )
                 old = current_session(request, session)

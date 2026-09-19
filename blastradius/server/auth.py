@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from blastradius.server.config import Settings
 from blastradius.server.models import LoginSession, Membership, Organization, User
+from blastradius.server.schemas import email_identity
 
 COOKIE = "br_session"
 
@@ -115,18 +116,19 @@ def provision(
     email: str,
     email_verified: bool = False,
 ) -> User:
+    identity = email_identity(email) if email_verified else None
     user = db.scalar(select(User).where(User.issuer == issuer, User.subject == subject))
     if user:
-        user.email = email[:320]
-        user.email_verified = email_verified
+        user.email = identity or ""
+        user.email_verified = identity is not None
         user.name = name[:200]
         return user
     user = User(
         issuer=issuer,
         subject=subject,
         name=name[:200],
-        email=email[:320],
-        email_verified=email_verified,
+        email=identity or "",
+        email_verified=identity is not None,
     )
     db.add(user)
     db.flush()

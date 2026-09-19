@@ -39,6 +39,7 @@ from blastradius.server.schemas import (
     PolicyInput,
     ProjectUpdate,
     RoleInput,
+    email_identity,
 )
 
 MANAGERS = ("owner", "admin")
@@ -295,7 +296,7 @@ def lifecycle_router(db: Database, settings: Settings) -> APIRouter:
                 or not user.email_verified
                 or user.issuer == "development-demo"
                 or not user.email
-                or user.email.casefold() != invite.email
+                or email_identity(user.email) != invite.email
             ):
                 raise HTTPException(404, "invitation_unavailable")
             require_feature(org, "team")
