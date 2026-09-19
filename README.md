@@ -16,10 +16,10 @@ Fix Terraform → Re-analyze → No new modeled critical paths → ✅ SAFE TO M
 security model—not proof that infrastructure is safe. It requires no AWS account,
 credentials, deployment, or paid service.
 
-**Availability:** installable packaging and the PR workflow are prepared and tested
-locally. No PyPI package, `v1` tag, or hosted PR success is claimed. Before using
-GitHub installation, publish a reviewed commit containing `pyproject.toml` and this
-integration. The earlier initial MVP commit is not packaging-enabled.
+**Availability:** installable packaging and the PR workflow are published on GitHub.
+Installation from commit `a72c04890640102b315506ab85e5f1ccbe91bb9f` is verified.
+No PyPI package, `v1` tag, or hosted PR success is claimed.
+The copyable workflow defaults to that immutable, packaging-enabled commit.
 
 [Add the GitHub check](#github-actions) · [Install locally](#installation) ·
 [Coverage and limitations](#limitations)
@@ -227,16 +227,15 @@ For dashboard development and tests, use `python -m pip install ".[ui,dev]"` and
 run `streamlit run app.py` from the source checkout. The CLI wheel intentionally
 does not bundle the dashboard entry file, demo Terraform, or test suite.
 
-After a packaging-enabled commit has been reviewed and published to this GitHub
-repository, install it without vendoring source:
+Install the published, pinned implementation without vendoring source:
 
 ```bash
-python -m pip install "git+https://github.com/Mighiana/BlastRadius.git@FULL_REVIEWED_COMMIT_SHA"
+python -m pip install "git+https://github.com/Mighiana/BlastRadius.git@a72c04890640102b315506ab85e5f1ccbe91bb9f"
 blastradius --repo /path/to/terraform-repo --base main --head feature/network-change
 ```
 
-Replace `FULL_REVIEWED_COMMIT_SHA` with a real published 40-character commit SHA.
-This is an explicit placeholder, not an existing release. Do **not** use plain
+This commit exists and installation from it has been tested. It is a source
+revision, not a versioned release. Do **not** use plain
 `pip install blastradius` or `uses: Mighiana/BlastRadius@v1`: no such distribution
 or Action release is asserted by this project.
 
@@ -380,15 +379,14 @@ Protect policy changes with review and branch protection outside this tool.
 
 ### GitHub Actions
 
-**New-repository setup** (after publishing a reviewed packaging-enabled analyzer
-commit; no vendoring of Python source is required):
+**New-repository setup** (no vendoring of Python source is required):
 
 1. Copy `examples/github-action/blastradius-pr-check.yml` into your Terraform
    repository as `.github/workflows/blastradius.yml`.
-2. In repository **Settings → Secrets and variables → Actions → Variables**, set
-   `BLASTRADIUS_REVISION` to that analyzer commit's full 40-character SHA. This
-   mandatory pin prevents installing an unreviewed moving branch. The workflow
-   fails clearly if the pin is absent, invalid, or not installable.
+2. Keep the built-in immutable analyzer pin, or optionally set repository variable
+   `BLASTRADIUS_REVISION` to another reviewed, packaging-enabled 40-character SHA.
+   No variable is required for the supplied default. Invalid or uninstallable
+   overrides fail clearly; moving branch names are not accepted.
 3. With one Terraform root, no root setting is needed. For multiple roots, set
    optional repository variable `BLASTRADIUS_TERRAFORM_DIR=infra`, or add
    `terraform_dir: infra` to the base branch's `blastradius.yml`.
@@ -467,6 +465,11 @@ internal gate uses bundled `examples/safe`. The external-install workflow is the
 example above. YAML, shell syntax, gate exits, installation, and event inputs are
 locally tested. Hosted GitHub execution/comment publication remains unverified.
 
+For this repository's live acceptance test, `.github/workflows/blastradius-hosted-test.yml`
+uses the same published analyzer and bot-comment path against `examples/hosted-pr`.
+This isolated fixture is never deployed and does not change the existing demo
+configurations. The test PR is intended to remain unmerged.
+
 ### SARIF findings
 
 ```bash
@@ -484,7 +487,7 @@ validated against the published SARIF 2.1.0 schema.
 ### Tests
 
 ```bash
-pytest
+python -m pytest
 ```
 
 Point the **BEFORE** / **AFTER** directory inputs in the sidebar at any two local
@@ -587,8 +590,8 @@ it does not fake reachability. Fixes are local recommendations, not AWS changes.
 workflow, idempotent bot-comment publisher, fork fallback, and summaries are
 implemented and locally validated. No hosted PR was created and no successful
 hosted comment/run is claimed. API tests use a fake client; analysis tests use
-real Git and the real graph engine. Packaging is prepared locally, not published
-as a PyPI package, `v1` Action, or release.
+real Git and the real graph engine. Packaging is published as installable GitHub
+source, not as a PyPI package, `v1` Action, or release.
 
 **Not production assurance:** AWS reachability and IAM are simplified; incomplete
 coverage can miss paths. No branch protection, cloud deployment, hosted service,

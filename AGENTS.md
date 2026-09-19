@@ -5,7 +5,7 @@
 ```bash
 pip install ".[ui,dev]"          # setup (Python 3.11+; verified on 3.14)
 streamlit run app.py              # dashboard (http://localhost:8501)
-pytest                            # all tests (must be green before any commit)
+python -m pytest                 # all tests (must be green before any commit)
 
 python -m blastradius.cli --before examples/safe --after examples/vulnerable
 # exit 0 = no critical regression, 1 = BLOCK CHANGE, 2 = usage error
@@ -105,3 +105,8 @@ python -m blastradius.cli --plan examples/plans/ssh_open_plan.json --format sari
   package, Action release or verified hosted GitHub run. Publication needs approval.
 * Tests with very large parametrized strings need short explicit IDs: Windows
   environment variables (including PYTEST_CURRENT_TEST) have a 32767-char limit.
+* Invoke tests with `python -m pytest`, not the standalone pytest entry point.
+  Without an installed project, standalone pytest fails importing blastradius
+  from conftest (exit 4); this was reproduced during hosted CI bring-up.
+* Published, install-verified analyzer pin: a72c04890640102b315506ab85e5f1ccbe91bb9f.
+  The consumer workflow uses this immutable default; overrides must be full SHAs.

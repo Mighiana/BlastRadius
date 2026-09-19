@@ -1,36 +1,21 @@
-# BlastRadius pull-request security check.
-#
-# Copy this file to .github/workflows/blastradius.yml in the repository that
-# holds your Terraform, and optionally configure TERRAFORM_DIR.
-#
-#   Pull request opened/updated
-#        -> checkout (full history, so the base ref exists locally)
-#        -> BlastRadius compares base vs PR head
-#        -> attack-path analysis
-#        -> exit 0 = no blocking modeled findings, exit 1 = blocked
-#        -> the check passes or fails, with artifacts and a best-effort PR comment
-#
-# No AWS account, credentials or cloud access is required: the analysis is
-# static and uses only the repository contents.
-name: BlastRadius
+name: BlastRadius Hosted Acceptance
 
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "examples/hosted-pr/**"
 
 permissions:
   contents: read
-  pull-requests: write # optional: forks/read-only tokens use artifacts and summary
+  pull-requests: write
 
 concurrency:
-  group: blastradius-${{ github.repository }}-${{ github.event.pull_request.number }}
+  group: blastradius-hosted-${{ github.repository }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 env:
-  # Directory holding the .tf files to analyze (repo-relative).
-  TERRAFORM_DIR: ${{ vars.BLASTRADIUS_TERRAFORM_DIR }}
-  BLASTRADIUS_REVISION: ${{ vars.BLASTRADIUS_REVISION || 'a72c04890640102b315506ab85e5f1ccbe91bb9f' }}
-  BASE_SHA: ${{ github.event.pull_request.base.sha }}
+  BLASTRADIUS_REVISION: a72c04890640102b315506ab85e5f1ccbe91bb9f
   HEAD_SHA: ${{ github.event.pull_request.head.sha }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
 
@@ -49,58 +34,43 @@ jobs:
         shell: bash
         working-directory: ${{ runner.temp }}
     steps:
-      - name: Checkout trusted Terraform base
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          # BlastRadius reads the base ref straight out of Git, so the history
-          # must be present. A shallow clone would fail with "Ref not found".
-          fetch-depth: 0
           ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
           persist-credentials: false
           path: terraform-repo
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Install reviewed BlastRadius revision
+      - name: Install published analyzer
         run: |
-          if [[ ! "$BLASTRADIUS_REVISION" =~ ^[0-9a-fA-F]{40}$ ]]; then
-            echo "::error::Set BLASTRADIUS_REVISION to a reviewed, published packaging-enabled commit SHA."
-            exit 2
-          fi
           python -m venv "$RUNNER_TEMP/blastradius-env"
           "$RUNNER_TEMP/blastradius-env/bin/python" -m pip install "git+https://github.com/Mighiana/BlastRadius.git@$BLASTRADIUS_REVISION"
-
-      - name: Fetch candidate objects without checkout
+      - name: Fetch candidate without checkout
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
           git -C "$GITHUB_WORKSPACE/terraform-repo" -c "http.extraHeader=AUTHORIZATION: basic $auth" fetch --no-tags origin "refs/pull/$PR_NUMBER/head"
-
-      - name: Analyze Terraform change
+      - name: Analyze controlled Terraform change
         id: analysis
         run: |
-          mkdir -p "$RUNNER_TEMP/blastradius-reports"
           set +e
           "$RUNNER_TEMP/blastradius-env/bin/python" -I -m blastradius.cli \
             --github-action --repo "$GITHUB_WORKSPACE/terraform-repo" \
-            --terraform-dir "$TERRAFORM_DIR" --format summary \
+            --terraform-dir examples/hosted-pr --format summary \
             --report-dir "$RUNNER_TEMP/blastradius-reports" \
             --github-output "$GITHUB_OUTPUT" --github-summary "$GITHUB_STEP_SUMMARY"
           code=$?
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           exit 0
-
-      - name: Upload security reports
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4
         with:
-          name: blastradius-security-report
+          name: blastradius-hosted-test-report
           path: ${{ runner.temp }}/blastradius-reports/
           if-no-files-found: warn
-
       - name: Post or update one PR comment
         if: always() && (steps.analysis.outputs.exit_code == '0' || steps.analysis.outputs.exit_code == '1')
         continue-on-error: true
@@ -111,7 +81,6 @@ jobs:
           "$RUNNER_TEMP/blastradius-env/bin/python" -I -m blastradius.github_pr \
             --repository "$PR_REPOSITORY" --pr "$PR_NUMBER" --head-sha "$HEAD_SHA" \
             --report-file "$RUNNER_TEMP/blastradius-reports/report.md"
-
       - name: Enforce analysis exit code
         if: always()
         env:
@@ -119,6 +88,6 @@ jobs:
         run: |
           case "$ANALYSIS_EXIT" in
             0) exit 0 ;;
-            1) echo "::error::BlastRadius blocked this infrastructure change."; exit 1 ;;
-            *) echo "::error::BlastRadius analysis did not complete successfully."; exit 2 ;;
+            1) echo "::error::Controlled change introduces a modeled critical path."; exit 1 ;;
+            *) echo "::error::Analysis did not complete."; exit 2 ;;
           esac

@@ -52,6 +52,21 @@ def test_comment_file_generation_preserves_analysis_exit(tmp_path):
         assert report.read_text(encoding='utf-8').startswith(MARKER)
 
 
+def test_hosted_acceptance_uses_pinned_production_path():
+    data = yaml.safe_load((ROOT / '.github/workflows/blastradius-hosted-test.yml').read_text(encoding='utf-8'))
+    assert len(data['env']['BLASTRADIUS_REVISION']) == 40
+    steps = data['jobs']['blast-radius']['steps']
+    checkout = next(s for s in steps if s.get('uses', '').startswith('actions/checkout'))
+    assert checkout['with']['ref'] == '${{ github.event.pull_request.base.sha }}'
+    scripts = '\n'.join(s.get('run', '') for s in steps)
+    assert '--github-action' in scripts
+    assert '--terraform-dir examples/hosted-pr' in scripts
+    assert ' -I -m blastradius.github_pr' in scripts
+    assert steps[-1]['if'] == 'always()'
+    ci = yaml.safe_load((ROOT / '.github/workflows/blastradius.yml').read_text(encoding='utf-8'))
+    assert any(s.get('run') == 'python -m pytest -q' for s in ci['jobs']['tests']['steps'])
+
+
 def test_failed_report_write_is_not_a_pass(tmp_path):
     assert run(['--before', str(ROOT / 'examples/safe'), '--after', str(ROOT / 'examples/safe'),
                 '--comment-file', str(tmp_path / 'missing' / 'report.md')], stream=io.StringIO()) == 2

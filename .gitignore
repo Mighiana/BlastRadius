@@ -1,5 +1,6 @@
 .venv/
 .venv-install-check/
+.hosted-pr-worktree/
 build/
 dist/
 *.egg-info/
