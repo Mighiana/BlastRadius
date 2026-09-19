@@ -1,14 +1,35 @@
 name: blastradius
 
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   db:
-    image: postgres:16.15-bookworm@sha256:efedf3595f1d6f415c08568ba171029bf54052e754cc9f030e3f2412b21f3d67
+    image: blastradius-postgres:local
+    build:
+      context: .
+      target: database
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-blastradius}
       POSTGRES_USER: ${POSTGRES_USER:-blastradius}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a local database password in .env}
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-trixie-data:/var/lib/postgresql/data
+    user: postgres
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /var/run/postgresql:size=16m,uid=999,gid=999,mode=3775
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: 1.0
+    mem_limit: 1g
+    pids_limit: 128
+    shm_size: 128m
+    logging: *logging
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
@@ -17,6 +38,7 @@ services:
     restart: unless-stopped
 
   app:
+    image: blastradius:local
     build: .
     env_file: .env
     environment: &app-environment
@@ -38,11 +60,16 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     init: true
+    cpus: 2.0
+    mem_limit: 2g
+    pids_limit: 128
+    logging: *logging
     restart: unless-stopped
-    stop_grace_period: 30s
+    stop_grace_period: 150s
 
   migrate:
     profiles: [tools]
+    image: blastradius:local
     build: .
     env_file: .env
     environment: *app-environment
@@ -52,9 +79,16 @@ services:
         condition: service_healthy
     volumes:
       - app-data:/app/.local
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
+    cpus: 1.0
+    mem_limit: 512m
+    pids_limit: 64
+    logging: *logging
 
 volumes:
-  postgres-data:
+  postgres-trixie-data:
   app-data:

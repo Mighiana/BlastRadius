@@ -33,3 +33,6 @@ build
 *.egg-info
 .blastradius_sim
 examples/generated_fix
+backups
+artifacts
+**/*.dump

@@ -1,4 +1,8 @@
-FROM node:22.23.2-bookworm-slim@sha256:48e4b67d85f87bd551df43704e24d252f56cc5f8e9718841aace50f19948f0f9 AS frontend
+FROM postgres:16.15-trixie@sha256:a3b7f434b2dc57ce85a67e171163eb8ab1a1ebcb39d27484661f26b1dfbe30d6 AS database
+RUN rm /usr/local/bin/gosu /etc/ssl/private/ssl-cert-snakeoil.key /etc/ssl/certs/ssl-cert-snakeoil.pem
+USER postgres
+
+FROM node:24.19.0-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df AS frontend
 WORKDIR /build/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
@@ -20,7 +24,12 @@ FROM python:3.12.14-slim-trixie@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83d
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    HOME=/home/blastradius
+    HOME=/home/blastradius \
+    BR_ENV=production \
+    BR_AUTO_MIGRATE=false \
+    BR_DATA_DIR=/app/.local \
+    BR_STATIC_DIR=/app/web/dist \
+    BLASTRADIUS_ALEMBIC_CONFIG=/app/alembic.ini
 RUN /usr/local/bin/python -m pip uninstall --yes pip \
     && rm -rf /usr/local/lib/python3.12/ensurepip \
     && groupadd --gid 10001 blastradius \
@@ -30,7 +39,8 @@ RUN /usr/local/bin/python -m pip uninstall --yes pip \
 WORKDIR /app
 COPY --from=python-build /opt/venv /opt/venv
 COPY --from=frontend /build/web/dist ./web/dist
-COPY --chown=blastradius:blastradius . .
+COPY alembic.ini ./
+COPY scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh
 USER 10001:10001
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

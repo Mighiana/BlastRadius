@@ -3,7 +3,7 @@ set -eu
 
 case "${1:-serve}" in
   serve)
-    exec python -m uvicorn blastradius.server.app:app \
+    exec python -I -m uvicorn blastradius.server.app:app \
       --host 0.0.0.0 --port 8000 --workers 1 --no-access-log --no-proxy-headers
     ;;
   migrate)
@@ -11,7 +11,7 @@ case "${1:-serve}" in
       echo "Set BLASTRADIUS_ALEMBIC_CONFIG to the server's existing Alembic config." >&2
       exit 2
     fi
-    exec python -m alembic -c "$BLASTRADIUS_ALEMBIC_CONFIG" upgrade head
+    exec python -I -m alembic -c "$BLASTRADIUS_ALEMBIC_CONFIG" upgrade head
     ;;
   *)
     echo "Expected serve or migrate." >&2
