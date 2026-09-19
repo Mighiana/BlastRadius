@@ -4,6 +4,8 @@
 
 Your Terraform diff shows what changed. **BlastRadius shows what became reachable.**
 
+**[Try the live dashboard](https://blastradius.streamlit.app/)** — hosted on Streamlit Community Cloud.
+
 Install the GitHub check, open a Terraform PR, and receive one updated security
 comment explaining the modeled attack-path change and merge decision.
 
@@ -14,7 +16,8 @@ Fix Terraform → Re-analyze → No new modeled critical paths → ✅ SAFE TO M
 
 **Know the blast radius before you merge.** BlastRadius is a simplified static
 security model—not proof that infrastructure is safe. It requires no AWS account,
-credentials, deployment, or paid service.
+AWS credentials, infrastructure deployment, or paid service. Hosting the dashboard
+on Streamlit is separate from provisioning cloud resources.
 
 **Availability:** installable packaging and the PR workflow are published on GitHub.
 Installation from commit `a72c04890640102b315506ab85e5f1ccbe91bb9f` is verified.
@@ -22,7 +25,8 @@ The hosted BLOCK → SAFE flow and single-comment update are verified on PR #1.
 No PyPI package or `v1` tag is published.
 The copyable workflow defaults to that immutable, packaging-enabled commit.
 
-[Add the GitHub check](#github-actions) · [Install locally](#installation) ·
+[Live demo](https://blastradius.streamlit.app/) · [Add the GitHub check](#github-actions) ·
+[Install locally](#installation) · [Community Cloud setup](#streamlit-community-cloud) ·
 [Coverage and limitations](#limitations)
 
 A routine-looking CIDR change can produce:
@@ -40,7 +44,7 @@ New attack path:
   Internet → Web SG → Web Server → App Role → Customer Data → Sensitive Data
 ```
 
-Analysis runs locally against Terraform source, Git snapshots, or plan JSON.
+Analysis runs in the CLI or dashboard process against Terraform source, Git snapshots, or plan JSON.
 Bundled scenarios are controlled examples, not the only supported inputs.
 **No AWS credentials are read, no infrastructure is provisioned, and nothing is attacked.**
 
@@ -255,6 +259,48 @@ keeps the three scenarios visible; filesystem inputs live under **Advanced** exp
 Enable **Demo Mode** to hide advanced inputs and tabs and show the decision, graph,
 explanation, and fix together. After a successful fix, the hero explicitly shows
 **BLOCK CHANGE → SAFE TO MERGE** based on re-analysis.
+
+### Streamlit Community Cloud
+
+Public dashboard: **https://blastradius.streamlit.app/**
+
+To deploy your own copy, sign in at [Streamlit Community Cloud](https://share.streamlit.io),
+choose **Create app**, and use these settings (substitute your repository if forked):
+
+| Setting | Value |
+|---|---|
+| Repository | `Mighiana/BlastRadius` |
+| Branch | `main` |
+| Main file path | `app.py` |
+| Python version | `3.12` under Advanced settings |
+| Secrets | Leave empty for the bundled demo |
+
+Community Cloud installs the root `requirements.txt` and reads
+`.streamlit/config.toml` for the dark theme. Do not add AWS credentials or a GitHub
+token to run the dashboard's bundled scenarios. The dashboard is separate from
+the GitHub Actions PR check and does not require PR-write permissions.
+
+After deployment, manually verify **Demo Mode → Restore safe configuration →
+Simulate risky change → Generate Safer Configuration & Re-analyze**. The expected
+sequence is **SAFE → BLOCK → SAFE**, with the graph and metrics reflecting real
+re-analysis. The public URL has responded with HTTP 200; that reachability check
+is not independent verification of the deployed interactive flow.
+
+**Hosting limitations:**
+
+* Local-directory and Git inputs refer to files on the Streamlit server, not the
+  visitor's computer. Use the bundled scenarios for the public demonstration;
+  analyze private infrastructure locally or in your own CI environment.
+* Generated Terraform is temporary local output, not durable cloud storage. Do
+  not rely on it surviving an app restart or redeployment.
+* Simulation and remediation currently write to shared application directories,
+  not per-session directories. Concurrent visitors can overwrite one another's
+  generated configurations. Use a controlled demonstration until session-isolated
+  output is implemented; Demo Mode hides advanced controls but does not provide
+  multi-user isolation or authentication.
+* Dashboard dependency ranges are defined by `requirements.txt`; the CLI's
+  immutable source pin does not freeze the Community Cloud environment. Pin the
+  dashboard dependencies for reproducible public deployments.
 
 ### CI mode
 
@@ -593,7 +639,8 @@ operates on controlled Terraform configurations.
 * **IAM parsing is shallow.** Heredoc JSON policies only; no wildcard ARN
   matching, conditions or `NotAction`/`NotResource` semantics.
 * **Score and decision are heuristics**, not calibrated risk measures.
-* Nothing is ever deployed, and no AWS credentials are used.
+* No AWS infrastructure is deployed and no AWS credentials are used. The dashboard
+  itself is hosted on Streamlit Community Cloud.
 
 ---
 
@@ -611,6 +658,12 @@ remediation and score formula are preserved.
 synthetic inputs. Simulation edits real Terraform text and reuses the same engine;
 it does not fake reachability. Fixes are local recommendations, not AWS changes.
 
+**Hosted dashboard:** the maintainer deployed the dashboard to
+[Streamlit Community Cloud](https://blastradius.streamlit.app/). Public URL
+reachability was checked (HTTP 200); the deployed interactive demo flow and
+multi-user behavior have not been independently verified. See the hosting
+limitations above, especially shared generated files.
+
 **Hosted-GitHub verified:** PR #1 demonstrated an actual blocking gate, report
 artifact upload, bot-comment creation, remediation, a passing gate, and an update
 to the same comment. The run links and observed counts are recorded above. The
@@ -622,13 +675,16 @@ repository acceptance remains future work. Packaging is published as installable
 GitHub source, not as a PyPI package, `v1` Action, or release.
 
 **Not production assurance:** AWS reachability and IAM are simplified; incomplete
-coverage can miss paths. No branch protection, cloud deployment, hosted service,
-or automatic PR remediation is configured by running the local tool.
+coverage can miss paths. Running the local tool does not configure branch
+protection, deploy AWS infrastructure, or apply automatic PR remediation. The
+hosted dashboard is a demonstration, not a multi-tenant security service.
 
 ## Future roadmap
 
 Not implemented:
 
+* Per-session generated files and hosted multi-user acceptance testing
+* Reproducibly pinned Community Cloud dashboard dependencies
 * VPC / subnet / route-table and NACL awareness
 * More resources: RDS, Lambda, Secrets Manager, EKS/Kubernetes
 * Azure and GCP providers
