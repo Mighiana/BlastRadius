@@ -3,8 +3,6 @@ name: BlastRadius Hosted Acceptance
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - "examples/hosted-pr/**"
 
 permissions:
   contents: read
@@ -21,6 +19,7 @@ env:
 
 jobs:
   blast-radius:
+    if: startsWith(github.head_ref, 'test/blastradius-hosted-')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     outputs:

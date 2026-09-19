@@ -56,6 +56,8 @@ def test_comment_file_generation_preserves_analysis_exit(tmp_path):
 def test_hosted_acceptance_uses_pinned_production_path():
     data = yaml.safe_load((ROOT / '.github/workflows/blastradius-hosted-test.yml').read_text(encoding='utf-8'))
     assert len(data['env']['BLASTRADIUS_REVISION']) == 40
+    assert 'paths' not in data.get('on', data.get(True))['pull_request']
+    assert data['jobs']['blast-radius']['if'] == "startsWith(github.head_ref, 'test/blastradius-hosted-')"
     steps = data['jobs']['blast-radius']['steps']
     checkout = next(s for s in steps if s.get('uses', '').startswith('actions/checkout'))
     assert checkout['with']['ref'] == '${{ github.event.pull_request.base.sha }}'
