@@ -5,6 +5,8 @@ from sqlalchemy import select
 
 from blastradius.server.config import Settings
 from blastradius.server.db import Database
+from blastradius.server.github_api import GitHubError
+from blastradius.server.github_routes import register_installation
 from blastradius.server.models import Analysis, Organization, Project, User
 from blastradius.server.persistence import audit, cleanup
 from blastradius.server.plans import PLANS
@@ -59,6 +61,11 @@ def main(argv: list[str] | None = None) -> int:
     inspect.add_argument("--offset", type=int, default=0)
     clean = commands.add_parser("cleanup")
     clean.add_argument("--limit", type=int, default=100)
+    github = commands.add_parser("github-register", help="Operator-verified workspace/account mapping")
+    github.add_argument("organization_id")
+    github.add_argument("installation_id", type=int)
+    github.add_argument("account_id", type=int)
+    github.add_argument("--verification-reference", required=True)
     args = parser.parse_args(argv)
     settings = Settings.from_env()
     if not settings.admin_enabled:
@@ -72,6 +79,14 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(assign_plan(db, args.organization_id, args.plan, limits)))
         elif args.command == "cleanup":
             print(json.dumps({"removed": cleanup(db, args.limit)}))
+        elif args.command == "github-register":
+            try:
+                print(json.dumps(register_installation(
+                    db, settings, args.organization_id, args.installation_id, args.account_id,
+                    args.verification_reference,
+                )))
+            except (GitHubError, ValueError):
+                parser.error("registration rejected; verify operator mapping, App setup and permissions")
         else:
             if not 1 <= args.limit <= 1000 or args.offset < 0:
                 parser.error("limit must be 1..1000 and offset nonnegative")

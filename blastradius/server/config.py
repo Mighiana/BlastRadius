@@ -20,6 +20,10 @@ class Settings:
     oidc_client_id: str = ""
     oidc_client_secret: str = ""
     admin_enabled: bool = False
+    github_app_id: int = 0
+    github_app_slug: str = ""
+    github_private_key_file: Path | None = field(default=None, repr=False)
+    github_webhook_secret: str = field(default="", repr=False)
     max_body_bytes: int = 1_048_576
     max_files: int = 30
     max_resources: int = 300
@@ -40,7 +44,25 @@ class Settings:
     def billing_enabled(self) -> bool:
         return False
 
+    @property
+    def github_enabled(self) -> bool:
+        return bool(
+            self.github_app_id
+            and self.github_app_slug
+            and self.github_private_key_file
+            and self.github_webhook_secret
+        )
+
     def validate(self) -> None:
+        if self.github_app_id < 0:
+            raise ValueError("BR_GITHUB_APP_ID must be nonnegative (0 disables integration)")
+        if self.github_webhook_secret and len(self.github_webhook_secret) < 32:
+            raise ValueError("GitHub webhook secret must contain at least 32 characters")
+        if self.github_app_slug and (
+            len(self.github_app_slug) > 100
+            or not all(c in "abcdefghijklmnopqrstuvwxyz0123456789-" for c in self.github_app_slug)
+        ):
+            raise ValueError("Invalid GitHub App slug")
         if self.environment not in {"development", "test", "production"}:
             raise ValueError("BR_ENV must be development, test or production")
         if self.auth_mode not in {"disabled", "demo", "oidc"}:
@@ -119,6 +141,12 @@ class Settings:
             oidc_client_id=env.get("BR_OIDC_CLIENT_ID", ""),
             oidc_client_secret=env.get("BR_OIDC_CLIENT_SECRET", ""),
             admin_enabled=env.get("BR_ADMIN_ENABLED") == "true",
+            github_app_id=int(env.get("BR_GITHUB_APP_ID", "0")),
+            github_app_slug=env.get("BR_GITHUB_APP_SLUG", ""),
+            github_private_key_file=(
+                Path(env["BR_GITHUB_PRIVATE_KEY_FILE"]) if env.get("BR_GITHUB_PRIVATE_KEY_FILE") else None
+            ),
+            github_webhook_secret=env.get("BR_GITHUB_WEBHOOK_SECRET", ""),
             max_body_bytes=int(env.get("BR_MAX_BODY_BYTES", "1048576")),
             max_files=int(env.get("BR_MAX_FILES", "30")),
             max_resources=int(env.get("BR_MAX_RESOURCES", "300")),

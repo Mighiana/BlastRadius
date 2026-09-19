@@ -27,6 +27,8 @@ from blastradius.server.config import Settings
 from blastradius.server.db import Database
 from blastradius.server.demos import build_demos
 from blastradius.server.fixtures import FIXTURES
+from blastradius.server.github_routes import github_router
+from blastradius.server.github_service import GitHubService
 from blastradius.server.jobs import JobManager
 from blastradius.server.lease import ServiceLease
 from blastradius.server.middleware import GuardMiddleware
@@ -100,6 +102,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     db = Database(settings)
     oauth = oauth_client(settings)
     jobs = JobManager(db, settings)
+    github = GitHubService(db, settings, jobs)
     lease = ServiceLease(db, settings.data_dir)
     demos: dict[tuple[str, str], dict] = {}
 
@@ -114,9 +117,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "Database schema is not ready; run python -m blastradius.server.migrate"
                 )
             jobs.recover()
+            github.recover()
             demos.update(await run_in_threadpool(build_demos, settings))
             yield
         finally:
+            await run_in_threadpool(github.shutdown)
             await run_in_threadpool(jobs.shutdown)
             lease.release()
             db.engine.dispose()
@@ -135,6 +140,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         jobs,
         oauth,
     )
+    app.state.github = github
     app.add_middleware(
         SessionMiddleware,
         secret_key=settings.session_secret,
@@ -150,6 +156,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
     app.add_middleware(GuardMiddleware, settings=settings)
     app.include_router(lifecycle_router(db, settings))
+    app.include_router(github_router(db, settings, github))
 
     @app.get("/api/plans")
     def plans():

@@ -5,6 +5,7 @@ import uuid
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     CheckConstraint,
     ForeignKey,
     Index,
@@ -238,4 +239,67 @@ class AnalysisArtifact(Base):
 class BillingEvent(Base):
     __tablename__ = "billing_events"
     id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    created_at: Mapped[float] = mapped_column(default=time.time)
+
+
+class GitHubInstallation(Base):
+    __tablename__ = "github_installations"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    organization_id: Mapped[str] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), index=True
+    )
+    account_id: Mapped[int] = mapped_column(BigInteger)
+    account_login: Mapped[str] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(30), default="active")
+    verified_at: Mapped[float] = mapped_column(default=time.time)
+
+
+class RepositoryConnection(Base):
+    __tablename__ = "repository_connections"
+    __table_args__ = (UniqueConstraint("installation_id", "repository_id"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=identifier)
+    installation_id: Mapped[int] = mapped_column(
+        ForeignKey("github_installations.id", ondelete="CASCADE"), index=True
+    )
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), unique=True
+    )
+    repository_id: Mapped[int] = mapped_column(BigInteger, unique=True)
+    full_name: Mapped[str] = mapped_column(String(255))
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    status: Mapped[str] = mapped_column(String(30), default="active")
+    created_at: Mapped[float] = mapped_column(default=time.time)
+
+
+class GitHubDelivery(Base):
+    __tablename__ = "github_deliveries"
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    body_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    event: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(30), default="queued")
+    attempts: Mapped[int] = mapped_column(default=1)
+    error: Mapped[str | None] = mapped_column(String(100))
+    created_at: Mapped[float] = mapped_column(default=time.time)
+
+
+class GitHubRun(Base):
+    __tablename__ = "github_runs"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    connection_id: Mapped[str] = mapped_column(
+        ForeignKey("repository_connections.id", ondelete="CASCADE"), index=True
+    )
+    analysis_id: Mapped[str | None] = mapped_column(
+        ForeignKey("analyses.id", ondelete="SET NULL"), unique=True
+    )
+    pull_number: Mapped[int]
+    base_sha: Mapped[str] = mapped_column(String(40))
+    head_sha: Mapped[str] = mapped_column(String(40))
+    head_repository_id: Mapped[int] = mapped_column(BigInteger)
+    base_ref: Mapped[str] = mapped_column(String(120))
+    head_ref: Mapped[str] = mapped_column(String(120))
+    status: Mapped[str] = mapped_column(String(30), default="pending")
+    error: Mapped[str | None] = mapped_column(String(100))
+    check_id: Mapped[int | None] = mapped_column(BigInteger)
+    check_uncertain: Mapped[bool] = mapped_column(default=False)
+    comment_uncertain: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[float] = mapped_column(default=time.time)

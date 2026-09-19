@@ -1,8 +1,11 @@
-# Future GitHub App — not implemented
+# GitHub App security design
 
-The current integration is [Actions](github-actions.md). An App needs a separate
-security review, credentials, hosted infrastructure and owner approval.
-No registration, OAuth flow or live webhook receiver is implemented here.
+The backend implementation and frontend/operator contracts are documented in
+[GitHub App integration](github.md). The existing [Actions](github-actions.md)
+integration remains available. App provider interactions are mock-tested;
+production credentials, hosted infrastructure and live provider acceptance
+require operator setup and approval. There is no public installation-claim or
+GitHub-user OAuth flow.
 
 ## Identity
 
@@ -13,9 +16,14 @@ Do not request workflow write or organization administration.
 Map authenticated application organizations to installation IDs and explicit
 repository IDs, validated against GitHub. A repository name, redirect query or
 client-provided installation ID is not authorization. Uninstall and repository
-removal revoke mappings and cancel work; renames must not cross tenant boundaries.
-Use supported OAuth/OIDC libraries with state/nonce/PKCE, managed secret storage,
-rotation and short-lived installation tokens. Never expose them in browser bundles.
+removal revoke mappings and stop admission/publication; a bounded in-flight
+worker may finish, but its result is discarded. Renames must not cross tenant boundaries.
+Workspace/account mapping requires a trusted operator's independently verified
+registration, followed by authoritative App/installation/account/permission
+checks. A callback state alone cannot prove installation access. A future public
+flow must verify the authenticated GitHub user's installation permissions.
+Use protected PEM files and short-lived repository-scoped installation tokens.
+Never expose them in browser bundles.
 
 ## Webhooks
 
@@ -60,3 +68,17 @@ heads, fork permissions, token expiry, retries and concurrent results.
 Use mock/recorded interactions first. Sandbox installs and any live comments or
 checks need separate approval. GitHub Enterprise and multi-root aggregation are
 separate compatibility decisions.
+
+## Current operational boundary
+
+The control queue is serialized within the existing single-replica service
+lease. Admission shares the ordinary analysis semaphore and quota controls.
+Analysis runs in the existing isolated worker. Publication rechecks the head
+before each mutation and records intent before POSTs; uncertain outcomes require
+remote reconciliation, never blind creation retries.
+
+Durable delivery hashes and run metadata protect replay/idempotency, but raw
+webhooks are not stored. Restart recovery is fail-closed and requires operator
+redelivery from GitHub. Physical evidence retention uses normal operator cleanup;
+delivery hashes and run tombstones have no age purge. See the integration
+document for exact limits, errors and supported inputs.
