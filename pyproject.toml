@@ -21,7 +21,18 @@ classifiers = [
 
 [project.optional-dependencies]
 ui = ["streamlit>=1.40,<2", "pyvis==0.3.2"]
-dev = ["pytest>=8.4.2,<10"]
+dev = ["pytest>=8.4.2,<10", "httpx==0.28.1", "ruff==0.12.12", "mypy==1.17.1"]
+server = [
+  "fastapi==0.116.1",
+  "uvicorn==0.35.0",
+  "SQLAlchemy==2.0.43",
+  "alembic==1.16.5",
+  "psycopg[binary]==3.2.10",
+  "Authlib==1.6.5",
+  "httpx==0.28.1",
+  "itsdangerous==2.2.0",
+  "stripe==12.5.1",
+]
 
 [project.scripts]
 blastradius = "blastradius.cli:main"
