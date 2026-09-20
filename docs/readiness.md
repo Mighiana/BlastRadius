@@ -1,9 +1,10 @@
 # Authenticated SaaS readiness
 
 Assessment: **2026-09-20 — INTERNAL ALPHA**. Private/public beta promotion remains
-blocked. Local shell verification of the integrated commercial-beta implementation
-passed; final browser/responsive acceptance on this implementation is **pending**
-and owned by the parent session. This is not a security certification.
+blocked. Local shell and current-revision browser/responsive acceptance of the
+integrated commercial-beta implementation passed. Remaining image, hosted-provider,
+operations and owner-approval gates prevent a higher classification. This is not
+a security certification.
 
 Defensive security revision: `abfe328` on
 `devin/1789903228-saas-verification`, following integrated head `5cc9257`.
@@ -13,40 +14,106 @@ unmerged. PR #2 was previously merged outside this integration stage. No new PR,
 merge, force push, provider provisioning, payment activation or public deployment
 was performed.
 
-Prior browser revision: `c9253b9340a35ea61e0ed17262b9113293d84e64`.
-Its retained backend failure/role evidence from `9b0b5a6` used identical backend
-code **at that time**. The new beta, feedback, events, operator and container
-changes require acceptance again; prior browser evidence below is historical.
+Current browser revision: `da043fbc007359af5a05ecb1569bea4a19b41413`, using a
+fresh isolated installation, signed local HTTPS OIDC provider and disposable
+PostgreSQL. The final documentation-only update does not change that runtime.
+Prior browser evidence from `c9253b9` and retained backend evidence from `9b0b5a6`
+remain explicitly historical and are not added to current counts.
 
 ## Final status by area
 
 | Area | Integrated status and evidence boundary |
 | --- | --- |
 | Technical | Python 3.12.14 / Node 24.19.0 shell validation passes; single-process bounded queue remains the supported architecture |
-| Authenticated flow | SQLite/PostgreSQL API and signed mocked OIDC regressions pass; final integrated browser flow and hosted identity remain pending |
+| Authenticated flow | Fresh installed app with real signed local OIDC/PostgreSQL passes login, owner/project, HCL, genuine queue progression, evidence, downloads, history, relogin and restart; selected external identity/ingress remains unverified |
 | PostgreSQL | Disposable PostgreSQL 16.15 acceptance passes; fresh/upgrade/idempotent migrations reach `0004`; logical recovery and commercial retention verified |
 | RBAC / tenant isolation | Authorization matrix and beta/feedback/operator regressions pass in full backend suite; workspace ownership does not grant platform access |
 | Fail-closed analysis | Engine/worker/restart regressions pass; errors/incomplete results never become SAFE; SAFE means “No new modeled blocking findings detected.” |
 | Container security | Promotion blocked: database 1 CRITICAL / 54 HIGH; app reports zero but retains assessed zlib MEDIUM risk; [full inventory](container-security.md) |
-| CI | Historical integrated push `5be27d0`: 2 passed, 4 pending, 1 skipped when inspected. Final security/evidence push requires its own CI result; local promotion check is deliberately red |
-| Responsive / browser | **0 browser cases executed in this integration stage**; 29 collected (19 existing + 10 new). Six requested widths and new beta/feedback/operator flows await parent acceptance |
-| Onboarding | Demo/HCL/plan choices, result guidance, beta/pricing/trust wording implemented; 141 frontend unit tests pass; browser usability and time-to-value not measured here |
-| Beta access | Persisted consent-based intake, strict schema, exact Origin/CSRF, bounded storage/rate limits and privacy notice verified by API/unit tests; no invitation/email promise |
-| Feedback | Authenticated terminal-analysis feedback derives tenant/user context server-side; isolation, persistence, expiry and operator review verified by shell tests |
+| CI | Tested runtime/evidence head `da043fb`: **6 passed, 0 failed, 0 pending, 1 skipped**. Later documentation pushes have separate checks; the local image-promotion gate remains red |
+| Responsive / browser | **29/29** native browser cases, zero skipped/unexpected/flaky; **186/186** current six-width measurements, plus 13 browser-driven acceptance groups and 2 independent HTTP exercises |
+| Onboarding | Demo/HCL/plan choices, result guidance, beta/pricing/trust wording and paid CTA-to-beta passed local browser checks; a new customer's under-five-minute time-to-value remains a validation target, not a measured claim |
+| Beta access | Real consent validation, HTTP 201 persistence and saved state passed; exact Origin/CSRF, peer/global rate caps and no public list checked; no invitation/email promise |
+| Feedback | Actual create/reload/edit, independent viewer response, tenant/expiry isolation, restart persistence and operator review passed; context remains server-derived |
 | First-party product metrics | Fixed event names and UUID references only; no browser ingestion or fingerprints; bounded 90-day activity summaries, not evidence of customer intent |
-| Admin | Read-only operator API/UI; web access requires validated OIDC session, verified email/issuer and UUID allowlist; trusted CLI remains separate; hosted operator acceptance pending |
+| Admin | Real verified-OIDC UUID authorization passed all nine views; ordinary roles denied, session revocation returned 401, UUID removal returned 403 for old and fresh sessions; hosted acceptance pending |
 | Pricing / entitlement | Central Free 1/25/7, Pro 5/500/90, Team 25/5000/365 project/monthly-analysis/history limits; Enterprise custom; proposed prices and checkout disabled; manual audited plan grants |
 | GitHub Actions | Local event/base-policy/immutable-SHA/publication regressions pass; historical hosted evidence retained below; current strict REVIEW/fork behavior needs authorized hosted acceptance |
 | GitHub App | Signed-webhook/provider mocks pass; real installation/check/comment/redelivery acceptance requires owner configuration |
-| OIDC | Signed callback/session validation tested locally; legacy operator sessions must reauthenticate after `0004`; selected external IdP remains unverified |
+| OIDC | Actual signed local provider, stable-subject relogin, revocation and operator authorization passed; legacy operator sessions must reauthenticate after `0004`; selected external IdP remains unverified |
 | Deployment | Hardened images and provider-neutral runbooks prepared; nothing hosted or provisioned |
 | Backups / restore | Disposable logical dump/restore matches schema/data, preserves source/usage and verifies bounded deletion/cascades; encrypted off-host backup/PITR and disaster recovery remain unverified |
 | Monitoring | Health/readiness, bounded logs and alert/scheduling runbooks exist; delivery of real alarms and deployed schedules not verified |
 | Legal / trust | Explicit static-analysis/model/retention boundaries and synthetic customer materials exist; legal entity, contacts, terms/subprocessors and beta approval remain owner work |
-| Test counts | 1,144 backend/engine; 42 release with opt-in Docker drill; 141 frontend; 5 additional isolated-wheel CLI cases; 9 container worker cases; 0 new browser executions |
+| Test counts | 1,144 backend/engine; 42 release with opt-in Docker drill; 141 frontend; 29 repository browser; 186 responsive measurements; 5 additional isolated-wheel CLI and 9 container worker cases |
 | Delivery / PR #3 | Consume the [delivery branch](https://github.com/Mighiana/BlastRadius/tree/devin/1789903228-saas-verification) directly; `abfe328` includes all prior integrated changes plus security fixes. PR #3 remains draft/unmerged |
 
 ## IMPLEMENTED AND VERIFIED
+
+### Current commercial-beta browser acceptance
+
+The [current acceptance report](https://app.devin.ai/attachments/f6de8233-6d8b-49b1-a273-a360b8318d01/acceptance.md)
+and [sanitized evidence bundle](https://app.devin.ai/attachments/3e0f36ef-899f-47ff-b910-1cc09885f9e5/evidence.zip)
+cover `da043fb`. The bundle contains 303 files including 247 screenshots; private
+profiles, provider keys/logs, cookies, session/CSRF values and database dumps are
+excluded. Current recordings are delivered in the
+[session](https://app.devin.ai/sessions/43f88b66eb154704bcc13f7cabb8d478).
+
+Fresh-install scope: a clean isolated clone, new Python 3.12.14 environment,
+current package installation, frontend dependency installation/build, explicit
+idempotent migration to `0004`, signed local HTTPS identity provider and disposable
+PostgreSQL. Isolated installed app/worker/jobs hashes matched source. Separate
+ports and private profiles preserved the existing Desktop demo. This is local
+installed-package acceptance, separate from the Alpine image smoke and external
+hosting acceptance.
+
+The recorded workflow was sign in → workspace owner → project → HCL upload →
+genuine QUEUED → RUNNING → succeeded/completed → BLOCK 100→20 →
+graph/responsible change/per-hop evidence/remediation/coverage → actual
+JSON/Markdown and Team-entitled SARIF downloads → history/reopen →
+logout/401 → same-subject sign-in → normal backend restart. Selected
+identity/membership/project/analysis/artifact/feedback/beta/event records persisted,
+and post-Team export bytes remained identical. No queued/running state was mocked.
+
+| Current check | Result and boundary |
+| --- | --- |
+| Repository Playwright | **29/29 distinct cases**, zero skipped/unexpected/flaky. Mocked CSRF-error/operator-presentation cases remain distinct from real provider tests |
+| Additional acceptance | **13 browser-driven groups** and **2 independent HTTP exercises**, not additional repository cases or hand-click-only tests |
+| Beta request | Cold navigation, initially unchecked consent, required/email/consent validation, optional fields, real 201/storage/saved state, public-list 405 and paid CTA-to-beta passed |
+| Feedback | Create 200, reload/edit with stable ID/creation time, bounded text, server-derived context, independent viewer response and foreign/expired 404 passed |
+| Decisions | SAFE, REVIEW, BLOCK, malformed/unsupported input and actionable missing/invalid input states passed; failed/incomplete results never showed SAFE |
+| Roles and tenancy | **36/36** ordinary-role operator calls returned 403; viewer analysis mutation denied; foreign project/result/artifact/feedback returned 404 without UI disclosure |
+| Origin, CSRF and abuse | Exact required Origin/CSRF 403, invalid feedback 422 and real peer 429 without false saved state passed; independent clients verified beta 60/global and feedback 120/global caps |
+| Real operator | Persisted verified UUID allowlist, signed reauthentication, nine protected views/aggregates/private review and response privacy passed; no mocked capability substituted |
+| Revocation | Session revocation 401 and allowlist removal 403 passed for stale UI, reload and fresh signed login |
+| Failure recovery | Scoped PostgreSQL terminal-write trigger produced incomplete UI and 503 admission/reads; completed evidence stayed 200, foreign 404, anonymous 401. Trigger removal/restart failed interrupted jobs closed and a new BLOCK succeeded |
+| Active-job interruption | SIGKILL during actual RUNNING → restart → `failed/server_restarted` → fresh successful BLOCK; prior report and feedback unchanged |
+| Retention and upload bounds | Expired-feedback GET/PUT 404 with result/control hiding; oversized/file-count input rejected in UI and API 413. Temporary fixture aging was restored |
+
+The full historical 82-permutation browser RBAC matrix was **not** repeated;
+current backend role/tenant regressions passed in the 1,144-test suite.
+Dense automation initially reached the unchanged rate budget; pacing and harness
+corrections were required. No material application defect remained in exercised
+assertions, and no limits or security controls were relaxed.
+
+| Width | Public surfaces | Authenticated surfaces | Operator surfaces | Violations |
+| --- | ---: | ---: | ---: | ---: |
+| 320 | 9 | 13 | 9 | 0 |
+| 375 | 9 | 13 | 9 | 0 |
+| 430 | 9 | 13 | 9 | 0 |
+| 768 | 9 | 13 | 9 | 0 |
+| 1024 | 9 | 13 | 9 | 0 |
+| 1440 | 9 | 13 | 9 | 0 |
+
+These **186/186** measurements cover new public/beta/pricing, authenticated
+onboarding/report/feedback and all nine operator surfaces. No measured document
+or panel overflow; applicable controls were at least 44px. Measurements are not
+distinct test-suite cases.
+
+The disposable runtime was restored to two workers with readiness 200, fault
+triggers removed and web-operator allowlist removed. Live external OIDC, hosted
+HTTPS/proxy, GitHub provider writes, payments and deployment remain untested.
+Local browser success does not clear the image-promotion gate.
 
 ### Defensive security reassessment
 
@@ -86,8 +153,9 @@ The [security shell evidence](https://app.devin.ai/attachments/48613f5e-db67-406
 contains check/build/audit logs and raw scans, excluding databases, environment
 files and installed environments. Current image digests and scanner provenance
 are in [container security](container-security.md#defensive-security-reassessment).
-One Starlette/httpx deprecation warning remains. No browser or hosted-provider
-actions were run; the parent must accept the new auth and deep-link behavior.
+One Starlette/httpx deprecation warning remains. That security stage ran no
+browser or hosted-provider actions; subsequent current-revision local browser
+acceptance above verifies the new auth and deep-link behavior.
 
 ### Prior integrated verification
 
@@ -328,7 +396,7 @@ An unhealthy Docker healthcheck alone does not restart the container.
 | SaaS GitHub App — High for GitHub beta | Local HMAC/provider mocks and real worker tests pass; no hosted App installation/check/comment/redelivery acceptance | Authorize a disposable hosted repository; test installation/revocation, signed delivery/redelivery, private/fork permissions, BLOCK/SAFE/REVIEW, stale head/base retarget and app-owned check/comment updates |
 | Current strict Actions gate — Medium | Historical Actions [BLOCK](https://github.com/Mighiana/BlastRadius/actions/runs/35441550348)/[SAFE](https://github.com/Mighiana/BlastRadius/actions/runs/35441968970) and [bot-comment update](https://github.com/Mighiana/BlastRadius/pull/1#issuecomment-5741664556) prove the older same-repository integration; current `--fail-on-review`/base-edit behavior and hosted fork fallback were not reaccepted | Approve the analyzer release/pin, rerun the current consumer workflow on same-repository and fork PRs, and verify REVIEW cannot satisfy the merge gate |
 | Production operations — Critical | Local database/container checks do not establish backup recovery, TLS, alerting or capacity | Execute restore/deletion, retention, failure-alert and queue-drain drills in [operations](operations.md) on the real deployment |
-| Integrated commercial frontend — High | Prior browser evidence predates intake/feedback/operator UI and hardened images | Parent must run the 29 collected browser cases and full authenticated Desktop flow at the final revision, including requested widths, error states, persistence and signed-OIDC operator access |
+| Hosted commercial frontend — High | Current installed-package browser acceptance passed locally; this does not prove the selected ingress, deployment image and real identity configuration work together | Repeat the recorded beta/feedback/operator and core workflow against the approved final deployment |
 
 ## NOT YET IMPLEMENTED
 
@@ -370,13 +438,16 @@ application tests does not waive the image gate.
 | B3 — High if offering GitHub integration | Mocked provider tests do not prove hosted checks enforce merges | Owner: configure the selected-repository App and authorize disposable hosted acceptance; do not offer it as verified until passed |
 | B4 — High | A single-process beta still requires recoverable data, alerts and operational ownership | Operator: provision backup/PITR, run a restore drill, schedule retention, assign incident ownership, alert on failed readiness and validate admission/drain capacity |
 | B5 — High | Unreviewed terms/data promises and unapproved artifacts block commercial exposure | Owner/legal: approve beta limits, privacy/terms/support/security contacts and final release/deployment scope. Payments stay disabled |
-| B6 — High | Integrated commercial UI and hardened runtime lack final browser acceptance | Parent: rerun authenticated workflow and six-width responsive acceptance, real beta persistence/feedback and authorized/unauthorized operator paths on the final delivery revision; retain exact revision and evidence |
+
+Former local blocker B6 is closed by the current-revision acceptance above.
+Hosted deployment/image acceptance remains under B1/B2; no container or provider
+claim is inferred from the installed-package browser run.
 
 ## PUBLIC BETA BLOCKERS
 
 | ID / severity | Why it matters | Exact next action / owner |
 | --- | --- | --- |
-| U1 — Critical | Private-beta security/identity/operational gates remain open | Resolve B1–B6 before a public invitation; record the exact build/configuration accepted |
+| U1 — Critical | Private-beta security/identity/operational gates remain open | Resolve B1–B5 before a public invitation; record the exact build/configuration accepted |
 | U2 — High | Broad intake exceeds the demonstrated single-process operating scope | Operator: measure admission, request/queue/worker limits and abuse rates; test alerts, exhaustion recovery and support escalation under the intended concurrency |
 | U3 — High | Public data collection needs approved legal/support and deletion commitments | Owner: approve notice/contact/retention wording, test physical cleanup and backup deletion replay, publish support/security routes and assign response owners |
 | U4 — Medium | Synthetic samples and activity counts do not establish product value | Owner: run the [neutral interviews](customer-interview.md) with authorized private-beta users and record usability/missing-coverage/return-use evidence before widening access; do not infer payment intent from event counts |
@@ -405,8 +476,9 @@ fields and acceptance checks. No external setup was performed by this stage.
    compatible vendor remediation, rebuild both images, run
    `bash scripts/verify-containers.sh`, `make container-audit` and
    `make promotion-check`, then retain full ledger/digests. Do not waive the
-   remaining HIGH/CRITICAL findings. Repeat final parent-owned browser acceptance
-   on that reviewed build; the current integration remains INTERNAL ALPHA.
+   remaining HIGH/CRITICAL findings. Repeat deployment browser acceptance
+   on that reviewed build; current local acceptance does not raise the
+   INTERNAL ALPHA classification.
 3. **Configure owned HTTPS infrastructure.** Use the
    [production worksheet](environment-production.md) and
    [domain steps](owner-setup.md#2-domain-and-tls): owned DNS, certificate/renewal,
@@ -444,4 +516,31 @@ fields and acceptance checks. No external setup was performed by this stage.
    Record explicit go/no-go only after the applicable gates pass.
 
 Credentials belong in the secret manager, never this document or Git. No missing
-credential prevented the completed local shell verification.
+credential prevented the completed local shell or browser verification.
+
+## Commits pushed and PR status
+
+The overnight implementation follows `5c83277` on
+`devin/1789903228-saas-verification`:
+
+| Commit | Purpose |
+| --- | --- |
+| `97aa2b7` | Bounded beta intake, feedback, first-party events and separate operator authorization |
+| `b8bd6fa` | Commercial onboarding, beta/feedback/operator UI and regressions |
+| `bf4cf8e` | Runtime image hardening and compatibility checks |
+| `766b95f` | Complete vulnerability inventory and vendor evidence without waivers |
+| `2ac0ffa` | Reproducible customer reports and CLI regression cases |
+| `54e1a66` | Demo, beta guide, interviews and buyer personas |
+| `d7f337d` | Isolated PostgreSQL recovery and retention drill |
+| `bd23806` | Deployment and owner operations procedures |
+| `5be27d0` | Integrated commercial recovery and operator setup verification |
+| `5cc9257` | Conservative readiness classification and preserved release gates |
+| `abfe328` | Signed OIDC claim provenance and beta/operator deep-link fixes |
+| `da043fb` | Final security/image evidence; runtime accepted in the current browser run |
+
+The subsequent documentation-only acceptance update records this handoff.
+[PR #3](https://github.com/Mighiana/BlastRadius/pull/3) remains open and draft,
+unmerged. No direct main commit, force-push, public deployment, provider
+provisioning or payment activation was performed in this run. The existing
+branch is pushed; CI for documentation-only updates is separate from the passing
+six-check `da043fb` result.

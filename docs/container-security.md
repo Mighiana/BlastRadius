@@ -37,7 +37,9 @@ supplied baseline findings below are retained. Runtime metadata, nonroot
 operation, read-only roots, restore/migration behavior, psycopg binary support,
 nine installed-worker cases and entrypoint failure behavior all passed again.
 No Dockerfile, dependency, runtime policy or scanner suppression changed.
-Promotion remains blocked; final browser/hosted acceptance is still pending.
+Promotion remains blocked. Subsequent installed-package browser acceptance at
+`da043fb` passed; see [readiness](readiness.md#current-commercial-beta-browser-acceptance).
+It does not establish hosted acceptance or remove image findings.
 
 ### Integrated release reassessment
 
@@ -68,7 +70,8 @@ nonroot/read-only roots, absent build tools and exit-2 entrypoint failures.
 The unchanged promotion check **failed (make exit 2)** on the database
 HIGH/CRITICAL findings. Full integrated shell counts and the separately tested
 commercial retention/restore evidence are in [readiness](readiness.md).
-Final integrated browser acceptance remains pending.
+Subsequent integrated local browser acceptance passed at `da043fb`, as recorded
+in [readiness](readiness.md#current-commercial-beta-browser-acceptance).
 
 ### Contributor evidence before integration
 
