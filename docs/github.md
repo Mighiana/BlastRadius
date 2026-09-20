@@ -7,21 +7,39 @@ comment has been verified by this implementation.
 
 ## Operator setup
 
-Create an App in [GitHub developer settings](https://github.com/settings/apps/new).
-Use **selected repositories** and these repository permissions only:
+An owner with authority over the intended GitHub account creates an App in
+[GitHub developer settings](https://github.com/settings/apps/new) (or the chosen
+organization's developer settings). Complete this worksheet before installation:
 
-| Permission | Access |
+| Registration field | Operator value |
 | --- | --- |
-| Contents | Read |
-| Pull requests | Read and write |
-| Checks | Read and write |
-| Metadata | Read |
+| App name / owner | Choose an available, recognizable name (for example `BlastRadius Private Beta`); record the owning organization/account and key-rotation owner |
+| Homepage | Actual owned public product URL, or `https://app.example.com` if using the integrated site; replace example domains |
+| App slug / ID | Record the actual GitHub-generated slug and numeric App ID, not the OAuth client ID |
+| Webhook | Active, SSL verification enabled; `https://app.example.com/api/github/webhook`; same 32+ character random secret as the server |
+| Callback / setup URL | Leave unused for this operator-managed flow; no GitHub-user OAuth or installation-claim callback is implemented |
+| Installation availability | Choose only the intended pilot audience; install on selected repositories |
+| Private key | Generate/download an RSA PEM via the App settings; store it in the secret manager, mount as a private regular file readable by the service UID |
+
+Use these repository permissions only; no organization, administration, workflow,
+actions, contents-write or account permissions are needed:
+
+| Permission | Access | Reason |
+| --- | --- | --- |
+| Contents | Read | Read immutable commit/tree/blob source for comparison |
+| Pull requests | Read and write | Revalidate current PR identity/head and create/update the App's result comment (the issue-comment API accepts pull-request write permission) |
+| Checks | Read and write | Discover/create/update the App's head-specific check run |
+| Metadata | Read | Identify the selected repository and installation mapping |
 
 Subscribe to pull request events. Installation and installation-repositories
 events revoke access when GitHub suspends/uninstalls the App or removes a
 repository. The webhook URL is `BR_PUBLIC_URL/api/github/webhook`; select JSON
 payloads and configure the same random webhook secret at GitHub and the server.
 Do not configure a setup callback as a workspace authorization mechanism.
+GitHub App lifecycle events (`installation`, `installation_repositories`) are
+provided by GitHub; the operator must verify revocation/removal handling in the
+approved test installation. The App analyzes `opened`, `synchronize`, `reopened`
+and relevant base-retarget `edited` PR actions.
 
 | Configuration | Requirement |
 | --- | --- |
@@ -38,6 +56,14 @@ only checks local setup; connection and job processing verify provider access.
 There is no GitHub OAuth client ID/secret requirement for this operator-managed
 flow. GitHub credentials are never returned in JSON, persisted in the database,
 passed to the analysis subprocess, or included in comments.
+
+Do not paste the key into an environment variable, build argument or repository.
+Some secret mounts use symlinks; those fail this implementation's key-file check.
+Choose a regular private mount (or a reviewed private-file materialization step)
+with mode `0600` or stricter and the service UID as reader. Rotate the App key
+through GitHub's documented overlap procedure: deploy the new key, verify access,
+then revoke the old key. Coordinate webhook-secret replacement because this
+implementation accepts one active secret, not a dual-secret grace period.
 
 Before registration, the operator must independently verify that the workspace
 owner is authorized to connect the GitHub account, for example using an approved
@@ -139,7 +165,8 @@ compared in constant time before JSON parsing. The existing middleware enforces
 to 15 seconds, and rate limits requests. Delivery IDs are limited to 100
 alphanumeric/hyphen characters. No payload body is persisted.
 
-Only PR `opened`, `synchronize` and `reopened` are analyzed. Unsupported events
+PR `opened`, `synchronize`, `reopened` and relevant base-retarget `edited` actions
+are analyzed. Unsupported events
 or actions return 202 with `status: ignored` after signature validation.
 Lifecycle events return `handled`; accepted PRs return `queued`. A duplicate
 delivery ID or event/body digest returns `duplicate`. Reusing an ID with other
@@ -272,3 +299,6 @@ separate so analysis runtime cannot spend the publisher's deadline.
 - [Check runs](https://docs.github.com/en/rest/checks/runs)
 - [Issue comments](https://docs.github.com/en/rest/issues/comments)
 - [Webhook redelivery](https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries)
+- [Registering a GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app)
+- [Webhook events and lifecycle](https://docs.github.com/en/webhooks/webhook-events-and-payloads)
+- [Managing App private keys](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/managing-private-keys-for-github-apps)
