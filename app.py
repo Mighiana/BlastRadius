@@ -203,11 +203,12 @@ GRAPH_FIT_HTML = """
 </style>
 <script>
   (() => {
+    const target = document.getElementById('mynetwork');
     const fit = () => {
-      if (container.clientWidth > 0) network.fit({animation: false});
+      if (target.clientWidth > 0) network.fit({animation: false});
     };
     const observer = new ResizeObserver(() => requestAnimationFrame(fit));
-    observer.observe(container);
+    observer.observe(target);
     requestAnimationFrame(fit);
     if (document.fonts) document.fonts.ready.then(fit);
   })();
