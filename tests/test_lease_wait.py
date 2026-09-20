@@ -35,7 +35,11 @@ def _held_lock(settings: Settings):
     return handle
 
 
-def test_lease_wait_serves_liveness_until_old_owner_releases(tmp_path):
+def test_lease_wait_serves_liveness_until_old_owner_releases(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "blastradius.server.app.build_demos",
+        lambda _settings: {(str(index), "ready"): {} for index in range(9)},
+    )
     settings = _prepared_settings(tmp_path, 10)
     handle = _held_lock(settings)
     try:
