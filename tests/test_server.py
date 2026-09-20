@@ -9,6 +9,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from http.cookies import SimpleCookie
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -113,6 +114,170 @@ def test_workspace_origin_rejection_is_not_an_owner_permission_failure(client, s
     refreshed = client.get("/api/me").json()
     assert refreshed["user"]["id"] == me["user"]["id"]
     assert len(refreshed["organizations"]) == 2
+
+
+@pytest.mark.parametrize(
+    ("environment", "origin"),
+    [
+        ("development", "http://localhost:8000"),
+        ("preview", "https://8000--session.preview.devinapps.com"),
+        ("test", "https://app.example"),
+    ],
+)
+def test_configured_origin_bootstrap_mutations_and_fail_closed(
+    settings, demo_results, monkeypatch, environment, origin
+):
+    monkeypatch.setattr("blastradius.server.app.build_demos", lambda _: demo_results)
+    configured = replace(settings, environment=environment, public_url=origin)
+    app = create_app(configured)
+    with TestClient(app, base_url=origin) as client:
+        response = client.get("/api/me")
+        anonymous = response.json()
+        assert anonymous["auth"]["public_url"] == origin
+        assert ("Secure" in response.headers["set-cookie"]) == origin.startswith("https:")
+        headers = {"Origin": origin, "X-CSRF-Token": anonymous["csrf_token"]}
+        assert client.post(
+            "/api/organizations", json={"name": "Anonymous"}, headers=headers
+        ).status_code == 401
+        assert client.post("/api/auth/demo", headers=headers).status_code == 200
+        me = client.get("/api/me").json()
+        headers["X-CSRF-Token"] = me["csrf_token"]
+        assert client.post(
+            "/api/organizations", json={"name": "Trusted origin"}, headers=headers
+        ).status_code == 201
+        for hostile in (
+            {"Origin": "https://untrusted.example"},
+            {"Origin": "http://localhost:8001"},
+            {"Origin": "null"},
+            {"Sec-Fetch-Site": "cross-site"},
+            {
+                "Origin": "http://localhost",
+                "Host": "localhost",
+                "X-Forwarded-Host": urlsplit(origin).netloc,
+                "X-Forwarded-Proto": "http",
+                "Sec-Fetch-Site": "same-origin",
+            },
+            {
+                "Origin": "https://untrusted.example",
+                "Host": "untrusted.example",
+                "X-Forwarded-Host": "untrusted.example",
+                "X-Forwarded-Proto": "https",
+                "Forwarded": "host=untrusted.example;proto=https",
+            },
+        ):
+            rejected = client.post(
+                "/api/organizations",
+                json={"name": "Rejected"},
+                headers=headers | hostile,
+            )
+            assert rejected.status_code == 403
+            assert rejected.json()["detail"] == "invalid_origin"
+        rejected = client.post(
+            "/api/organizations", json={"name": "Missing CSRF"}, headers={"Origin": origin}
+        )
+        assert rejected.status_code == 403
+        assert rejected.json()["detail"] == "csrf_required"
+        assert len(client.get("/api/me").json()["organizations"]) == 2
+        assert client.post(
+            "/api/projects",
+            json={"organization_id": "unavailable", "name": "Unauthorized"},
+            headers=headers,
+        ).status_code == 404
+        logout = client.post("/api/auth/logout", headers=headers)
+        assert logout.status_code == 200
+        assert ("Secure" in logout.headers["set-cookie"]) == origin.startswith("https:")
+        assert client.get("/api/projects").status_code == 401
+
+
+@pytest.mark.parametrize("environment", ["development", "test", "preview", "production"])
+@pytest.mark.parametrize("origin", [None, "", "http://localhost:8000", "https://app.example"])
+def test_environment_origin_defaults_and_explicit_https(monkeypatch, environment, origin):
+    for name in list(os.environ):
+        if name.startswith("BR_"):
+            monkeypatch.delenv(name)
+    for name, value in {
+        "BR_ENV": environment,
+        "BR_SESSION_SECRET": "a" * 48,
+        "BR_AUTH_MODE": "oidc",
+        "BR_OIDC_ISSUER": "https://issuer.example",
+        "BR_OIDC_CLIENT_ID": "client",
+        "BR_OIDC_CLIENT_SECRET": "test-client-secret",
+        "BR_DATABASE_URL": "postgresql+psycopg://localhost/br",
+    }.items():
+        monkeypatch.setenv(name, value)
+    if origin is not None:
+        monkeypatch.setenv("BR_PUBLIC_URL", origin)
+    if origin == "" or (environment in {"preview", "production"} and origin != "https://app.example"):
+        with pytest.raises(ValueError, match="BR_PUBLIC_URL"):
+            Settings.from_env()
+    else:
+        configured = Settings.from_env()
+        assert configured.public_url == (origin or "http://localhost:8000")
+        assert configured.secure_cookies == (origin == "https://app.example")
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://*.preview.devinapps.com",
+        "https://app.example/path",
+        "https://app.example?trusted=true",
+        "https://app.example#fragment",
+        "https://user:password@app.example",
+        "https://app.example:0",
+        "https://app.example:invalid",
+        "https://app.example:65536",
+        " https://app.example",
+        "https://app.example\\untrusted",
+    ],
+)
+def test_public_origin_rejects_ambiguous_configuration(settings, origin):
+    with pytest.raises(ValueError):
+        replace(settings, public_url=origin).validate()
+
+
+def test_https_preview_oidc_cookie_and_callback_ignore_forwarded_origin(
+    settings, demo_results, monkeypatch
+):
+    monkeypatch.setattr("blastradius.server.app.build_demos", lambda _: demo_results)
+    origin = "https://8000--session.preview.devinapps.com"
+    configured = replace(
+        settings,
+        environment="preview",
+        public_url=origin,
+        auth_mode="oidc",
+        oidc_issuer="https://issuer.example",
+        oidc_client_id="client",
+        oidc_client_secret="test",
+    )
+    app = create_app(configured)
+    oauth = app.state.oauth.create_client("oidc")
+    oauth.server_metadata.update(
+        {
+            "issuer": configured.oidc_issuer,
+            "_loaded_at": time.time(),
+            "authorization_endpoint": "https://issuer.example/authorize",
+            "token_endpoint": "https://issuer.example/token",
+        }
+    )
+    with TestClient(app, base_url=origin) as client:
+        response = client.get(
+            "/api/auth/login",
+            headers={
+                "Host": "untrusted.example",
+                "X-Forwarded-Host": "untrusted.example",
+                "X-Forwarded-Proto": "http",
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 302
+        params = parse_qs(urlsplit(response.headers["location"]).query)
+        assert params["redirect_uri"] == [origin + "/api/auth/callback"]
+        cookies = SimpleCookie()
+        cookies.load(response.headers["set-cookie"])
+        assert cookies["br_oidc"]["secure"]
+        assert cookies["br_oidc"]["httponly"]
+        assert cookies["br_oidc"]["samesite"] == "lax"
 
 
 def login(client):

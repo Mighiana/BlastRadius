@@ -22,6 +22,43 @@ from blastradius.server.db import Database
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_preview_environment_file_controls_migration_without_changing_local_settings(
+    tmp_path: Path,
+) -> None:
+    environment_file = tmp_path / "preview config.env"
+    database = tmp_path / "preview" / "server.db"
+    local_file = ROOT / ".env"
+    original = local_file.read_bytes() if local_file.exists() else None
+    environment_file.write_text(
+        "\n".join(
+            [
+                "BR_ENV=preview",
+                "BR_PUBLIC_URL=https://8000--fixture.preview.devinapps.com",
+                "BR_AUTH_MODE=demo",
+                "BR_AUTO_MIGRATE=false",
+                f"BR_DATA_DIR='{database.parent}'",
+                f"BR_DATABASE_URL='sqlite:///{database}'",
+                f"BLASTRADIUS_ALEMBIC_CONFIG='{ROOT / 'alembic.ini'}'",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["make", "migrate", f"ENV_FILE={environment_file}", f"VENV={sys.prefix}"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    db = Database(Settings(database_url=f"sqlite:///{database}", data_dir=database.parent))
+    try:
+        assert db.ready()
+    finally:
+        db.engine.dispose()
+    assert (local_file.read_bytes() if local_file.exists() else None) == original
+
+
 @pytest.mark.parametrize("existing", [False, True], ids=["fresh", "upgrade-from-0001"])
 def test_migrate_uses_current_head_and_preserves_existing_data(
     tmp_path: Path, existing: bool

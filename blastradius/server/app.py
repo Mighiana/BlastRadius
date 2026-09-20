@@ -147,7 +147,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         session_cookie="br_oidc",
         max_age=600,
         same_site="lax",
-        https_only=settings.production,
+        https_only=settings.secure_cookies,
     )
     if settings.production:
         app.add_middleware(
@@ -287,7 +287,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         with db.session(write=True) as session:
             session.delete(require_csrf(request, session, settings))
         response.delete_cookie(
-            COOKIE, path="/", secure=settings.production, httponly=True, samesite="lax"
+            COOKIE, path="/", secure=settings.secure_cookies, httponly=True, samesite="lax"
         )
         return {"authenticated": False}
 

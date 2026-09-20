@@ -48,14 +48,14 @@ as its only owner. Subsequent logins to the same identity reuse it.
 
 The transient `br_oidc` cookie holds Authlib authorization state/nonce/PKCE data
 using Starlette's signed session middleware with a ten-minute expiration. It is
-HttpOnly, SameSite Lax and Secure in production. It contains no provider access
+HttpOnly, SameSite Lax and Secure for HTTPS origins (including preview and production). It contains no provider access
 tokens. Authorization state is cleared after callback success/failure.
 
 ## Application sessions and CSRF
 
 The `br_session` application cookie is an opaque random 256-bit token. Only its
 SHA-256 hash is stored, with user ID, separate random CSRF token and expiration.
-The cookie is HttpOnly, SameSite Lax, path `/`, and Secure in production.
+The cookie is HttpOnly, SameSite Lax, path `/`, and Secure for HTTPS origins.
 Sessions are not sliding: default lifetime is eight hours. Expired rows are
 removed when new sessions are created. Server-side logout deletes the session,
 so a copied old cookie stops working.
@@ -89,7 +89,8 @@ times. No hash, cookie or CSRF value is exposed by the session list.
 
 ## Explicit local demo authentication
 
-`BR_AUTH_MODE=demo` is allowed only in `development` or `test`. Production fails
+`BR_AUTH_MODE=demo` is allowed in `development`, `test` or the explicit private
+[preview profile](environment-preview.md). Production fails
 configuration validation with this mode. `POST /api/auth/demo` requires the
 anonymous CSRF token from `/api/me`, rotates the cookie, and creates a fresh
 random identity/workspace. It accepts no email/user/role/workspace selector.

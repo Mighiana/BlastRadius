@@ -65,7 +65,7 @@ def create_session(
         token,
         max_age=settings.session_ttl_seconds,
         httponly=True,
-        secure=settings.production,
+        secure=settings.secure_cookies,
         samesite="lax",
         path="/",
     )

@@ -35,6 +35,8 @@ For Vite hot reload, use [frontend development](frontend.md) and set
 `BR_PUBLIC_URL=http://localhost:5173` to match its browser origin.
 `.env` is trusted local configuration,
 not an upload format. Never commit it. `make dev` does not deploy anything publicly.
+For the HTTPS Devin URL, use the separate [preview profile](environment-preview.md)
+and `make start ENV_FILE=.env.preview`; do not overwrite the localhost `.env`.
 
 For a repeatable fresh-clone check without starting a long-running server:
 

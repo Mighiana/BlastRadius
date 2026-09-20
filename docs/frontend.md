@@ -40,6 +40,8 @@ In a second terminal, run `npm --prefix web run dev`, then open
 Do not mix `localhost` and `127.0.0.1`. The UI detects Origin mismatch before
 showing workspace mutations. Never weaken CSRF or accept arbitrary forwarded
 headers to work around deployment configuration.
+For Devin's HTTPS URL, use the [separate preview environment](environment-preview.md)
+instead of the localhost configuration.
 
 Public pages work without credentials. Demo login creates an isolated local
 identity; signing out loses that identity. Demo users cannot accept invitations.

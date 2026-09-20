@@ -10,6 +10,10 @@ a stable `BR_SESSION_SECRET` of at least 32 characters, `BR_OIDC_ISSUER`,
 `BR_OIDC_CLIENT_ID` and `BR_OIDC_CLIENT_SECRET`. Invalid combinations fail startup.
 See [auth](auth.md) for cookies, CSRF and OIDC validation and [API](api.md) for quotas.
 Payments stay disabled; do not provision payment-provider credentials.
+`BR_PUBLIC_URL` has no default in production and must name the explicitly trusted
+HTTPS origin. Request headers never select it. The separate
+[private preview profile](environment-preview.md) does not change production's
+OIDC, PostgreSQL, secret, host-validation or migration requirements.
 
 | Purpose | Required production decision |
 |---|---|

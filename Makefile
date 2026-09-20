@@ -6,12 +6,14 @@ TRIVY ?= trivy
 IMAGE ?= blastradius:local
 DB_IMAGE ?= blastradius-postgres:local
 AUDIT_DIR ?= .local/audit
+ENV_FILE ?= .env
 
 .PHONY: help install install-core dev start legacy frontend test lint typecheck audit check docs integration-check migrate compose-up compose-down wheel image container-audit promotion-check secret-audit
 
 help:
 	@printf '%s\n' \
 	  'make dev          Install and start the integrated local app (Python 3.12, Node 24)' \
+	  'make start ENV_FILE=.env.preview  Start with explicit private-preview settings' \
 	  'make install-core Install CLI, legacy demo and test/quality tools' \
 	  'make legacy       Start the legacy bundled Streamlit demo' \
 	  'make check        Tests, Python lint/types and local documentation links' \
@@ -47,8 +49,10 @@ dev: install
 	$(MAKE) start
 
 start: integration-check
-	@test -f .env || { echo 'Copy .env.example to .env and configure the documented server settings.'; exit 2; }
-	@set -a; . ./.env; set +a; $(PY) -m blastradius.server.migrate && exec $(PY) -m uvicorn blastradius.server.app:app --host 127.0.0.1 --port "$${BLASTRADIUS_PORT:-8000}" --workers 1 --no-access-log --no-proxy-headers
+	@test -f "$(ENV_FILE)" || { echo 'Configure ENV_FILE using the documented development or preview template.'; exit 2; }
+	@set -a; \
+	case "$(ENV_FILE)" in /*) . "$(ENV_FILE)" ;; *) . "./$(ENV_FILE)" ;; esac; \
+	set +a; $(PY) -m blastradius.server.migrate && exec $(PY) -m uvicorn blastradius.server.app:app --host 127.0.0.1 --port "$${BLASTRADIUS_PORT:-8000}" --workers 1 --no-access-log --no-proxy-headers
 
 legacy: install-core
 	$(PY) -m streamlit run app.py --server.address 127.0.0.1
@@ -104,8 +108,10 @@ promotion-check:
 	exit $$status
 
 migrate:
-	@test -f .env || { echo 'Copy and configure .env first.'; exit 2; }
-	@set -a; . ./.env; set +a; PATH="$(abspath $(VENV))/bin:$$PATH" sh scripts/container-entrypoint.sh migrate
+	@test -f "$(ENV_FILE)" || { echo 'Configure ENV_FILE before migrating.'; exit 2; }
+	@set -a; \
+	case "$(ENV_FILE)" in /*) . "$(ENV_FILE)" ;; *) . "./$(ENV_FILE)" ;; esac; \
+	set +a; PATH="$(abspath $(VENV))/bin:$$PATH" sh scripts/container-entrypoint.sh migrate
 
 compose-up:
 	docker compose build app db

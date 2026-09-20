@@ -41,6 +41,10 @@ class Settings:
         return self.environment == "production"
 
     @property
+    def secure_cookies(self) -> bool:
+        return self.production or urlsplit(self.public_url).scheme == "https"
+
+    @property
     def billing_enabled(self) -> bool:
         return False
 
@@ -63,8 +67,8 @@ class Settings:
             or not all(c in "abcdefghijklmnopqrstuvwxyz0123456789-" for c in self.github_app_slug)
         ):
             raise ValueError("Invalid GitHub App slug")
-        if self.environment not in {"development", "test", "production"}:
-            raise ValueError("BR_ENV must be development, test or production")
+        if self.environment not in {"development", "test", "preview", "production"}:
+            raise ValueError("BR_ENV must be development, test, preview or production")
         if self.auth_mode not in {"disabled", "demo", "oidc"}:
             raise ValueError("BR_AUTH_MODE must be disabled, demo or oidc")
         if len(self.session_secret) < 32:
@@ -74,13 +78,20 @@ class Settings:
         url = urlsplit(self.public_url)
         if (
             url.scheme not in {"http", "https"}
-            or not url.netloc
+            or not url.hostname
             or url.path not in {"", "/"}
             or url.query
             or url.fragment
-            or url.username
+            or url.username is not None
+            or "*" in url.netloc
+            or "\\" in self.public_url
+            or any(c.isspace() for c in self.public_url)
         ):
             raise ValueError("BR_PUBLIC_URL must be an origin without credentials or path")
+        if url.port == 0:
+            raise ValueError("BR_PUBLIC_URL must use a valid port")
+        if self.environment in {"preview", "production"} and url.scheme != "https":
+            raise ValueError("Preview and production require an explicit HTTPS BR_PUBLIC_URL")
         if self.production and (
             self.auth_mode != "oidc"
             or len(self.session_secret) < 32
@@ -132,7 +143,10 @@ class Settings:
             database_url=env.get("BR_DATABASE_URL", "sqlite:///./.blastradius/server.db"),
             data_dir=Path(env.get("BR_DATA_DIR", ".blastradius")),
             static_dir=Path(env.get("BR_STATIC_DIR", "web/dist")),
-            public_url=env.get("BR_PUBLIC_URL", "http://localhost:8000").rstrip("/"),
+            public_url=env.get(
+                "BR_PUBLIC_URL",
+                "" if env.get("BR_ENV") in {"preview", "production"} else "http://localhost:8000",
+            ).rstrip("/"),
             session_secret=env.get(
                 "BR_SESSION_SECRET", "" if production else secrets.token_urlsafe(48)
             ),

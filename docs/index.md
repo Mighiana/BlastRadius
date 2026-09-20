@@ -28,6 +28,7 @@ separates verified implementation, external configuration and launch blockers.
 [Operations and administration](operations.md) · [Data lifecycle](data-lifecycle.md) ·
 [Frontend contract](frontend.md) · [Integration acceptance](release-integration.md) ·
 [Development environment](environment-development.md) ·
+[Devin preview](environment-preview.md) ·
 [Test environment](environment-test.md) · [Production environment](environment-production.md) ·
 [Contributor guide](../CONTRIBUTING.md) · [Roadmap](roadmap.md)
 

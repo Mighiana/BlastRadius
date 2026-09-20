@@ -1,6 +1,7 @@
 # Commercial-beta readiness
 
-Assessment updated: 2026-09-20, browser acceptance of `ce77f98`, following integration of frontend
+Assessment updated: 2026-09-20, origin configuration regressions and an actual
+HTTPS preview diagnostic; earlier local browser acceptance of `ce77f98`, following integration of frontend
 `36df10877fd9a1d141805f7a7d160acfa4f61b8e` and operations
 `6364e1f7fb2b2553a93272ae276a31fb28ea898c`.
 This assessment supersedes the earlier sandbox-billing/12-browser-test snapshot.
@@ -27,8 +28,8 @@ Exact commands, installed-package/container checks and downstream acceptance
 instructions are in [release integration](release-integration.md).
 Provider-mocked tests do not establish real external service behavior.
 
-Final local checks passed: **579 Python tests with disposable PostgreSQL and no
-skips**, **22 release tests**, **78 frontend tests**, Ruff/mypy/ESLint/TypeScript,
+Latest local checks passed: **609 Python tests with disposable PostgreSQL and no
+skips**, **23 release tests**, **78 frontend tests**, Ruff/mypy/ESLint/TypeScript,
 production frontend build and documentation links. Independent recorded acceptance
 verified the workspace URL-context and persistent save-feedback regressions.
 Unchanged core-flow evidence from `d36c9ed` covers HCL BLOCK → manual repair → SAFE,
@@ -40,6 +41,28 @@ role controls and denied viewer mutations, protected ownership, individual/globa
 session revocation and alternate-origin rejection. These fixtures are application
 tests, not real OIDC acceptance. The browser pass did not repeat Docker or live
 provider acceptance; earlier package/container evidence retains its original scope.
+
+### HTTPS preview configuration and acceptance boundary
+
+Local development retains the localhost default. Preview and production require
+an explicit HTTPS `BR_PUBLIC_URL`; the [separate preview profile](environment-preview.md)
+uses an ignored environment file and isolated database. Application and OIDC
+cookies are Secure for HTTPS. Regression coverage includes exact/mismatched
+origins, forwarded-header spoofing, CSRF, authorization, logout, environment
+selection and migrations without modifying local configuration.
+
+Actual HTTPS preview acceptance is **blocked**, not passed. After Devin login,
+the browser and `/api/me` matched the configured preview origin, but a correlated
+sign-in diagnostic found the proxy replaced the browser's HTTPS Origin with
+`http://localhost` before delivery to the application. The existing strict check
+correctly returned `403 invalid_origin`. Cookie and CSRF-header presence were
+confirmed at both ends; no secret values were recorded. The issue was reported
+to Cognition, and temporary instrumentation was removed.
+
+The requested authenticated workspace → project → analysis → persisted history
+flow remains unverified through that HTTPS proxy. Prior local acceptance and
+passing API regressions do not substitute for it. Neither Origin checks nor
+authorization were weakened to accommodate the proxy.
 
 ## IMPLEMENTED BUT REQUIRES EXTERNAL CONFIGURATION
 

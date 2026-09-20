@@ -12,6 +12,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+!.env.preview.example
 .terraform/
 *.tfstate
 *.tfstate.*
