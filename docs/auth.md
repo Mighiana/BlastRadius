@@ -28,7 +28,16 @@ For production also set:
 BR_ENV=production
 BR_PUBLIC_URL=https://your-application.example
 BR_AUTO_MIGRATE=false
+BR_LEASE_WAIT_SECONDS=0
+BR_TRUST_PROXY_HEADERS=false
 ```
+
+`BR_LEASE_WAIT_SECONDS` opts into waiting for an existing service lease during a
+zero-downtime deployment; it accepts values from 0 through 600 seconds. Keep it
+at `0` for the default fail-fast startup behavior. Set
+`BR_TRUST_PROXY_HEADERS=true` only when a trusted reverse proxy is the sole
+network peer, such as the Render deployment described in
+[deployment-render.md](deployment-render.md).
 
 Inject `BR_DATABASE_URL` and other credentials through your secret manager; use
 PostgreSQL certificate verification (`sslmode=verify-full` and the trusted CA).

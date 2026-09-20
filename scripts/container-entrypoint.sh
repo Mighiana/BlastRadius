@@ -3,6 +3,11 @@ set -eu
 
 case "${1:-serve}" in
   serve)
+    if [ "${BR_TRUST_PROXY_HEADERS:-false}" = "true" ]; then
+      exec python -I -m uvicorn blastradius.server.app:app \
+        --host 0.0.0.0 --port 8000 --workers 1 --no-access-log \
+        --proxy-headers --forwarded-allow-ips='*'
+    fi
     exec python -I -m uvicorn blastradius.server.app:app \
       --host 0.0.0.0 --port 8000 --workers 1 --no-access-log --no-proxy-headers
     ;;

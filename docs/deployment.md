@@ -29,6 +29,12 @@ The [development](environment-development.md), [test](environment-test.md), and
 The full service setting contract is in [authentication](auth.md).
 No Vite variable can hold a secret: `VITE_*` values are public browser assets.
 
+## Managed platform: Render
+
+The complete FastAPI, React and managed PostgreSQL deployment procedure for Render
+is in the [Render deployment guide](deployment-render.md). It covers the Blueprint,
+OIDC callback, zero-downtime lease handoff and platform-specific caveats.
+
 ## Local commands
 
 Prerequisites: Python 3.12, Node 24, npm, Make; Docker/Compose for PostgreSQL.
