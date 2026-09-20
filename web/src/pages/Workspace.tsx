@@ -38,7 +38,11 @@ function JobView({ id, onComplete }: { id: string; onComplete: () => void }) {
           delay = Math.min(delay * 1.5, 5000);
         } else onComplete();
       } catch (err) {
-        if (!controller.signal.aborted) setError(err instanceof Error ? err : new Error('Could not read this analysis.'));
+        if (!controller.signal.aborted) {
+          setJob(null);
+          setError(err instanceof Error ? err : new Error('Could not read this analysis.'));
+          onComplete();
+        }
       }
     }
     void poll();

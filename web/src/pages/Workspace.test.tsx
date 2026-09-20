@@ -82,4 +82,32 @@ describe('workspace roles and polling', () => {
     expect(screen.queryByLabelText('Analysis decision')).not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent('Traceback');
   });
+  it.each(['queued', 'running'])('removes stale %s progress when saving the outcome is unavailable', async status => {
+    let polls = 0;
+    let historyReads = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/analyses/job' && ++polls > 1) {
+        return new Response(JSON.stringify({ detail: 'analysis_persistence_failed' }), { status: 503 });
+      }
+      if (url.startsWith('/api/projects/project/analyses')) {
+        historyReads++;
+        if (polls > 1) return new Response(JSON.stringify({ detail: 'analysis_persistence_failed' }), { status: 503 });
+        return new Response(JSON.stringify({ analyses: [{ ...queued, status }], total: 1, limit: 50, offset: 0 }));
+      }
+      const body = url === '/api/me' ? viewer
+        : url.startsWith('/api/projects?') ? { projects: [project] }
+          : url === '/api/projects/project' ? project : { ...queued, status };
+      return new Response(JSON.stringify(body));
+    }));
+    mount('/dashboard?project=project&analysis=job');
+    expect(await screen.findByText(status === 'queued' ? /Queued — waiting/ : /Analyzing Terraform/)).toBeVisible();
+    await waitFor(() => {
+      expect(screen.getAllByRole('alert')[0]).toHaveTextContent('Analysis incomplete:');
+      expect(historyReads).toBeGreaterThan(1);
+    }, { timeout: 3000 });
+    expect(screen.queryByText(/Queued — waiting|Analyzing Terraform/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Analysis decision')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /before → after/ })).not.toBeInTheDocument();
+    expect(polls).toBe(2);
+  });
 });

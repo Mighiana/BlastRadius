@@ -198,6 +198,7 @@ const errorMessages: Record<string, string> = {
   invalid_worker_result: 'The analysis returned an invalid result. Submit a new analysis.',
   dispatch_failed: 'The analysis could not start. Submit a new analysis.',
   service_lease_lost: 'This service lost database ownership. Retry when the service is ready.',
+  analysis_persistence_failed: 'Analysis incomplete: the service could not save an outcome. Ask the operator to restore database access and restart the service, then submit a new analysis.',
   result_too_large: 'The result is too large. Try a smaller Terraform scope.',
 };
 export function jobError(code: string | null) {

@@ -40,6 +40,16 @@ increase the grace before relying on graceful draining. A forced stop or host
 loss still loses queued work. Restart marks queued/running records failed
 with `server_restarted` and cleans `BR_DATA_DIR/jobs/job-*`; it does not requeue.
 
+Terminal writes retry three times. If all attempts fail, readiness and new analysis
+admission return 503. Reads of unfinished analyses, including history pages that
+contain them, return `analysis_persistence_failed` rather than claim the stale
+database status is current. The UI clears previous progress and displays
+**Analysis incomplete**. Completed reports remain readable. Restore database
+access, then restart the single application process; startup recovery finalizes
+unfinished rows as failed. Docker's healthcheck alone does not restart an
+unhealthy container: configure an alert/operator response or a supervisor that
+restarts unhealthy instances. The queue does not retry or resume lost input.
+
 The entrypoint always starts **one ASGI process**. The database service lease
 rejects a second process, so do not scale replicas or run overlapping rolling
 deployments. Stop admission at the ingress, drain/stop the old service, migrate

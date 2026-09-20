@@ -62,7 +62,11 @@ def project_payload(project: Project) -> dict:
     }
 
 
-def analysis_payload(job: Analysis, detail: bool = True, sarif: bool = False) -> dict:
+def analysis_payload(
+    job: Analysis, detail: bool = True, sarif: bool = False, available: bool = True
+) -> dict:
+    if not available and job.status in ("queued", "running"):
+        raise HTTPException(503, "analysis_persistence_failed")
     data = {
         "id": job.id,
         "project_id": job.project_id,
@@ -441,7 +445,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "limit": limit,
                 "offset": offset,
                 "analyses": [
-                    analysis_payload(job, False)
+                    analysis_payload(job, False, available=not jobs.persistence_failed.is_set())
                     for job in session.scalars(
                         query.order_by(Analysis.created_at.desc(), Analysis.id)
                         .limit(limit)
@@ -469,6 +473,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 session.refresh(project)
                 if project.archived_at is not None:
                     raise HTTPException(409, "project_archived")
+                if jobs.persistence_failed.is_set():
+                    raise HTTPException(503, "analysis_persistence_failed")
                 if not jobs.reserve():
                     raise HTTPException(429, "job_capacity_exceeded")
                 reserved = True
@@ -502,7 +508,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         with db.session() as session:
             user = require_user(request, session, settings)
             job, org = visible_analysis(session, user, analysis_id)
-            return analysis_payload(job, sarif=entitlements(org).sarif)
+            return analysis_payload(
+                job, sarif=entitlements(org).sarif, available=not jobs.persistence_failed.is_set()
+            )
 
     @app.delete("/api/analyses/{analysis_id}", status_code=204)
     def delete_analysis(analysis_id: str, request: Request):

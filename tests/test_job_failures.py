@@ -179,3 +179,56 @@ def test_result_commit_rollback_and_exhaustion_fail_closed(
         monkeypatch.setattr(app.state.db, "session", original)
         app.state.jobs.recover()
         assert client.get(f"/api/analyses/{job_id}").json()["error"] == "server_restarted"
+
+
+def test_persistence_outage_hides_stale_progress_without_exposing_other_tenants(
+    client, app, monkeypatch
+):
+    me = login(client)
+    proj = project(client, me)
+    completed = terminal(client, submit(client, proj["id"]).json()["id"])
+    original = app.state.db.session
+
+    @contextmanager
+    def unavailable(write=False):
+        if write and threading.current_thread().name.startswith("analysis"):
+            raise OperationalError("test outage", {}, Exception("disposable fault"))
+        with original(write=write) as session:
+            yield session
+
+    def execute(*_):
+        monkeypatch.setattr(app.state.db, "session", unavailable)
+        return {"error": "worker_failed"}
+
+    monkeypatch.setattr("blastradius.server.jobs.execute", execute)
+    job_id = submit(client, proj["id"]).json()["id"]
+    app.state.jobs.shutdown()
+    assert app.state.jobs.persistence_failed.is_set()
+    for url in (
+        f"/api/analyses/{job_id}",
+        f"/api/projects/{proj['id']}/analyses",
+    ):
+        response = client.get(url)
+        assert response.status_code == 503
+        assert response.json() == {"detail": "analysis_persistence_failed"}
+    assert submit(client, proj["id"]).status_code == 503
+    assert client.get(f"/api/analyses/{completed['id']}").json() == completed
+    assert client.get(f"/api/analyses/{completed['id']}/report").status_code == 200
+    assert client.get(f"/api/projects/{proj['id']}/analyses?status=succeeded").status_code == 200
+    with original() as session:
+        job = session.get(Analysis, job_id)
+        assert job.status == "running" and job.result is None and job.decision is None
+        assert session.get(Usage, (proj["organization_id"], period())).analyses == 2
+    login(client)
+    for url in (
+        f"/api/analyses/{job_id}",
+        f"/api/projects/{proj['id']}/analyses",
+        f"/api/analyses/{completed['id']}/report",
+    ):
+        assert client.get(url).status_code == 404
+    assert submit(client, proj["id"]).status_code == 404
+    monkeypatch.setattr(app.state.db, "session", original)
+    app.state.jobs.recover()
+    with original() as session:
+        job = session.get(Analysis, job_id)
+        assert job.status == "failed" and job.error == "server_restarted"
