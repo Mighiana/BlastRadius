@@ -195,6 +195,9 @@ const errorMessages: Record<string, string> = {
   server_restarted: 'The service restarted during analysis. Submit a new analysis.',
   analysis_failed: 'Analysis failed. Review the input and try again.',
   worker_failed: 'The analysis worker stopped. Try again with a smaller input.',
+  invalid_worker_result: 'The analysis returned an invalid result. Submit a new analysis.',
+  dispatch_failed: 'The analysis could not start. Submit a new analysis.',
+  service_lease_lost: 'This service lost database ownership. Retry when the service is ready.',
   result_too_large: 'The result is too large. Try a smaller Terraform scope.',
 };
 export function jobError(code: string | null) {

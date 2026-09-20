@@ -1,5 +1,27 @@
 # Architecture
 
+## Failure and ownership boundaries
+
+Worker envelopes and report decision/completeness fields are validated before
+either manual or GitHub analysis persistence. Invalid results fail without
+normalized findings, paths or artifacts. Committed analysis submissions count
+against usage even if executor dispatch fails; such submissions become terminal
+`dispatch_failed` records, and their admission reservation is released.
+
+Terminal persistence is attempted three times with bounded delays. A failed result
+transaction falls back to a failed analysis. Exhaustion emits
+`analysis.persistence_failed`, makes readiness fail and closes job admission.
+Operators must restore database availability and restart the sole server to run
+startup recovery if all attempts are exhausted; this queue is not durable.
+
+The PostgreSQL lease is checked at readiness, admission and during isolated
+worker execution. Loss is irreversible for that process: workers are killed and
+reaped, database writes are rejected, and GitHub processing stops. Write
+transactions hold a shared advisory fence; a successor takes the exclusive fence
+before startup recovery so obsolete transactions cannot commit after recovery.
+Run exactly one ASGI process per database. A replacement may start only after it
+acquires the lease; do not add replicas or multiple Uvicorn workers.
+
 ## Components and flows
 
 ```mermaid

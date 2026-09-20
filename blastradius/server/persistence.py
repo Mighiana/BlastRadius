@@ -20,6 +20,7 @@ from blastradius.server.models import (
 )
 from blastradius.server.plans import PLANS, entitlements
 from blastradius.server.quotas import lock_org
+from blastradius.server.results import validate_result
 
 
 def audit(
@@ -75,6 +76,7 @@ def public_result(result: dict | None, sarif: bool) -> dict | None:
 
 
 def persist_result(db: Session, job: Analysis, result: dict) -> None:
+    validate_result(result)
     job.result = result
     job.decision = result["decision"]
     job.score_before = result["score"]["before"]

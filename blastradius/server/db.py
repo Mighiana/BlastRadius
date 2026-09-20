@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from alembic import command
@@ -15,6 +15,10 @@ from sqlalchemy.pool import StaticPool
 
 from blastradius.server.config import Settings
 from blastradius.server.models import Base
+
+
+class LeaseLost(RuntimeError):
+    pass
 
 
 def migration_config() -> Config:
@@ -38,6 +42,8 @@ class Database:
         if sqlite:
             event.listen(self.engine, "connect", _sqlite_options)
         self.sessions = sessionmaker(self.engine, expire_on_commit=False)
+        self.fence: Callable[[Session], None] | None = None
+        self.lease_healthy: Callable[[], bool] = lambda: True
 
     @contextmanager
     def session(self, write: bool = False) -> Iterator[Session]:
@@ -45,7 +51,11 @@ class Database:
             if write and self.engine.dialect.name == "sqlite":
                 session.connection().exec_driver_sql("BEGIN IMMEDIATE")
             try:
+                if self.fence:
+                    self.fence(session)
                 yield session
+                if self.fence:
+                    self.fence(session)
                 session.commit()
             except BaseException:
                 session.rollback()

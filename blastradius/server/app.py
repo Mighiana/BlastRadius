@@ -24,7 +24,7 @@ from blastradius.server.auth import (
     require_user,
 )
 from blastradius.server.config import Settings
-from blastradius.server.db import Database
+from blastradius.server.db import Database, LeaseLost
 from blastradius.server.demos import build_demos
 from blastradius.server.fixtures import FIXTURES
 from blastradius.server.github_routes import github_router
@@ -141,6 +141,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         oauth,
     )
     app.state.github = github
+    app.state.lease = lease
     app.add_middleware(
         SessionMiddleware,
         secret_key=settings.session_secret,
@@ -170,13 +171,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def internal_error(_request: Request, _error: Exception):
         return JSONResponse({"detail": "internal_error"}, status_code=500)
 
+    @app.exception_handler(LeaseLost)
+    async def lease_error(_request: Request, _error: LeaseLost):
+        return JSONResponse({"detail": "service_lease_lost"}, status_code=503)
+
     @app.get("/health/live")
     def live():
         return {"status": "ok"}
 
     @app.get("/health/ready")
     def ready():
-        if not db.ready() or len(demos) != 9:
+        if (
+            not lease.healthy() or not db.ready() or len(demos) != 9
+            or jobs.persistence_failed.is_set()
+        ):
             raise HTTPException(503, "not_ready")
         return {"status": "ready"}
 

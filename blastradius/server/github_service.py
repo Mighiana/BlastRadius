@@ -26,7 +26,7 @@ from blastradius.server.models import (
     Project,
     RepositoryConnection,
 )
-from blastradius.server.persistence import audit, effective_policy, persist_result
+from blastradius.server.persistence import audit, effective_policy
 from blastradius.server.quotas import lock_org, quota
 from blastradius.server.schemas import AnalysisInput
 
@@ -250,7 +250,6 @@ class GitHubService:
                 analysis_id, run_status = run.analysis_id, run.status
             if run_status == "pending" and analysis_id:
                 response: dict
-                completed_job: Analysis | None
                 try:
                     before = api.snapshot(token, repository, pull.base.sha, root)
                     after = api.snapshot(token, repository, pull.head.sha, root)
@@ -264,23 +263,13 @@ class GitHubService:
                     if len(inputs.model_dump_json().encode()) > self.settings.max_body_bytes:
                         raise GitHubError("github_source_limit")
                     active(self.db, connection_id)
-                    response = execute(inputs, self.settings, policy)
+                    response = execute(inputs, self.settings, policy, self.db.lease_healthy)
                     active(self.db, connection_id)
                 except GitHubError as exc:
                     response = {"error": exc.code}
                 except Exception:
                     response = {"error": "github_analysis_failed"}
-                with self.db.session(write=True) as session:
-                    completed_job = session.get(Analysis, analysis_id)
-                    run = session.get(GitHubRun, run_id)
-                    if not completed_job or not run:
-                        return
-                    completed_job.status = "failed" if response.get("error") else "succeeded"
-                    completed_job.error = response.get("error")
-                    if not completed_job.error:
-                        persist_result(session, completed_job, response["result"])
-                    completed_job.completed_at = time.time()
-                    run.status, run.error = "ready", completed_job.error
+                self.jobs.finish(analysis_id, response, run_id)
         for attempt in range(2):
             try:
                 with self.api_factory() as api:

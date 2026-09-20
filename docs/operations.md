@@ -32,9 +32,12 @@ Observe actual input mix and memory/CPU saturation before increasing limits.
 
 Default `BR_WORKERS=2` is the analysis subprocess pool, not the ASGI process count.
 `BR_MAX_JOBS=8` bounds admitted/running jobs; `BR_JOB_TIMEOUT=30` bounds each worker.
-The queue is in memory. Shutdown has 150 seconds for the default eight jobs/two
-workers; increase the grace period if increasing those bounds. A forced stop or
-host loss still loses queued work. Restart marks queued/running records failed
+The queue is in memory. The configured shutdown grace is 150 seconds; this is not
+a verified worst-case drain bound. GitHub jobs use a separate single-thread
+pipeline plus provider requests, so eight GitHub jobs can exceed that grace even
+with the default worker timeout. Measure the intended backlog/input mix and
+increase the grace before relying on graceful draining. A forced stop or host
+loss still loses queued work. Restart marks queued/running records failed
 with `server_restarted` and cleans `BR_DATA_DIR/jobs/job-*`; it does not requeue.
 
 The entrypoint always starts **one ASGI process**. The database service lease

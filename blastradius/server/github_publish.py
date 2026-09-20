@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic import TypeAdapter, ValidationError
 
 from blastradius.server.config import Settings
-from blastradius.server.db import Database
+from blastradius.server.db import Database, LeaseLost
 from blastradius.server.github_api import GitHubAPI, GitHubError
 from blastradius.server.github_types import Check, Checks, Comment, Repository
 from blastradius.server.models import (
@@ -29,6 +29,8 @@ LIMITATIONS = (
 def active(
     db: Database, connection_id: str
 ) -> tuple[RepositoryConnection, GitHubInstallation, Project]:
+    if not db.lease_healthy():
+        raise LeaseLost("service_lease_lost")
     with db.session() as session:
         connection = session.get(RepositoryConnection, connection_id)
         if not connection or connection.status != "active":

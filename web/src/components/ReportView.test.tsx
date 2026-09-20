@@ -6,6 +6,12 @@ import { risky, safe } from '../test/fixtures';
 import { validateFiles, validatePlan } from './AnalysisForm';
 
 describe('report evidence and graph', () => {
+  it('never renders or exports an incomplete result claiming SAFE', () => {
+    render(<ReportView report={{ ...safe, analysis_complete: false }} />);
+    expect(screen.getByRole('alert')).toHaveTextContent('The analysis result is inconsistent');
+    expect(screen.queryByText('SAFE TO MERGE')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'JSON' })).not.toBeInTheDocument();
+  });
   it('explains a demo baseline without implying that a candidate change exists', () => {
     render(<ReportView report={{ ...safe, responsible_changes: [], demo: {
       scenario_id: 'public_ssh', stage: 'safe', remediation_kind: 'supported_patch', note: '',

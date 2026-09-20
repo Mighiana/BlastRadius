@@ -9,6 +9,9 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
   const [error, setError] = useState<Error | null>(null);
   const [exporting, setExporting] = useState(false);
   const sarifAvailable = !!report.reports.sarif;
+  if (report.analysis_complete === false && report.decision === 'SAFE TO MERGE') {
+    return <ErrorNotice error={new Error('The analysis result is inconsistent. Submit a new analysis.')} />;
+  }
   async function exportAs(format: 'json' | 'markdown' | 'sarif') {
     if (format === 'sarif' && !sarifAvailable) return;
     setError(null); setExporting(true);
