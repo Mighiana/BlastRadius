@@ -169,14 +169,15 @@ CSS = """
   .br-path, .br-hop, .br-kicker { overflow-wrap: anywhere; }
   iframe { max-width: 100%; }
   .br-graph-card { border: 1px solid #253248; border-radius: 0 0 10px 10px; overflow: hidden; min-width: 0; }
-  .br-pricing { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.9rem; }
-  .br-pricing .br-card { display:flex; flex-direction:column; min-height:100%; }
+  .br-pricing { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%, 200px),1fr)); gap:.9rem; }
+  .br-pricing .br-card { display:flex; flex-direction:column; min-height:100%; overflow-wrap:normal; }
+  .br-pricing .br-card .val { font-size:clamp(1.6rem, 2vw, 2.3rem); white-space:nowrap; }
   .br-pricing .br-card ul { flex:1; padding-left:1.2rem; color:#cbd7e6; }
   .br-pricing .br-card li { margin:.35rem 0; }
   .br-public-block { background:#0f172a; border:1px solid #253248; border-radius:12px; padding:1rem 1.1rem; }
   @media (max-width: 800px) {
     .br-cards, .br-reasons { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .br-pricing { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .br-card .val { font-size: clamp(1.35rem, 7vw, 2.3rem); }
     .br-decision { padding: 1rem; gap: .75rem; }
     .br-dec-right { margin-left: 0; text-align: left; width: 100%; }
     .br-path { font-size: .95rem; padding: .7rem; }
@@ -189,7 +190,6 @@ CSS = """
   @media (max-width: 400px) {
     .block-container { padding-left: 1rem; padding-right: 1rem; }
     .br-cards, .br-reasons { grid-template-columns: minmax(0, 1fr); }
-    .br-pricing { grid-template-columns:minmax(0,1fr); }
     .br-badge { font-size: .9rem; }
   }
 </style>
