@@ -62,7 +62,7 @@ def _count_findings(result: "AnalysisResult") -> Dict[str, int]:
         1 for n in result.exposed_resources if node_of(graph, n).type == NodeType.EC2
     )
     counts["sensitive_exposed"] = len(result.reachable_sensitive)
-    counts["full_path"] = 1 if result.critical_paths else 0
+    counts["full_path"] = 1 if result.critical_paths or result.reachable_sensitive else 0
     return counts
 
 

@@ -8,10 +8,13 @@ and in any future CI integration.
 from __future__ import annotations
 
 import difflib
+import html
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional
 
 from blastradius.security.decision import Decision, DeploymentDecision, decide
+from blastradius.parser.limits import MAX_FILES, MAX_INPUT_BYTES, read_bounded, InputLimitError
+from blastradius.github_pr import MARKER
 
 if TYPE_CHECKING:  # pragma: no cover
     from blastradius.graph.diff_engine import GraphDiff
@@ -29,23 +32,45 @@ def responsible_change(before_dir: Optional[Path], after_dir: Optional[Path]) ->
     try:
         before = _terraform_text(Path(before_dir)).splitlines()
         after = _terraform_text(Path(after_dir)).splitlines()
-    except OSError:  # pragma: no cover - unreadable directory
+    except (OSError, ValueError):  # pragma: no cover - unreadable directory
         return ""
 
-    removed = [l.strip() for l in difflib.unified_diff(before, after, n=0) if l.startswith("-") and not l.startswith("---")]
-    added = [l.strip() for l in difflib.unified_diff(before, after, n=0) if l.startswith("+") and not l.startswith("+++")]
-    removed = [l[1:].strip() for l in removed]
-    added = [l[1:].strip() for l in added]
+    removed = [line.strip() for line in difflib.unified_diff(before, after, n=0) if line.startswith("-") and not line.startswith("---")]
+    added = [line.strip() for line in difflib.unified_diff(before, after, n=0) if line.startswith("+") and not line.startswith("+++")]
+    removed = [line[1:].strip() for line in removed]
+    added = [line[1:].strip() for line in added]
 
     if len(removed) == 1 and len(added) == 1:
         return f"{removed[0]} -> {added[0]}"
     if removed or added:
         return f"{len(removed)} line(s) removed, {len(added)} line(s) added"
-    return "no textual change"
+    return "Baseline and candidate configurations are identical."
 
 
 def _terraform_text(directory: Path) -> str:
-    return "\n".join(p.read_text(encoding="utf-8") for p in sorted(directory.glob("*.tf")))
+    files = sorted(directory.glob("*.tf"))
+    if len(files) > MAX_FILES:
+        raise InputLimitError("Too many files for textual comparison")
+    documents = []
+    size = 0
+    for path in files:
+        text = read_bounded(path)
+        size += len(text.encode("utf-8"))
+        if size > MAX_INPUT_BYTES:
+            raise InputLimitError("Textual comparison exceeds byte budget")
+        documents.append(text)
+    return "\n".join(documents)
+
+
+def coverage_lines(diff: "GraphDiff") -> list[str]:
+    lines = ["", "Analysis coverage: " + ("complete within documented model" if diff.complete else "INCOMPLETE")]
+    for phase, result in (("before", diff.before), ("after", diff.after)):
+        for item in result.diagnostics[:100]:
+            location = ": ".join(part for part in (item.source_file, item.resource, item.attribute) if part)
+            lines.append(f"- {_safe_markdown(phase)} [{item.code}] {_safe_markdown(location)}: {_safe_markdown(item.message)}")
+        if len(result.diagnostics) > 100:
+            lines.append(f"- {len(result.diagnostics) - 100} additional diagnostics; see JSON/SARIF.")
+    return lines
 
 
 def _metric_lines(diff: "GraphDiff") -> List[str]:
@@ -70,6 +95,8 @@ def _metric_lines(diff: "GraphDiff") -> List[str]:
 def _recommendation(diff: "GraphDiff", decision: DeploymentDecision) -> str:
     if decision.decision is Decision.SAFE:
         return "No action required."
+    if not diff.complete:
+        return "Resolve coverage diagnostics and re-analyze; missing paths do not establish safety."
 
     changed = {(e.source, e.target) for e in diff.new_edges}
     for path in diff.new_critical_paths or diff.new_attack_paths:
@@ -95,8 +122,12 @@ def build_report(
 ) -> str:
     """Render the full PR comment as markdown-ish plain text."""
     decision = decision or decide(diff)
-    status = "PASSED" if decision.passed else "FAILED"
-    mark = "\u2705" if decision.passed else "\u274c"
+    status = {
+        Decision.SAFE: "PASSED",
+        Decision.REVIEW: "REVIEW REQUIRED",
+        Decision.BLOCK: "FAILED",
+    }[decision.decision]
+    mark = "\u26a0" if decision.decision is Decision.REVIEW else "\u2705" if decision.passed else "\u274c"
 
     lines = [TITLE, "", f"{mark} {status}", ""]
 
@@ -104,7 +135,7 @@ def build_report(
         lines.append("This infrastructure change introduces a security regression."
                      if diff.is_regression else "Repository security policy blocks this change.")
     elif decision.decision is Decision.REVIEW:
-        lines.append("This infrastructure change increases internet-facing exposure.")
+        lines.append(decision.headline)
     elif diff.removed_critical_paths:
         lines.append("This infrastructure change removes an existing attack path.")
     else:
@@ -144,6 +175,7 @@ def build_report(
 
     lines.append("Recommendation:")
     lines.append(f"  {_recommendation(diff, decision)}")
+    lines.extend(coverage_lines(diff))
     lines.append("")
     lines.append(
         "-- BlastRadius static attack-path analysis. Simplified AWS model; "
@@ -153,8 +185,6 @@ def build_report(
 
 
 def _safe_markdown(value):
-    import html
-
     text = html.escape(str(value), quote=False).replace('@', '@\u200b')
     for character in ('\\', '`', '*', '_', '[', ']', '|', '#'):
         text = text.replace(character, '\\' + character)
@@ -162,8 +192,6 @@ def _safe_markdown(value):
 
 
 def build_pr_comment(diff, decision=None, before_dir=None, after_dir=None):
-    from blastradius.github_pr import MARKER
-
     decision = decision or decide(diff)
     paths = diff.new_critical_paths or diff.new_attack_paths
     coverage = sorted(set(diff.before.graph.graph.get('unsupported', [])) |
@@ -190,6 +218,7 @@ def build_pr_comment(diff, decision=None, before_dir=None, after_dir=None):
     lines.extend(['', '**Recommendation:**', _recommendation(diff, decision)])
     if coverage:
         lines.extend(['', '**Outside current model coverage:** ' + ', '.join(_safe_markdown(c) for c in coverage)[:2000]])
+    lines.extend(coverage_lines(diff))
     lines.extend(['', '_Simplified static AWS model, not proof of infrastructure safety. '
                   'Unsupported relationships and unknown values can hide paths. No AWS access or deployment._'])
     return '\n'.join(lines)

@@ -59,14 +59,15 @@ class RuleBasedExplainer:
 
         if role is not None and compute is not None:
             sentences.append(
-                f"An attacker who compromises {compute.name} can read the instance "
-                f"metadata service and obtain credentials for {role.name}."
+                f"An attacker who compromises {compute.name} may obtain credentials "
+                f"for {role.name} if instance metadata is accessible."
             )
         if role is not None and bucket is not None:
             access = next((e for e in edges if e.relationship == Relationship.CAN_ACCESS), None)
             detail = f" ({access.reason.lower()})" if access else ""
             sentences.append(
-                f"Those credentials grant access to {bucket.name}{detail}."
+                f"Modeled IAM grants associate those credentials with {bucket.name}{detail}; "
+                "effective authorization and object read access require separate verification."
             )
         return sentences
 
@@ -77,7 +78,7 @@ class RuleBasedExplainer:
         target = bucket.name if bucket else "the target bucket"
         return (
             f"{target} is tagged as sensitive, so this is a complete path from the "
-            "internet to sensitive cloud data."
+            "internet to a sensitive resource under this model, not proof of data exfiltration."
         )
 
 

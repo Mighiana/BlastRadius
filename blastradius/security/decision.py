@@ -20,8 +20,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, List, Optional
 
-from blastradius.parser.models import Relationship, Risk
-from blastradius.policy import DEFAULT_POLICY, Policy
+from blastradius.parser.models import Risk, NodeType, TerraformResource
+from blastradius.policy import Policy
+from blastradius.security.rules import public_ingress_findings
 
 if TYPE_CHECKING:  # pragma: no cover
     from blastradius.graph.diff_engine import GraphDiff
@@ -171,9 +172,6 @@ def decide(diff: "GraphDiff", policy: Optional[Policy] = None) -> DeploymentDeci
         violations.append("New critical attack paths are prohibited")
     if new_sensitive and policy.block_new_sensitive_exposure:
         violations.append("New sensitive resource exposure is prohibited")
-    from blastradius.security.rules import public_ingress_findings
-    from blastradius.parser.models import NodeType, TerraformResource
-
     def ingress_facts(result):
         facts = set()
         for _, data in result.graph.nodes(data=True):
@@ -202,6 +200,8 @@ def decide(diff: "GraphDiff", policy: Optional[Policy] = None) -> DeploymentDeci
     if new_sensitive and not policy.block_new_sensitive_exposure:
         notes.append("Sensitive-exposure blocking disabled by explicit policy; findings remain visible")
     notes.extend(violations)
+    if not diff.complete:
+        notes.append("Analysis incomplete: resolve coverage diagnostics before treating this change as safe.")
 
     if violations:
         decision = Decision.BLOCK
@@ -209,6 +209,9 @@ def decide(diff: "GraphDiff", policy: Optional[Policy] = None) -> DeploymentDeci
             "This change opens a new path from the public internet to data marked sensitive."
             if new_critical or new_sensitive else "; ".join(violations) + "."
         )
+    elif not diff.complete:
+        decision = Decision.REVIEW
+        headline = "Security-critical inputs or paths are incomplete; manual review is required."
     elif new_paths or new_sensitive or new_exposed or diff.score_delta < 0:
         decision = Decision.REVIEW
         headline = "This change introduces security findings requiring review; see the exposure and policy details."

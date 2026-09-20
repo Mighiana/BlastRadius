@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Dict, List
+from collections import deque
 
 import networkx as nx
 
@@ -19,8 +20,11 @@ from blastradius.parser.models import (
     NodeType,
     ResourceNode,
     Risk,
+    Diagnostic,
 )
 from blastradius.security import explain
+from blastradius.security.risk_score import score_analysis
+from blastradius.parser.limits import InputLimitError
 
 # Node types counted as "resources" in the exposure metrics. Security groups are
 # controls rather than assets, and SENSITIVE_DATA is a marker, so both are
@@ -29,6 +33,9 @@ RESOURCE_TYPES = (NodeType.EC2, NodeType.IAM_ROLE, NodeType.S3_BUCKET)
 
 # Safety valve so a pathological config cannot hang the UI.
 MAX_PATHS_PER_TARGET = 25
+MAX_PATHS = 500
+MAX_PATH_DEPTH = 32
+MAX_PATH_WORK = 100_000
 
 
 @dataclass
@@ -45,6 +52,13 @@ class AnalysisResult:
     score: int = 100
     score_breakdown: List[Dict[str, object]] = field(default_factory=list)
     label: str = ""
+    diagnostics: list[Diagnostic] = field(default_factory=list)
+    paths_truncated: bool = False
+    path_work: int = 0
+
+    @property
+    def complete(self) -> bool:
+        return not self.paths_truncated and not any(d.blocks_analysis for d in self.diagnostics)
 
     @property
     def critical_paths(self) -> List[AttackPath]:
@@ -79,13 +93,13 @@ def _build_attack_path(graph: nx.DiGraph, node_ids: List[str]) -> AttackPath:
         nodes=node_ids,
         edges=edges,
         severity=explain.path_severity(edges, reaches_sensitive),
-        explanation=explain.explain_path(resource_nodes, edges),
+        explanation=explain.RuleBasedExplainer().explain_path(resource_nodes, edges),
         reaches_sensitive=reaches_sensitive,
     )
 
 
 def _determine_risk_level(result: AnalysisResult) -> Risk:
-    if result.critical_paths:
+    if result.critical_paths or result.reachable_sensitive:
         return Risk.CRITICAL
     if result.attack_paths:
         worst = Risk.max(*[p.severity for p in result.attack_paths])
@@ -97,9 +111,10 @@ def _determine_risk_level(result: AnalysisResult) -> Risk:
 
 def analyze(graph: nx.DiGraph, label: str = "") -> AnalysisResult:
     """Run full reachability + attack-path analysis on a graph."""
-    from blastradius.security.risk_score import score_analysis  # local: avoids a cycle
-
-    result = AnalysisResult(graph=graph, label=label)
+    if len(graph) > 2500 or graph.number_of_edges() > 20_000:
+        raise InputLimitError("Analysis graph exceeds node or edge budget")
+    result = AnalysisResult(graph=graph, label=label,
+                            diagnostics=list(graph.graph.get("diagnostics", [])))
 
     if not graph.has_node(INTERNET_ID):
         return result
@@ -114,24 +129,64 @@ def analyze(graph: nx.DiGraph, label: str = "") -> AnalysisResult:
     )
     result.reachable_sensitive = [n for n in result.sensitive_resources if n in reachable]
 
-    # Enumerate every route from the internet to each sensitive-data marker.
     paths: List[AttackPath] = []
-    for target in sorted(sensitive_markers):
-        if target not in reachable:
+    targets = sorted(set(sensitive_markers) & set(reachable))
+    if not targets:
+        targets = sorted(n for n in result.exposed_resources if node_of(graph, n).type == NodeType.EC2)
+    adjacency = {n: sorted(graph.successors(n)) for n in graph}
+    parent = {INTERNET_ID: INTERNET_ID}
+    queue = deque([INTERNET_ID])
+    while queue:
+        current = queue.popleft()
+        for neighbor in adjacency[current]:
+            if neighbor not in parent:
+                parent[neighbor] = current
+                queue.append(neighbor)
+    for target in targets:
+        witness = [target]
+        while witness[-1] != INTERNET_ID and len(witness) <= MAX_PATH_DEPTH:
+            witness.append(parent[witness[-1]])
+        if witness[-1] != INTERNET_ID:
+            result.paths_truncated = True
             continue
-        for count, node_ids in enumerate(nx.all_simple_paths(graph, INTERNET_ID, target)):
-            if count >= MAX_PATHS_PER_TARGET:
+        witness.reverse()
+        if len(paths) >= MAX_PATHS or result.path_work >= MAX_PATH_WORK:
+            result.paths_truncated = True
+            break
+        paths.append(_build_attack_path(graph, witness))
+        emitted = {tuple(witness)}
+        stack = [(INTERNET_ID, iter(adjacency[INTERNET_ID]))]
+        route = [INTERNET_ID]
+        visited = {INTERNET_ID}
+        while stack:
+            if result.path_work >= MAX_PATH_WORK or len(paths) >= MAX_PATHS:
+                result.paths_truncated = True
                 break
-            paths.append(_build_attack_path(graph, node_ids))
-
-    # If nothing sensitive is reachable, still surface internet-exposed compute
-    # so the "safe" configuration is not just an empty screen.
-    if not paths:
-        for target in sorted(n for n in result.exposed_resources if node_of(graph, n).type == NodeType.EC2):
-            for count, node_ids in enumerate(nx.all_simple_paths(graph, INTERNET_ID, target)):
-                if count >= MAX_PATHS_PER_TARGET:
+            neighbor = next(stack[-1][1], None)
+            result.path_work += 1
+            if neighbor is None:
+                stack.pop()
+                visited.remove(route.pop())
+                continue
+            if neighbor in visited:
+                continue
+            if neighbor == target:
+                key = tuple([*route, target])
+                if key not in emitted:
+                    emitted.add(key)
+                    paths.append(_build_attack_path(graph, list(key)))
+                if len(emitted) >= MAX_PATHS_PER_TARGET:
+                    result.paths_truncated = True
                     break
-                paths.append(_build_attack_path(graph, node_ids))
+            elif len(route) >= MAX_PATH_DEPTH:
+                result.paths_truncated = True
+            else:
+                route.append(neighbor)
+                visited.add(neighbor)
+                stack.append((neighbor, iter(adjacency[neighbor])))
+    if result.paths_truncated:
+        result.diagnostics.append(Diagnostic("PATHS_TRUNCATED",
+            "Path enumeration reached a work, depth or output budget; path counts are lower bounds."))
 
     paths.sort(key=lambda p: (-p.severity.rank, len(p), p.key))
     result.attack_paths = paths

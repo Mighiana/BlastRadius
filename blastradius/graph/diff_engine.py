@@ -20,6 +20,7 @@ class Verdict(str, Enum):
     REGRESSION = "SECURITY REGRESSION"
     IMPROVED = "SECURITY IMPROVED"
     UNCHANGED = "NO SECURITY CHANGE"
+    INCOMPLETE = "INCOMPLETE ANALYSIS"
 
 
 @dataclass
@@ -46,6 +47,10 @@ class GraphDiff:
     summary: str = ""
 
     # --- convenience for the UI -------------------------------------------
+    @property
+    def complete(self) -> bool:
+        return self.before.complete and self.after.complete
+
     @property
     def new_critical_paths(self) -> List[AttackPath]:
         return [p for p in self.new_attack_paths if p.reaches_sensitive]
@@ -94,10 +99,16 @@ def _edges(result: AnalysisResult) -> Dict[Tuple[str, str], GraphEdge]:
     return {_edge_key(data["edge"]): data["edge"] for _, _, data in result.graph.edges(data=True)}
 
 
+def _contains_path(result: AnalysisResult, path: AttackPath) -> bool:
+    return all(result.graph.has_edge(a, b) for a, b in zip(path.nodes, path.nodes[1:]))
+
+
 def _determine_verdict(diff: GraphDiff) -> Verdict:
     """Prioritise sensitive-data reachability, then paths, then score."""
     if diff.newly_reachable_sensitive or diff.new_critical_paths:
         return Verdict.REGRESSION
+    if not diff.complete:
+        return Verdict.INCOMPLETE
     if diff.no_longer_reachable_sensitive or diff.removed_critical_paths:
         return Verdict.IMPROVED
     if diff.after.score < diff.before.score or diff.new_attack_paths or diff.newly_exposed:
@@ -130,8 +141,14 @@ def compare(before: AnalysisResult, after: AnalysisResult) -> GraphDiff:
 
     before_paths = {p.key: p for p in before.attack_paths}
     after_paths = {p.key: p for p in after.attack_paths}
-    diff.new_attack_paths = [after_paths[k] for k in after_paths if k not in before_paths]
-    diff.removed_attack_paths = [before_paths[k] for k in before_paths if k not in after_paths]
+    diff.new_attack_paths = [
+        p for k, p in after_paths.items()
+        if k not in before_paths and not _contains_path(before, p)
+    ]
+    diff.removed_attack_paths = [
+        p for k, p in before_paths.items()
+        if k not in after_paths and not _contains_path(after, p)
+    ]
     diff.new_attack_paths.sort(key=lambda p: (-p.severity.rank, len(p)))
     diff.removed_attack_paths.sort(key=lambda p: (-p.severity.rank, len(p)))
 
@@ -141,6 +158,8 @@ def compare(before: AnalysisResult, after: AnalysisResult) -> GraphDiff:
         len(before.reachable_sensitive),
         len(after.reachable_sensitive),
     )
+    if not diff.complete:
+        diff.summary += " Analysis is incomplete; absent or removed paths do not establish safety."
     return diff
 
 

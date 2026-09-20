@@ -12,6 +12,8 @@ the UI can explain itself.
 from __future__ import annotations
 
 from typing import Dict, List, Optional
+from collections import Counter
+from copy import deepcopy
 
 import networkx as nx
 
@@ -24,12 +26,16 @@ from blastradius.parser.models import (
     ResourceNode,
     Risk,
     TerraformResource,
+    Diagnostic,
 )
+from blastradius.parser.coverage import config_diagnostics, safe_source
+from blastradius.parser.limits import MAX_RESOURCES, InputLimitError, check_structure
 from blastradius.parser.terraform_parser import references
 from blastradius.security import rules
 
 # Words that should stay upper-case when we prettify Terraform names for display.
 _ACRONYMS = {"sg": "SG", "iam": "IAM", "s3": "S3", "ec2": "EC2", "db": "DB", "ssh": "SSH", "vpc": "VPC"}
+MAX_GRAPH_EDGES = 20_000
 
 
 def _display_name(resource: TerraformResource) -> str:
@@ -53,6 +59,7 @@ def nodes_of_type(graph: nx.DiGraph, *types: NodeType) -> List[str]:
 
 
 def _add_node(graph: nx.DiGraph, node: ResourceNode) -> None:
+    node.attributes = deepcopy(node.attributes)
     graph.add_node(node.id, node=node)
 
 
@@ -62,6 +69,9 @@ def _add_edge(graph: nx.DiGraph, edge: GraphEdge) -> None:
         existing = edge_of(graph, edge.source, edge.target)
         if existing.risk.rank >= edge.risk.rank:
             return
+    elif graph.number_of_edges() >= MAX_GRAPH_EDGES:
+        graph.graph["edge_limit_reached"] = True
+        return
     graph.add_edge(edge.source, edge.target, edge=edge)
 
 
@@ -72,9 +82,15 @@ def sensitive_node_id(bucket_address: str) -> str:
 def build_graph(config: ParsedConfig) -> nx.DiGraph:
     """Build the attack graph for one parsed Terraform configuration."""
     graph = nx.DiGraph()
-    graph.graph["source_dir"] = config.source_dir
-    graph.graph["source_files"] = {r.address: r.source_file for r in config.resources if r.source_file}
-    graph.graph["unsupported"] = config.unsupported
+    if len(config.resources) > MAX_RESOURCES:
+        raise InputLimitError(f"Graph input exceeds {MAX_RESOURCES} resources")
+    check_structure([r.attributes for r in config.resources])
+    graph.graph["source_dir"] = safe_source(config.source_dir)
+    graph.graph["source_files"] = {r.address: safe_source(r.source_file) for r in config.resources if r.source_file}
+    graph.graph["unsupported"] = list(config.unsupported)
+    graph.graph["diagnostics"] = config_diagnostics(config)
+    counts = Counter(r.address for r in config.resources)
+    config = ParsedConfig(resources=[r for r in config.resources if counts[r.address] == 1])
 
     _add_node(
         graph,
@@ -200,12 +216,13 @@ def build_graph(config: ParsedConfig) -> nx.DiGraph:
                     relationship=Relationship.ASSUMES_ROLE,
                     reason=(
                         "IAM role attached through instance profile "
-                        f"({profile_name or 'instance profile'}); credentials are readable "
-                        "from instance metadata"
+                        f"({profile_name or 'instance profile'}); compromised compute may "
+                        "obtain metadata credentials"
                     ),
                     risk=Risk.MEDIUM,
                     terraform_resource=instance.address,
                     evidence=f"iam_instance_profile = {profile_name}",
+                    confidence="conditional",
                 ),
             )
 
@@ -213,9 +230,12 @@ def build_graph(config: ParsedConfig) -> nx.DiGraph:
     bucket_addresses = [b.address for b in buckets]
     for role in roles:
         for policy_address, document in rules.role_policy_sources(role.address, config.resources):
-            for finding in rules.s3_access_findings(document):
+            for access in rules.s3_access_findings(document):
                 targets = (
-                    bucket_addresses if finding.targets_all_buckets else finding.bucket_addresses
+                    bucket_addresses if access.targets_all_buckets else [
+                        b.address for b in buckets if b.address in access.bucket_addresses
+                        or rules.bucket_resource_matches(access.resources, b)
+                    ]
                 )
                 for bucket_address in targets:
                     if not graph.has_node(bucket_address):
@@ -226,26 +246,31 @@ def build_graph(config: ParsedConfig) -> nx.DiGraph:
                             source=role.address,
                             target=bucket_address,
                             relationship=Relationship.CAN_ACCESS,
-                            reason=finding.reason,
-                            risk=finding.risk,
+                            reason=access.reason,
+                            risk=access.risk,
                             terraform_resource=policy_address,
-                            evidence=finding.evidence,
+                            evidence=access.evidence,
+                            category="data_access" if access.data_read else "privilege",
+                            confidence="conditional" if access.conditional else "conservative",
+                            metadata={"actions": access.actions, "data_read": access.data_read,
+                                      "resources": access.resources},
                         ),
                     )
 
     # --- INTERNET -> S3_BUCKET (directly public bucket) -------------------
     for bucket in buckets:
-        for finding in rules.public_bucket_findings(bucket, config.resources):
+        for public_access in rules.public_bucket_findings(bucket, config.resources):
             _add_edge(
                 graph,
                 GraphEdge(
                     source=INTERNET_ID,
                     target=bucket.address,
                     relationship=Relationship.PUBLIC_ACCESS,
-                    reason=finding.reason,
-                    risk=finding.risk,
-                    terraform_resource=finding.terraform_resource,
-                    evidence=finding.evidence,
+                    reason=public_access.reason,
+                    risk=public_access.risk,
+                    terraform_resource=public_access.terraform_resource,
+                    evidence=public_access.evidence,
+                    confidence="conditional" if public_access.conditional else "modeled",
                 ),
             )
 
@@ -266,6 +291,25 @@ def build_graph(config: ParsedConfig) -> nx.DiGraph:
             ),
         )
 
+    categories = {
+        Relationship.INGRESS_ALLOWS: "exposure", Relationship.PROTECTS: "reachability",
+        Relationship.ASSUMES_ROLE: "privilege", Relationship.PUBLIC_ACCESS: "exposure",
+        Relationship.CONTAINS: "impact",
+    }
+    remediation = {
+        Relationship.INGRESS_ALLOWS: "Restrict ingress to intended CIDRs and ports.",
+        Relationship.PROTECTS: "Review the instance security-group attachment and network routes.",
+        Relationship.ASSUMES_ROLE: "Use least-privilege instance roles and protect metadata credentials.",
+        Relationship.CAN_ACCESS: "Narrow IAM actions and bucket ARNs; verify effective policies.",
+        Relationship.PUBLIC_ACCESS: "Remove public ACL/policy grants or apply effective public access controls.",
+        Relationship.CONTAINS: "Verify sensitivity classification and restrict access to this bucket.",
+    }
+    for edge in graph_edges(graph):
+        edge.category = categories.get(edge.relationship, edge.category)
+        edge.source_file = graph.graph["source_files"].get(edge.terraform_resource, "")
+        edge.remediation = remediation[edge.relationship]
+    if graph.graph.get("edge_limit_reached"):
+        graph.graph["diagnostics"].append(Diagnostic("GRAPH_TRUNCATED", f"Graph exceeded {MAX_GRAPH_EDGES} edges."))
     return graph
 
 

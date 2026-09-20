@@ -2,12 +2,33 @@ import io
 from pathlib import Path
 
 import yaml
+import pytest
 
 from blastradius.cli import run
 from blastradius.github_pr import MARKER
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / 'examples/github-action/blastradius-pr-check.yml'
+
+
+@pytest.mark.parametrize("name", [
+    "docs/github-action.yml",
+    "examples/github-action/blastradius-pr-check.yml",
+    ".github/workflows/blastradius.yml",
+    ".github/workflows/blastradius-hosted-test.yml",
+])
+def test_merge_gates_refresh_on_base_edits_and_fail_incomplete_reviews(name):
+    data = yaml.safe_load((ROOT / name).read_text(encoding="utf-8"))
+    assert "edited" in data.get("on", data.get(True))["pull_request"]["types"]
+    analysis_steps = [
+        step["run"]
+        for job in data["jobs"].values()
+        for step in job["steps"]
+        if "blastradius.cli" in step.get("run", "") and "--repo" in step["run"]
+    ]
+    assert analysis_steps
+    for script in analysis_steps:
+        assert script.count("--fail-on-review") == script.count("blastradius.cli")
 
 
 def workflow():

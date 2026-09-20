@@ -1,0 +1,94 @@
+name: blastradius
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  db:
+    image: blastradius-postgres:local
+    build:
+      context: .
+      target: database
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-blastradius}
+      POSTGRES_USER: ${POSTGRES_USER:-blastradius}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a local database password in .env}
+    volumes:
+      - postgres-trixie-data:/var/lib/postgresql/data
+    user: postgres
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /var/run/postgresql:size=16m,uid=999,gid=999,mode=3775
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: 1.0
+    mem_limit: 1g
+    pids_limit: 128
+    shm_size: 128m
+    logging: *logging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  app:
+    image: blastradius:local
+    build: .
+    env_file: .env
+    environment: &app-environment
+      BR_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-blastradius}:${POSTGRES_PASSWORD:?Set a local database password in .env}@db:5432/${POSTGRES_DB:-blastradius}
+      BR_DATA_DIR: /app/.local
+      BR_STATIC_DIR: /app/web/dist
+      BR_AUTO_MIGRATE: "false"
+      BLASTRADIUS_ALEMBIC_CONFIG: /app/alembic.ini
+    ports:
+      - "127.0.0.1:${BLASTRADIUS_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - app-data:/app/.local
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    init: true
+    cpus: 2.0
+    mem_limit: 2g
+    pids_limit: 128
+    logging: *logging
+    restart: unless-stopped
+    stop_grace_period: 150s
+
+  migrate:
+    profiles: [tools]
+    image: blastradius:local
+    build: .
+    env_file: .env
+    environment: *app-environment
+    command: [migrate]
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - app-data:/app/.local
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: 1.0
+    mem_limit: 512m
+    pids_limit: 64
+    logging: *logging
+
+volumes:
+  postgres-trixie-data:
+  app-data:

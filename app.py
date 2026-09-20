@@ -7,12 +7,15 @@ from __future__ import annotations
 
 import difflib
 import html
-import tempfile
+import re
+from dataclasses import replace
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, cast
 
+import networkx as nx
 import streamlit as st
 import streamlit.components.v1 as components
+from lark.exceptions import LarkError
 
 from blastradius.graph import analyze, build_graph, compare
 from blastradius.graph.attack_paths import AnalysisResult
@@ -20,18 +23,26 @@ from blastradius.graph.diff_engine import GraphDiff, Verdict, highlight_edges, h
 from blastradius.parser import parse_directory
 from blastradius.report import build_report
 from blastradius.policy import PolicyError, discover_policy
-from blastradius.parser.models import AttackPath, NodeType, Risk
+from blastradius.parser.models import AttackPath, GraphEdge, NodeType, ResourceNode, Risk
 from blastradius import gitsource, scenarios, simulation
 from blastradius.security import remediation
 from blastradius.security.decision import DeploymentDecision, decide
 from blastradius.security.risk_score import PENALTIES
+from blastradius.session_storage import (
+    SessionWorkspace,
+    StorageError,
+    checked_path,
+    cleanup_expired,
+    trusted_local_enabled,
+)
 from blastradius.visualization import LEGEND, render_graph
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parent
 SAFE_DIR = ROOT / "examples" / "safe"
 VULNERABLE_DIR = ROOT / "examples" / "vulnerable"
-REMEDIATED_DIR = ROOT / "examples" / "generated_fix"
-SIMULATION_DIR = ROOT / ".blastradius_sim"
+BUNDLED_DIRS = frozenset(
+    directory for scenario in scenarios.SCENARIOS for directory in (scenario.before, scenario.after)
+)
 
 RISK_COLORS: Dict[Risk, str] = {
     Risk.NONE: "#34d399",
@@ -121,25 +132,74 @@ CSS = """
   .br-h { font-size: 1.45rem; font-weight: 800; color: #f1f5fb; margin: .4rem 0 .2rem 0;
           letter-spacing: -.3px; }
   hr { border-color: #253248; }
+  .br-title { font-size: clamp(2.5rem, 9vw, 5rem); letter-spacing: -.04em; }
+  .br-cards, .br-reasons { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .br-card, .br-reason, .br-decision > div { min-width: 0; overflow-wrap: anywhere; }
+  .br-decision { flex-wrap: wrap; }
+  .br-decision h1 { font-size: clamp(1.65rem, 5vw, 2.9rem); }
+  .br-dec-right { white-space: normal; }
+  .br-side { flex-wrap: wrap; overflow-wrap: anywhere; }
+  .br-path, .br-hop, .br-kicker { overflow-wrap: anywhere; }
+  iframe { max-width: 100%; }
+  @media (max-width: 800px) {
+    .br-cards, .br-reasons { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .br-decision { padding: 1rem; gap: .75rem; }
+    .br-dec-right { margin-left: 0; text-align: left; width: 100%; }
+    .br-path { font-size: .95rem; padding: .7rem; }
+  }
+  @media (max-width: 400px) {
+    .block-container { padding-left: 1rem; padding-right: 1rem; }
+    .br-cards, .br-reasons { grid-template-columns: minmax(0, 1fr); }
+    .br-badge { font-size: .9rem; }
+  }
 </style>
+"""
+
+GRAPH_FIT_HTML = """
+<style>
+  html, body { margin: 0; width: 100%; overflow: hidden; }
+  .card { min-width: 0; max-width: 100%; border: 0; }
+  #mynetwork { width: 100% !important; border: 0; }
+</style>
+<script>
+  (() => {
+    const fit = () => {
+      if (container.clientWidth > 0) network.fit({animation: false});
+    };
+    const observer = new ResizeObserver(() => requestAnimationFrame(fit));
+    observer.observe(container);
+    requestAnimationFrame(fit);
+    if (document.fonts) document.fonts.ready.then(fit);
+  })();
+</script>
 """
 
 
 # ---------------------------------------------------------------------------
-# Analysis (cached on file contents so edits are picked up immediately)
+# Analysis and session-owned input boundaries
 # ---------------------------------------------------------------------------
-def _fingerprint(directory: Path) -> Tuple:
-    return tuple(sorted((p.name, p.stat().st_mtime_ns) for p in directory.glob("*.tf")))
+def workspace() -> SessionWorkspace:
+    return cast(SessionWorkspace, st.session_state.workspace)
 
 
-@st.cache_data(show_spinner=False)
-def _analyze_cached(directory: str, label: str, fingerprint: Tuple) -> AnalysisResult:
-    """`fingerprint` is part of the cache key so edited .tf files are re-analyzed."""
-    return analyze(build_graph(parse_directory(directory)), label)
+def validated_directory(directory: Path) -> Path:
+    return workspace().validate_input(directory, BUNDLED_DIRS, trusted=trusted_local_enabled())
 
 
 def analyze_dir(directory: Path, label: str) -> AnalysisResult:
-    return _analyze_cached(str(directory), label, _fingerprint(directory))
+    return analyze(build_graph(parse_directory(validated_directory(directory))), label)
+
+
+def new_job(purpose: str) -> Path:
+    keep = (Path(st.session_state.before_dir), Path(st.session_state.after_dir))
+    return workspace().new_job(purpose, keep)
+
+
+def apply_remediation(after_dir: Path, plan: remediation.RemediationPlan) -> None:
+    source = validated_directory(after_dir)
+    target = new_job("remediation")
+    remediation.write_plan(plan, target, source)
+    queue_scenario(source, target)
 
 
 def queue_scenario(before_dir: Path, after_dir: Path) -> None:
@@ -148,6 +208,7 @@ def queue_scenario(before_dir: Path, after_dir: Path) -> None:
     Streamlit forbids writing to a widget's session-state key after that widget
     has been created, so the change is staged and applied at the top of `main()`.
     """
+    before_dir, after_dir = validated_directory(before_dir), validated_directory(after_dir)
     st.session_state.pending_scenario = (str(before_dir), str(after_dir))
     st.rerun()
 
@@ -159,7 +220,9 @@ def _apply_pending_scenario() -> None:
 
 
 def terraform_text(directory: Path) -> str:
-    return "\n".join(p.read_text(encoding="utf-8") for p in sorted(directory.glob("*.tf")))
+    return "\n".join(
+        p.read_text(encoding="utf-8") for p in sorted(validated_directory(directory).glob("*.tf"))
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +234,25 @@ def risk_color(risk: Risk) -> str:
 
 def esc(value: object) -> str:
     return html.escape(str(value))
+
+
+def markdown_text(value: object) -> str:
+    return re.sub(r"([\\`*_{}\[\]()#+.!|<>-])", r"\\\1", esc(value))
+
+
+def safe_graph_html(
+    graph: nx.DiGraph, nodes: List[str], edges: List[Tuple[str, str]], height: int
+) -> str:
+    """Escape PyVis HTML tooltips without changing the analysis graph."""
+    display = graph.copy()
+    for node_id, data in display.nodes(data=True):
+        node = cast(ResourceNode, data["node"])
+        display.nodes[node_id]["node"] = replace(node, id=esc(node.id), name=esc(node.name))
+    for source, target, data in display.edges(data=True):
+        edge = cast(GraphEdge, data["edge"])
+        display.edges[source, target]["edge"] = replace(edge, reason=esc(edge.reason))
+    document = render_graph(display, nodes, edges, height=height)
+    return document.replace("</body>", GRAPH_FIT_HTML + "</body>")
 
 
 def embed_html(html_doc: str, height: int) -> None:
@@ -211,7 +293,7 @@ def section_simulator(before_dir: Path) -> None:
         icon=":material/bolt:",
         key="simulate_risky",
     ):
-        result = simulation.simulate(before_dir, SIMULATION_DIR, risky)
+        result = simulation.simulate(validated_directory(before_dir), new_job("simulation"), risky)
         st.session_state.last_simulation = result.simulation.id
         queue_scenario(before_dir, result.directory)
 
@@ -339,7 +421,7 @@ def legend_html() -> str:
 def path_chip(labels: List[str], dangerous: bool = True) -> str:
     arrow = " &nbsp;&rarr;&nbsp; "
     css = "br-path" if dangerous else "br-path br-path-good"
-    return f'<div class="{css}">{arrow.join(esc(l) for l in labels)}</div>'
+    return f'<div class="{css}">{arrow.join(esc(label) for label in labels)}</div>'
 
 
 def section_graphs(diff: GraphDiff) -> None:
@@ -368,7 +450,7 @@ def section_graphs(diff: GraphDiff) -> None:
                 hl_edges = removed_edges if highlight_before else []
             else:
                 hl_nodes, hl_edges = ([], []) if highlight_before else (nodes, edges)
-            embed_html(render_graph(result.graph, hl_nodes, hl_edges, height=470), height=480)
+            embed_html(safe_graph_html(result.graph, hl_nodes, hl_edges, height=470), height=480)
 
 
 # ---------------------------------------------------------------------------
@@ -406,7 +488,7 @@ def section_paths(diff: GraphDiff) -> None:
         for path in new_critical:
             st.markdown(path_chip(diff.display_path(path)), unsafe_allow_html=True)
             st.markdown(render_hops(diff.after, path), unsafe_allow_html=True)
-            st.info(path.explanation, icon=":material/psychology:")
+            st.info(markdown_text(path.explanation), icon=":material/psychology:")
     elif removed_critical:
         heading("Attack path eliminated")
         for path in removed_critical:
@@ -453,20 +535,26 @@ def section_change(diff: GraphDiff, before_dir: Path, after_dir: Path) -> None:
         st.caption("Graph impact")
         for edge in diff.new_edges:
             st.markdown(
-                f"**+ new edge** `{edge.source}` &rarr; `{edge.target}`  \n"
+                f"<b>+ new edge</b> <code>{esc(edge.source)}</code> &rarr; <code>{esc(edge.target)}</code><br>"
                 f'<span class="br-note">{esc(edge.reason)}</span>',
                 unsafe_allow_html=True,
             )
         for edge in diff.removed_edges:
             st.markdown(
-                f"**&minus; removed edge** `{edge.source}` &rarr; `{edge.target}`  \n"
+                f"<b>&minus; removed edge</b> <code>{esc(edge.source)}</code> &rarr; <code>{esc(edge.target)}</code><br>"
                 f'<span class="br-note">{esc(edge.reason)}</span>',
                 unsafe_allow_html=True,
             )
         if diff.newly_exposed:
-            st.markdown("**Newly internet-reachable:** " + ", ".join(f"`{n}`" for n in diff.newly_exposed))
+            st.markdown(
+                "<b>Newly internet-reachable:</b> " + ", ".join(f"<code>{esc(n)}</code>" for n in diff.newly_exposed),
+                unsafe_allow_html=True,
+            )
         if diff.no_longer_exposed:
-            st.markdown("**No longer reachable:** " + ", ".join(f"`{n}`" for n in diff.no_longer_exposed))
+            st.markdown(
+                "<b>No longer reachable:</b> " + ", ".join(f"<code>{esc(n)}</code>" for n in diff.no_longer_exposed),
+                unsafe_allow_html=True,
+            )
         if not (diff.new_edges or diff.removed_edges):
             st.markdown('<span class="br-note">No graph edges changed.</span>', unsafe_allow_html=True)
 
@@ -496,7 +584,7 @@ def section_pr_report(diff: GraphDiff, decision: DeploymentDecision, before_dir:
 
 def section_remediation(after_dir: Path) -> None:
     heading("Remediation")
-    plan = remediation.generate_safer_config(after_dir)
+    plan = remediation.generate_safer_config(validated_directory(after_dir))
 
     if not plan.recommendations:
         st.success("No remediation needed for this configuration.", icon=":material/task_alt:")
@@ -505,7 +593,7 @@ def section_remediation(after_dir: Path) -> None:
     for rec in plan.recommendations:
         with st.container(border=True):
             st.markdown(
-                f"**{esc(rec.title)}** &nbsp;"
+                f"<b>{esc(rec.title)}</b> &nbsp;"
                 f'<span style="color:{risk_color(rec.severity)};font-weight:800;font-size:.85rem">'
                 f"{rec.severity.value}</span>",
                 unsafe_allow_html=True,
@@ -527,8 +615,7 @@ def section_remediation(after_dir: Path) -> None:
         use_container_width=True,
         key="apply_fix",
     ):
-        remediation.write_plan(plan, REMEDIATED_DIR, after_dir)
-        queue_scenario(after_dir, REMEDIATED_DIR)
+        apply_remediation(after_dir, plan)
 
 
 def section_details(diff: GraphDiff) -> None:
@@ -543,8 +630,8 @@ def section_details(diff: GraphDiff) -> None:
                 st.markdown('<span class="br-note">No deductions.</span>', unsafe_allow_html=True)
             for item in result.score_breakdown:
                 st.markdown(
-                    f'<span class="br-note">{item["points"]} &nbsp; {item["finding"]} '
-                    f'(x{item["count"]})</span>',
+                    f'<span class="br-note">{esc(item["points"])} &nbsp; {esc(item["finding"])} '
+                    f'(x{esc(item["count"])})</span>',
                     unsafe_allow_html=True,
                 )
         st.caption(
@@ -555,7 +642,7 @@ def section_details(diff: GraphDiff) -> None:
         for source, target, data in sorted(diff.after.graph.edges(data=True)):
             edge = data["edge"]
             st.markdown(
-                f"`{source}` &rarr; `{target}` &nbsp; **{edge.relationship.value}** "
+                f"<code>{esc(source)}</code> &rarr; <code>{esc(target)}</code> &nbsp; <b>{esc(edge.relationship.value)}</b> "
                 f'&nbsp;<span class="br-note">{esc(edge.reason)}</span>',
                 unsafe_allow_html=True,
             )
@@ -599,9 +686,11 @@ def sidebar() -> Tuple[Path, Path]:
             help="Single-screen presentation view: scenario, decision, graph, fix.",
         )
 
-        if st.session_state.demo_mode:
+        if st.session_state.demo_mode or not trusted_local_enabled():
             for key in ("before_dir", "after_dir"):
                 st.session_state[key] = st.session_state[key]
+            if not trusted_local_enabled():
+                st.caption("Hosted demo: bundled scenarios only. Analyze private infrastructure locally or in CI.")
             return Path(st.session_state.before_dir), Path(st.session_state.after_dir)
 
         with st.expander("Advanced: Analyze Git change"):
@@ -617,7 +706,6 @@ def sidebar() -> Tuple[Path, Path]:
             before_dir = st.text_input("BEFORE directory", key="before_dir")
             after_dir = st.text_input("AFTER directory", key="after_dir")
             if st.button("Re-analyze", use_container_width=True, key="reanalyze"):
-                _analyze_cached.clear()
                 st.rerun()
 
         st.divider()
@@ -631,18 +719,27 @@ def sidebar() -> Tuple[Path, Path]:
 
 def _run_git_comparison(repo: str, base: str, head: str, tf_dir: str) -> None:
     """Materialize two Git refs and switch the dashboard onto them."""
+    if not trusted_local_enabled():
+        st.error("Local Git access is disabled in the hosted demo.")
+        return
     if not (repo and base and head):
         st.error("Repository, base ref and candidate ref are all required.")
         return
-    workspace = tempfile.TemporaryDirectory(prefix="blastradius-git-")
+    target = new_job("git")
     try:
-        comparison = gitsource.prepare_comparison(repo, base, head, workspace.name, tf_dir or None)
+        repository = checked_path(repo)
+        if (repository / ".git").exists() or (repository / ".git").is_symlink():
+            checked_path(repository / ".git")
+        if tf_dir and (Path(tf_dir).is_absolute() or ".." in Path(tf_dir).parts or "\\" in tf_dir or ":" in tf_dir):
+            raise StorageError("Terraform directory must stay within the repository.")
+        comparison = gitsource.prepare_comparison(repository, base, head, target, tf_dir or None)
+        validated_directory(comparison.before_dir)
+        validated_directory(comparison.after_dir)
         policy = gitsource.base_policy(comparison)
-    except (gitsource.GitAnalysisError, PolicyError) as error:
-        workspace.cleanup()
-        st.error(str(error))
+    except (gitsource.GitAnalysisError, PolicyError, StorageError, OSError) as error:
+        workspace().discard_job(target)
+        st.error(markdown_text(error))
         return
-    st.session_state.setdefault("git_workspaces", []).append(workspace)
     st.session_state.git_summary = comparison.summary
     st.session_state.git_policy = (str(comparison.before_dir), str(comparison.after_dir), policy)
     queue_scenario(comparison.before_dir, comparison.after_dir)
@@ -695,7 +792,7 @@ def path_summary_line(diff: GraphDiff) -> None:
 
 def primary_action(after_dir: Path, key: str) -> None:
     """The single most useful next step, surfaced on the Overview tab."""
-    plan = remediation.generate_safer_config(after_dir)
+    plan = remediation.generate_safer_config(validated_directory(after_dir))
     if plan.can_autofix:
         if st.button(
             "Generate Safer Configuration & Re-analyze",
@@ -704,8 +801,7 @@ def primary_action(after_dir: Path, key: str) -> None:
             icon=":material/build:",
             key=key,
         ):
-            remediation.write_plan(plan, REMEDIATED_DIR, after_dir)
-            queue_scenario(after_dir, REMEDIATED_DIR)
+            apply_remediation(after_dir, plan)
     elif plan.recommendations:
         st.info(
             f"{len(plan.recommendations)} manual remediation recommendation(s) - see the "
@@ -759,10 +855,17 @@ def render_demo_mode(
     primary_action(after_dir, key="demo_apply_fix")
 
 
-def main() -> None:
-    st.set_page_config(page_title="BlastRadius", page_icon=":material/radar:", layout="wide")
-    st.markdown(CSS, unsafe_allow_html=True)
-
+def render_app() -> None:
+    if "workspace" not in st.session_state:
+        st.session_state.workspace = SessionWorkspace.create()
+    try:
+        workspace().touch()
+    except FileNotFoundError:
+        st.session_state.workspace = SessionWorkspace.create()
+        for key in ("before_dir", "after_dir", "pending_scenario", "git_policy", "git_summary", "last_simulation"):
+            st.session_state.pop(key, None)
+        st.info("Your temporary demo session expired. The bundled scenario has been restored.")
+    cleanup_expired(workspace().root)
     st.session_state.setdefault("before_dir", str(SAFE_DIR))
     st.session_state.setdefault("after_dir", str(VULNERABLE_DIR))
     st.session_state.setdefault("demo_mode", False)
@@ -775,10 +878,8 @@ def main() -> None:
     before_dir, after_dir = sidebar()
     product_header()
 
-    for directory in (before_dir, after_dir):
-        if not directory.is_dir() or not list(directory.glob("*.tf")):
-            st.error(f"No Terraform files found in `{directory}`.")
-            return
+    before_dir, after_dir = validated_directory(before_dir), validated_directory(after_dir)
+    workspace().prune((before_dir, after_dir))
 
     scenario_chip(before_dir, after_dir)
     section_simulator(before_dir)
@@ -788,21 +889,35 @@ def main() -> None:
     diff = compare(before, after)
     try:
         binding = st.session_state.get("git_policy")
-        policy = binding[2] if binding and binding[:2] == (str(before_dir), str(after_dir)) else discover_policy(before_dir, ROOT)
+        policy = binding[2] if binding and binding[:2] == (str(before_dir), str(after_dir)) else discover_policy(before_dir)
     except PolicyError as error:
-        st.error(str(error))
+        st.error(markdown_text(error))
         return
     decision = decide(diff, policy)
     if policy.source:
-        st.caption(policy.describe())
+        st.caption(markdown_text(policy.describe()))
     for note in decision.policy_notes:
         if not st.session_state.demo_mode:
-            st.caption(note)
+            st.caption(markdown_text(note))
 
     if st.session_state.get("demo_mode"):
         render_demo_mode(diff, decision, before_dir, after_dir)
     else:
         render_tabs(diff, decision, before_dir, after_dir)
+
+
+def main() -> None:
+    st.set_page_config(page_title="BlastRadius", page_icon=":material/radar:", layout="wide")
+    st.markdown(CSS, unsafe_allow_html=True)
+    try:
+        render_app()
+    except StorageError as error:
+        st.error(markdown_text(error))
+    except (OSError, ValueError, LarkError) as error:
+        if trusted_local_enabled():
+            st.error(markdown_text(error))
+        else:
+            st.error("The selected demo input is unavailable or invalid. Choose a bundled scenario to continue.")
 
 
 if __name__ == "__main__":
