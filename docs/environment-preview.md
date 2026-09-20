@@ -8,6 +8,9 @@ does not verify OIDC, email delivery or persistent production accounts.
 browser's HTTPS `Origin` to `http://localhost`. BlastRadius rejects that request
 even when configured correctly. Authenticated preview acceptance remains blocked
 until the proxy preserves Origin; the profile below does not bypass that boundary.
+This is an environment/proxy limitation. The complete authenticated local demo
+flow passed independently; see [local acceptance](readiness.md#local-authenticated-browser-acceptance)
+and the [parallel Desktop setup](environment-development.md#parallel-desktop-demo).
 
 ## Configure the exact origin
 

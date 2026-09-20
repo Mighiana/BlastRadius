@@ -29,7 +29,7 @@ instructions are in [release integration](release-integration.md).
 Provider-mocked tests do not establish real external service behavior.
 
 Latest local checks passed: **609 Python tests with disposable PostgreSQL and no
-skips**, **23 release tests**, **78 frontend tests**, Ruff/mypy/ESLint/TypeScript,
+skips**, **23 release tests**, **91 frontend tests**, Ruff/mypy/ESLint/TypeScript,
 production frontend build and documentation links. Independent recorded acceptance
 verified the workspace URL-context and persistent save-feedback regressions.
 Unchanged core-flow evidence from `d36c9ed` covers HCL BLOCK → manual repair → SAFE,
@@ -42,7 +42,43 @@ session revocation and alternate-origin rejection. These fixtures are applicatio
 tests, not real OIDC acceptance. The browser pass did not repeat Docker or live
 provider acceptance; earlier package/container evidence retains its original scope.
 
-### HTTPS preview configuration and acceptance boundary
+### Local authenticated browser acceptance
+
+Recorded acceptance on `2c3ac72` passed using the separate localhost Desktop
+instance described in [local development](environment-development.md#parallel-desktop-demo).
+Actual demo sign-in created an owner identity; workspace and project creation,
+uploaded HCL analysis, persistence, History reopening and reload all passed.
+The original user's Desktop identity and workspace were preserved.
+
+The vulnerable comparison produced BLOCK, score 100 → 20 and one critical path.
+The reviewed SSH-only repair produced SAFE, score 100 → 100 and zero critical
+paths. JSON/Markdown and remediation-patch downloads worked; downloaded JSON
+matched the persisted reports. Free-plan SARIF remained gated. Both results
+remained accessible from History after reload, with unchanged BLOCK evidence.
+
+Isolated security checks returned 403 for missing/invalid CSRF, 401 for anonymous
+and logged-out reads, and 404 for another tenant's project/report. A separate
+101-project fixture verified pagination and off-page selection/reload in Analyze,
+History, Settings and GitHub integrations, including wrong-workspace exclusion.
+No browser page errors occurred; expected negative HTTP responses were retained
+as security evidence. This pass did not repeat exhaustive role, responsive,
+Docker, alternate-Origin or live-provider acceptance. Pagination retry/empty-page
+recovery is covered by frontend unit tests, not this browser recording.
+
+Recorded local identifiers (disposable demo data, not credentials):
+
+| Record | ID |
+| --- | --- |
+| Local E2E review workspace | `2d5af682-3592-4bb4-8d9d-bf07f863d004` |
+| Network boundary review project | `1fca4dbf-eefc-4c2c-9dd2-88117f0a7619` |
+| BLOCK analysis | `e05b6316-4750-4ec1-9812-f95a6d06aa73` |
+| SAFE analysis | `97524347-bfc8-465b-814f-dec48a79f017` |
+
+Recordings, the acceptance report, full screenshots, downloaded artifacts and
+sanitized validation results accompany the handoff in the
+[Devin session](https://app.devin.ai/sessions/43f88b66eb154704bcc13f7cabb8d478).
+
+### External HTTPS preview proxy limitation
 
 Local development retains the localhost default. Preview and production require
 an explicit HTTPS `BR_PUBLIC_URL`; the [separate preview profile](environment-preview.md)
@@ -51,7 +87,8 @@ cookies are Secure for HTTPS. Regression coverage includes exact/mismatched
 origins, forwarded-header spoofing, CSRF, authorization, logout, environment
 selection and migrations without modifying local configuration.
 
-Actual HTTPS preview acceptance is **blocked**, not passed. After Devin login,
+Actual HTTPS preview acceptance is **blocked by the environment/proxy**. Local
+application authentication passed as documented above. After Devin login,
 the browser and `/api/me` matched the configured preview origin, but a correlated
 sign-in diagnostic found the proxy replaced the browser's HTTPS Origin with
 `http://localhost` before delivery to the application. The existing strict check
@@ -60,7 +97,7 @@ confirmed at both ends; no secret values were recorded. The issue was reported
 to Cognition, and temporary instrumentation was removed.
 
 The requested authenticated workspace → project → analysis → persisted history
-flow remains unverified through that HTTPS proxy. Prior local acceptance and
+flow remains unverified through that HTTPS proxy. Local acceptance and
 passing API regressions do not substitute for it. Neither Origin checks nor
 authorization were weakened to accommodate the proxy.
 
@@ -97,8 +134,8 @@ authorization were weakened to accommodate the proxy.
 - Live AWS discovery, effective IAM evaluation, full network routing, Terraform
   execution, Azure/GCP/Kubernetes analysis, compliance certification.
 - Public share links, automatic Terraform patch application, PDF reports.
-- Browser project-list pagination beyond 100 projects; invitation/audit
-  pagination has no backend total and may show an empty final page.
+- Exact totals for project, invitation and audit pagination; a full last page
+  may expose an empty next page.
 
 ## KNOWN SECURITY / MODEL LIMITATIONS
 
