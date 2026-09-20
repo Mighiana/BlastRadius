@@ -8,6 +8,39 @@ MEDIUM finding that Alpine's scanner feed omits.
 
 ## Evidence and inventory
 
+### Integrated release reassessment
+
+The integrated implementation at `5be27d0` was rebuilt and rescanned after all
+backend/frontend/customer/operations contributions. The
+[integrated JSON ledger](https://app.devin.ai/attachments/0bb0f1ae-0dd6-4eac-bd84-1a3f3df6defc/ledger.json)
+and [Markdown inventory](https://app.devin.ai/attachments/f63bde6f-a8b8-48e8-b59e-af2339c8fc49/vulnerabilities.md)
+retain **673 unique rows**, all 428 supplied baseline rows, 245 rebuilt database
+rows and the separate zlib carried-forward finding. Counts and vendor
+assessments below remain unchanged. Raw integrated scans:
+[application](https://app.devin.ai/attachments/3906777f-7b3a-412c-a31d-1c2558c56e2c/app.json),
+[database](https://app.devin.ai/attachments/f3204b11-3df1-494a-acd9-b302330e6b06/database.json),
+[scanner provenance](https://app.devin.ai/attachments/542418c0-511f-4611-9920-0e0c7200ef4c/scanner.json).
+
+Integrated local image index digests (no registry publication):
+
+```text
+blastradius:local
+sha256:cd698f66ed62afe9713e12f677ad7e622fd5863bc685d8fb9d23636d286dab07
+blastradius-postgres:local
+sha256:890ea229acebe3df0619a79bd72251f1c7e82cee9ca5c40446415e2f6e06f09e
+```
+
+Both image builds/secret scans, repository secret scan and container smoke passed.
+Smoke reached migration `0004` from `0001`, verified idempotency/data-preserving
+restore, nine installed worker cases, binary psycopg, health/static assets,
+nonroot/read-only roots, absent build tools and exit-2 entrypoint failures.
+The unchanged promotion check **failed (make exit 2)** on the database
+HIGH/CRITICAL findings. Full integrated shell counts and the separately tested
+commercial retention/restore evidence are in [readiness](readiness.md).
+Final integrated browser acceptance remains pending.
+
+### Contributor evidence before integration
+
 The [complete JSON ledger](https://app.devin.ai/attachments/47fca95b-8838-4c32-a1a9-86247d2016aa/ledger.json)
 preserves all **428 supplied package-level rows** (152 app, 276 database), plus all
 245 rebuilt-image rows. No duplicates, lower severities, or UNKNOWN rows are
@@ -192,7 +225,7 @@ No ignore file, `--ignore-unfixed`, severity adjustment or policy change was add
 Future package/version changes invalidate the optional manual assessments
 automatically; re-review vendor evidence instead of extending a waiver.
 
-Verified: 999 Python tests passed/11 skipped; 30 release tests; Ruff/mypy; docs;
+Before integration: 999 Python tests passed/11 skipped; 30 release tests; Ruff/mypy; docs;
 94 frontend tests, lint, typecheck and production build; wheel integration;
 Python/npm dependency audits; both image builds, vulnerability/secret scans and unchanged promotion failure
 (`make` exit 2). Container smoke passed migration `0001` → current head `0003`,

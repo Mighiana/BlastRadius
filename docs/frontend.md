@@ -149,7 +149,7 @@ rotation races. No session, invitation or CSRF tokens use browser storage.
   only `{token}` in the acceptance POST body. It validates identity verification
   and blocks demo identities locally; server matching/expiry/single-use checks
   remain authoritative. Signed-out users sign in then reopen the original link.
-  There is no analytics or token persistence.
+  There is no browser analytics or token persistence.
 * **History:** GET `/api/projects/{id}/analyses` with `status`, `decision`,
   `input_type`, `branch` (candidate ref), epoch-second `since`/`until`, `limit`
   and `offset`. Dates are entered in browser local time then converted to epoch.
