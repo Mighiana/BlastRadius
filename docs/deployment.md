@@ -7,6 +7,14 @@ scan findings; a working local stack is not production security approval.
 The integrated application serves Vite assets and the API from one FastAPI
 process. No new public deployment, provider write or purchase has been performed.
 
+For phases 20–24 preparation, start with the
+[provider-neutral pattern comparison](deployment-patterns.md) and
+[owner acceptance checklist](owner-setup.md). The
+[domain/configuration worksheet](environment-production.md#domains-and-origins)
+keeps one exact HTTPS application origin even when marketing/docs use other hosts.
+The [disposable PostgreSQL drill](operations.md#local-postgresql-restore-drill)
+verifies local recovery without pointing tooling at an active database.
+
 ## Environments
 
 | Environment | Database | Identity | Payments | Network |
@@ -214,9 +222,10 @@ production privilege design.
 
 ## Health, proxy and rollout
 
-The image checks `/health/ready`: the database schema must match the application
-and all nine real-engine demo reports must be loaded. At the verified baseline the
-head is `0001`; later migrations must advance the readiness contract with the head.
+The image checks `/health/ready`: the database schema must match the packaged
+Alembic head, all nine real-engine demo reports must be loaded, the single-process
+service lease must be held and job persistence must not be degraded. Record the
+actual head from the release; do not copy a historical migration number.
 `/health/live` is liveness.
 Production host checks use the host from `BR_PUBLIC_URL` in the internal probe.
 
@@ -231,5 +240,6 @@ ingress or external OIDC provider was configured or validated in this local test
 Before public deployment: verify a clean build, PostgreSQL migration/restore,
 nonroot/read-only operation, TLS and auth failure modes, tenant isolation,
 quota/concurrency behavior, cancellation, retention and deletion. Record image
-digest and model version. Roll out a small controlled instance before scaling.
+digest and model version. Roll out one controlled instance; scaling requires a
+new durable queue/lease design and separate acceptance.
 Public deployment, billing activation and domains require separate owner approval.
