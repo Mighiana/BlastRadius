@@ -148,7 +148,7 @@ class BetaContact:
 
 
 def _secret_value(secrets: Mapping[str, object] | None, key: str) -> str | None:
-    if not secrets:
+    if secrets is None:
         return None
     try:
         value = secrets.get(key)

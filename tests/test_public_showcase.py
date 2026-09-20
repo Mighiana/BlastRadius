@@ -120,6 +120,8 @@ def test_navigation_to_beta_and_safe_demo():
     assert at.radio(key="page").value == "Beta access"
     text = _text(at)
     assert all(item in text for item in BETA_LOOKING_FOR)
+    assert "Contact us to join the beta" in text
+    assert "ANALYSIS INCOMPLETE" not in text
     at.radio(key="page").set_value("Pricing").run()
     at.button(key="pricing_free").click().run()
     assert at.radio(key="page").value == "Demo"
