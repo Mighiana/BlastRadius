@@ -65,7 +65,7 @@ PRICING = (
         "Enterprise",
         "Custom",
         "",
-        ("Custom repositories", "Custom analyses/month", "Custom history", "team access", "RBAC", "organization policies"),
+        ("Custom limits", "team access", "RBAC", "organization policies", "dedicated onboarding"),
         "Contact",
         "contact",
     ),
@@ -150,7 +150,10 @@ class BetaContact:
 def _secret_value(secrets: Mapping[str, object] | None, key: str) -> str | None:
     if not secrets:
         return None
-    value = secrets.get(key)
+    try:
+        value = secrets.get(key)
+    except Exception:
+        return None
     return value if isinstance(value, str) else None
 
 

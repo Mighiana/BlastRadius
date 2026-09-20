@@ -18,7 +18,6 @@ from typing import Dict, List, Tuple, cast
 import networkx as nx
 import streamlit as st
 import streamlit.components.v1 as components
-from lark.exceptions import LarkError
 
 from blastradius.graph import analyze, build_graph, compare
 from blastradius.graph.attack_paths import AnalysisResult
@@ -236,6 +235,8 @@ def analyze_dir(directory: Path, label: str) -> AnalysisResult:
     cache = st.session_state.setdefault("analysis_cache", {})
     key = (str(directory), fingerprint.hexdigest())
     if key not in cache:
+        if len(cache) >= 16:
+            cache.clear()
         cache[key] = analyze(build_graph(parse_directory(directory)), label)
     return cache[key]
 
@@ -429,6 +430,16 @@ def coverage_diagnostics(diff: GraphDiff) -> list[str]:
             )
             lines.append(f"{phase}: {item.code} — {location or 'unknown location'} — {item.message}")
     return lines[:100]
+
+
+def incomplete_banner() -> str:
+    return (
+        '<div class="br-decision br-dec-review"><div class="ic">⚠</div>'
+        '<div><div class="br-dec-label">MANUAL REVIEW REQUIRED</div>'
+        '<h1>ANALYSIS INCOMPLETE</h1>'
+        "<p>The selected input could not be analyzed. No SAFE result is produced "
+        "for incomplete analysis. Choose a bundled scenario to continue.</p></div></div>"
+    )
 
 
 def render_coverage_diagnostics(diff: GraphDiff) -> None:
@@ -801,6 +812,12 @@ BlastRadius uses a **simplified, intentionally incomplete** model of AWS reachab
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
+def learn_more_links() -> None:
+    st.markdown("### Learn more")
+    for label, path in DOC_LINKS:
+        st.markdown(f"[{esc(label)}]({doc_url(path)})")
+
+
 def sidebar() -> Tuple[Path, Path]:
     with st.sidebar:
         st.markdown("## Demo scenarios")
@@ -830,36 +847,30 @@ def sidebar() -> Tuple[Path, Path]:
                     "Public demo: bundled scenarios only. Analyze your own Terraform with "
                     "the CLI, GitHub Actions or the private-beta platform."
                 )
-            st.markdown("### Learn more")
-            for label, path in DOC_LINKS:
-                st.markdown(f"[{esc(label)}]({doc_url(path)})")
-            return Path(st.session_state.before_dir), Path(st.session_state.after_dir)
+        else:
+            with st.expander("Advanced: Analyze Git change"):
+                st.caption("Compare two refs of a local repository. Your working tree is untouched.")
+                repo = st.text_input("Repository directory", key="git_repo")
+                base = st.text_input("Base ref", key="git_base")
+                head = st.text_input("Candidate ref", key="git_head")
+                tf_dir = st.text_input("Terraform directory (optional)", key="git_dir")
+                if st.button("Analyze Git change", use_container_width=True, key="analyze_git"):
+                    _run_git_comparison(repo, base, head, tf_dir)
 
-        with st.expander("Advanced: Analyze Git change"):
-            st.caption("Compare two refs of a local repository. Your working tree is untouched.")
-            repo = st.text_input("Repository directory", key="git_repo")
-            base = st.text_input("Base ref", key="git_base")
-            head = st.text_input("Candidate ref", key="git_head")
-            tf_dir = st.text_input("Terraform directory (optional)", key="git_dir")
-            if st.button("Analyze Git change", use_container_width=True, key="analyze_git"):
-                _run_git_comparison(repo, base, head, tf_dir)
+            with st.expander("Advanced: Compare local directories"):
+                before_dir = st.text_input("BEFORE directory", key="before_dir")
+                after_dir = st.text_input("AFTER directory", key="after_dir")
+                if st.button("Re-analyze", use_container_width=True, key="reanalyze"):
+                    st.rerun()
 
-        with st.expander("Advanced: Compare local directories"):
-            before_dir = st.text_input("BEFORE directory", key="before_dir")
-            after_dir = st.text_input("AFTER directory", key="after_dir")
-            if st.button("Re-analyze", use_container_width=True, key="reanalyze"):
-                st.rerun()
+            st.divider()
+            st.caption(
+                "Static analysis only. No AWS credentials are read and nothing is deployed. "
+                "Simplified attack-path model - see Details."
+            )
+        learn_more_links()
 
-        st.divider()
-        st.caption(
-            "Static analysis only. No AWS credentials are read and nothing is deployed. "
-            "Simplified attack-path model - see Details."
-        )
-        st.markdown("### Learn more")
-        for label, path in DOC_LINKS:
-            st.markdown(f"[{esc(label)}]({doc_url(path)})")
-
-    return Path(before_dir), Path(after_dir)
+    return Path(st.session_state.before_dir), Path(st.session_state.after_dir)
 
 
 def _run_git_comparison(repo: str, base: str, head: str, tf_dir: str) -> None:
@@ -937,7 +948,6 @@ def _contact() -> BetaContact:
 def render_pricing() -> None:
     heading("Pricing")
     st.warning(PRICING_DISCLAIMER)
-    st.markdown(f"**{PRICING_DISCLAIMER}**")
     cards = []
     for tier in PRICING:
         features = "".join(f"<li>{esc(feature)}</li>" for feature in tier.features)
@@ -1183,30 +1193,11 @@ def main() -> None:
         render_app()
     except StorageError as error:
         st.error(markdown_text(error))
-    except (OSError, ValueError, LarkError) as error:
-        if trusted_local_enabled():
-            st.error(markdown_text(error))
-        else:
-            st.markdown(
-                '<div class="br-decision br-dec-review"><div class="ic">⚠</div>'
-                '<div><div class="br-dec-label">MANUAL REVIEW REQUIRED</div>'
-                '<h1>ANALYSIS INCOMPLETE</h1>'
-                "<p>The selected input could not be analyzed. No SAFE result is produced "
-                "for incomplete analysis. Choose a bundled scenario to continue.</p></div></div>",
-                unsafe_allow_html=True,
-            )
     except Exception as error:
         if trusted_local_enabled():
             st.error(markdown_text(error))
         else:
-            st.markdown(
-                '<div class="br-decision br-dec-review"><div class="ic">⚠</div>'
-                '<div><div class="br-dec-label">MANUAL REVIEW REQUIRED</div>'
-                '<h1>ANALYSIS INCOMPLETE</h1>'
-                "<p>The selected input could not be analyzed. No SAFE result is produced "
-                "for incomplete analysis. Choose a bundled scenario to continue.</p></div></div>",
-                unsafe_allow_html=True,
-            )
+            st.markdown(incomplete_banner(), unsafe_allow_html=True)
 
 
 if __name__ == "__main__":

@@ -63,10 +63,18 @@ def test_pricing_matches_platform_plan_catalog():
             assert plan.projects in numbers
             assert plan.analyses_per_month in numbers
             assert plan.retention_days in numbers
+        else:
+            assert tier.features == (
+                "Custom limits",
+                "team access",
+                "RBAC",
+                "organization policies",
+                "dedicated onboarding",
+            )
     at = _app()
     at.radio(key="page").set_value("Pricing").run()
     text = _text(at)
-    assert PRICING_DISCLAIMER in text
+    assert any(PRICING_DISCLAIMER in item.value for item in at.warning)
     assert "checkout" not in text.lower()
 
 
