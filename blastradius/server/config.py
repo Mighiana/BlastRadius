@@ -37,6 +37,7 @@ class Settings:
     auth_rate_limit: int = 15
     demo_rate_limit: int = 60
     auto_migrate: bool = True
+    lease_wait_seconds: int = 0
 
     @property
     def production(self) -> bool:
@@ -137,6 +138,8 @@ class Settings:
             < 1
         ):
             raise ValueError("Limits must be positive")
+        if not 0 <= self.lease_wait_seconds <= 600:
+            raise ValueError("BR_LEASE_WAIT_SECONDS must be between 0 and 600")
         if self.workers > self.max_jobs:
             raise ValueError("Workers cannot exceed job capacity")
 
@@ -144,9 +147,14 @@ class Settings:
     def from_env(cls) -> Settings:
         env = os.environ
         production = env.get("BR_ENV") == "production"
+        database_url = env.get("BR_DATABASE_URL", "sqlite:///./.blastradius/server.db")
+        for prefix in ("postgres://", "postgresql://"):
+            if database_url.startswith(prefix):
+                database_url = "postgresql+psycopg://" + database_url[len(prefix) :]
+                break
         settings = cls(
             environment=env.get("BR_ENV", "development"),
-            database_url=env.get("BR_DATABASE_URL", "sqlite:///./.blastradius/server.db"),
+            database_url=database_url,
             data_dir=Path(env.get("BR_DATA_DIR", ".blastradius")),
             static_dir=Path(env.get("BR_STATIC_DIR", "web/dist")),
             public_url=env.get(
@@ -185,6 +193,7 @@ class Settings:
             auth_rate_limit=int(env.get("BR_AUTH_RATE_LIMIT", "15")),
             demo_rate_limit=int(env.get("BR_DEMO_RATE_LIMIT", "60")),
             auto_migrate=env.get("BR_AUTO_MIGRATE", "false" if production else "true") == "true",
+            lease_wait_seconds=int(env.get("BR_LEASE_WAIT_SECONDS", "0")),
         )
         settings.validate()
         return settings

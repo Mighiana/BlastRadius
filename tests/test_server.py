@@ -217,6 +217,30 @@ def test_environment_origin_defaults_and_explicit_https(monkeypatch, environment
 
 
 @pytest.mark.parametrize(
+    ("database_url", "expected"),
+    [
+        ("postgres://user:pass@example/db", "postgresql+psycopg://user:pass@example/db"),
+        ("postgresql://user:pass@example/db", "postgresql+psycopg://user:pass@example/db"),
+        ("postgresql+psycopg://user:pass@example/db", "postgresql+psycopg://user:pass@example/db"),
+        ("sqlite:///./server.db", "sqlite:///./server.db"),
+    ],
+)
+def test_database_url_normalization(monkeypatch, database_url, expected):
+    for name in list(os.environ):
+        if name.startswith("BR_"):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("BR_DATABASE_URL", database_url)
+    assert Settings.from_env().database_url == expected
+
+
+@pytest.mark.parametrize("value", ["601", "-1"])
+def test_lease_wait_seconds_must_be_bounded(monkeypatch, value):
+    monkeypatch.setenv("BR_LEASE_WAIT_SECONDS", value)
+    with pytest.raises(ValueError, match="BR_LEASE_WAIT_SECONDS"):
+        Settings.from_env()
+
+
+@pytest.mark.parametrize(
     "origin",
     [
         "https://*.preview.devinapps.com",
