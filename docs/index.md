@@ -36,7 +36,7 @@ separates verified implementation, external configuration and launch blockers.
 [Test environment](environment-test.md) · [Production environment](environment-production.md) ·
 [Contributor guide](../CONTRIBUTING.md) · [Roadmap](roadmap.md)
 
-The [guided demo](demo.md) and [legacy Streamlit guide](legacy-demo.md) remain
+The [guided demo](demo.md) and [public Streamlit demo guide](legacy-demo.md) remain
 separate from the private application. The [GitHub App design](github-app-design.md)
 records historical design context; [github.md](github.md) is authoritative.
 

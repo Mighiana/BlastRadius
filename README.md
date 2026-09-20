@@ -14,8 +14,9 @@ policies and GitHub PR checks around the existing Python engine.
 [GitHub App](docs/github.md) · [Actions](docs/github-actions.md) ·
 [Readiness and launch blockers](docs/readiness.md)
 
-The [public Streamlit demo](https://blastradius.streamlit.app/) is a separate
-legacy deployment. No new public deployment is claimed.
+The [public Streamlit demo](https://blastradius.streamlit.app/) is the public
+interactive demo of the analyzer. The multi-user platform is currently in
+private beta.
 
 ## Quickstart
 
@@ -54,7 +55,7 @@ See [plans](docs/billing.md) and [future billing](docs/billing-future.md).
   sessions, trusted policies and plan usage.
 - Connect an operator-verified GitHub App installation for persistent PR
   analysis, stale-commit checks and app-owned checks/comments.
-- Keep using the independent CLI, trusted Actions workflow and legacy demo.
+- Keep using the independent CLI, trusted Actions workflow and public demo.
 
 Some capabilities require plan entitlements or operator/provider configuration.
 [Readiness](docs/readiness.md) distinguishes implementation from external
