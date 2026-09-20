@@ -4,7 +4,7 @@ import hashlib
 import secrets
 import time
 
-from authlib.integrations.starlette_client import OAuth
+from authlib.integrations.starlette_client import OAuth, StarletteOAuth2App
 from fastapi import HTTPException, Request, Response
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -17,11 +17,19 @@ from blastradius.server.schemas import email_identity
 COOKIE = "br_session"
 
 
+class OIDCClient(StarletteOAuth2App):
+    async def fetch_access_token(self, redirect_uri: str | None = None, **kwargs: object) -> dict:
+        token = await super().fetch_access_token(redirect_uri=redirect_uri, **kwargs)
+        token.pop("userinfo", None)
+        return token
+
+
 def oauth_client(settings: Settings) -> OAuth:
     oauth = OAuth()
     if settings.auth_mode == "oidc":
         oauth.register(
             name="oidc",
+            client_cls=OIDCClient,
             client_id=settings.oidc_client_id,
             client_secret=settings.oidc_client_secret,
             server_metadata_url=settings.oidc_issuer.rstrip("/")

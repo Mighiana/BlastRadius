@@ -500,6 +500,56 @@ def test_signed_oidc_callback_is_required_for_operator_capability(operator_clien
             assert me["user"]["id"] == user_id
 
 
+def test_oidc_token_response_cannot_supply_unsigned_operator_claims(operator_client):
+    client, app, _ = operator_client
+    client.cookies.clear()
+    configured = app.state.settings
+    authorization = {}
+
+    def provider(request):
+        if request.url.path == "/.well-known/openid-configuration":
+            return httpx.Response(
+                200,
+                json={
+                    "issuer": configured.oidc_issuer,
+                    "authorization_endpoint": configured.oidc_issuer + "/authorize",
+                    "token_endpoint": configured.oidc_issuer + "/token",
+                    "jwks_uri": configured.oidc_issuer + "/keys",
+                    "id_token_signing_alg_values_supported": ["RS256"],
+                },
+            )
+        assert request.url.path == "/token"
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "unused-local-token",
+                "token_type": "Bearer",
+                "userinfo": {
+                    "iss": configured.oidc_issuer,
+                    "sub": "operator",
+                    "aud": "test",
+                    "nonce": authorization["nonce"][0],
+                    "email": "operator@example.test",
+                    "email_verified": True,
+                },
+            },
+        )
+
+    app.state.oauth.create_client("oidc").client_kwargs["transport"] = httpx.MockTransport(provider)
+    response = client.get("/api/auth/login", follow_redirects=False)
+    authorization.update(parse_qs(urlsplit(response.headers["location"]).query))
+    response = client.get(
+        "/api/auth/callback",
+        params={"code": "local-code", "state": authorization["state"][0]},
+        follow_redirects=False,
+    )
+    assert response.status_code == 400
+    me = client.get("/api/me").json()
+    assert not me["authenticated"]
+    assert not me["capabilities"]["platform_admin"]
+    assert client.get("/api/admin/users").status_code == 401
+
+
 def test_event_allowlist_atomic_finish_retry_and_failure_never_safe(
     backend_client, demo_results, monkeypatch
 ):
