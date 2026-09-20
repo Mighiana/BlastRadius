@@ -11,8 +11,11 @@ def test_render_blueprint_has_production_single_instance_contract():
     service = blueprint["services"][0]
     values = {item["key"]: item for item in service["envVars"]}
 
+    assert service["plan"] == "free"
     assert service["numInstances"] == 1
     assert service["healthCheckPath"] == "/health/live"
+    assert service["dockerCommand"] == "sh /app/scripts/container-entrypoint.sh migrate-serve"
+    assert "preDeployCommand" not in service
     assert values["BR_ENV"]["value"] == "production"
     assert values["BR_AUTH_MODE"]["value"] == "oidc"
     assert values["BR_AUTO_MIGRATE"]["value"] == "false"
@@ -28,6 +31,7 @@ def test_render_blueprint_has_production_single_instance_contract():
         assert "value" not in item or not any(
             marker in str(item["value"]).lower() for marker in ("password", "secret", "token")
         )
+    assert blueprint["databases"][0]["plan"] == "free"
 
 
 def test_container_entrypoint_opts_into_proxy_headers_only_for_render():
@@ -38,3 +42,6 @@ def test_container_entrypoint_opts_into_proxy_headers_only_for_render():
     assert "--no-proxy-headers" in entrypoint
     assert '  sh)' in entrypoint
     assert '[ "${1:-}" = "/app/scripts/container-entrypoint.sh" ] && shift' in entrypoint
+    assert "  migrate-serve)" in entrypoint
+    assert "run_migrations" in entrypoint
+    assert "serve_app" in entrypoint

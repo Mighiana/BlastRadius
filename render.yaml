@@ -2,12 +2,12 @@ services:
   - type: web
     name: blastradius
     runtime: docker
-    plan: starter
+    plan: free
     region: frankfurt
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /health/live
-    preDeployCommand: sh /app/scripts/container-entrypoint.sh migrate
+    dockerCommand: sh /app/scripts/container-entrypoint.sh migrate-serve
     numInstances: 1
     autoDeploy: true
     envVars:
@@ -45,7 +45,7 @@ services:
         sync: false
 databases:
   - name: blastradius-db
-    plan: basic-256mb
+    plan: free
     region: frankfurt
     databaseName: blastradius
     user: blastradius

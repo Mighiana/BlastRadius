@@ -4,9 +4,9 @@ This guide deploys the integrated FastAPI and React service with a Render-manage
 PostgreSQL database. The repository's root `render.yaml` is the Blueprint for
 this deployment.
 
-The migration pre-deploy command is accepted whether Render preserves the
-Docker entrypoint or invokes `sh /app/scripts/container-entrypoint.sh migrate`
-directly.
+The free-tier container command invokes
+`sh /app/scripts/container-entrypoint.sh migrate-serve`, which runs migrations
+before starting the web process.
 
 ## Create the Render resources
 
@@ -45,9 +45,10 @@ instructions before production use.
 
 ## Deploy and verify
 
-Deploy the Blueprint after configuring the environment. The pre-deploy command
-runs the packaged migrations, while the web process keeps
-`BR_AUTO_MIGRATE=false`. Verify:
+Deploy the Blueprint after configuring the environment. The `migrate-serve`
+container command runs the packaged migrations first and only starts the web
+process after they succeed. `BR_AUTO_MIGRATE=false` remains set because the
+explicit migration step is separate from the serving process. Verify:
 
 ```text
 https://<service>.onrender.com/health/live
@@ -83,10 +84,33 @@ instances require a separate architecture and review.
 
 ## Cost and known caveats
 
-Approximate monthly costs for the Blueprint are a Starter web service at about
-$7/month and Basic-256mb PostgreSQL at about $6/month. The free PostgreSQL
-option is not used because it expires after 30 days. Prices and plan behavior
-are provider-controlled; verify the current Render pricing before provisioning.
+The default Blueprint costs $0 on Render's free tiers. The free web service
+sleeps after 15 minutes of inactivity and has an approximately 50-second cold
+start, so it is suitable for a demo rather than latency-sensitive production
+traffic. The free PostgreSQL database is deleted 30 days after creation unless
+it is upgraded; the owner must upgrade it or export the data before that
+deadline. Prices and plan behavior are provider-controlled; verify the current
+Render limits and lifecycle terms before provisioning.
+
+## Upgrading later
+
+For a continuously available service, upgrade the web service and database and
+move migrations back to a separate pre-deploy command:
+
+```yaml
+services:
+  - type: web
+    name: blastradius
+    plan: starter
+    preDeployCommand: sh /app/scripts/container-entrypoint.sh migrate
+databases:
+  - name: blastradius-db
+    plan: basic-256mb
+```
+
+With that variant, remove `dockerCommand` or restore the normal `serve` command
+so migrations are not run on every serving-container start. Keep
+`BR_AUTO_MIGRATE=false`.
 
 The Render-managed internal database connection supplied by the Blueprint is not
 configured as `sslmode=verify-full`. This is a known gap compared with
