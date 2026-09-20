@@ -11,6 +11,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
 
 permissions:
   contents: read
@@ -169,10 +170,10 @@ jobs:
         working-directory: trusted
         run: |
           set +e
-          python -m blastradius.cli --repo . --base "$BASE_SHA" --head "$HEAD_SHA" --terraform-dir "$TERRAFORM_DIR" --format pr > ../blastradius-report.md
+          python -m blastradius.cli --repo . --base "$BASE_SHA" --head "$HEAD_SHA" --terraform-dir "$TERRAFORM_DIR" --fail-on-review --format pr > ../blastradius-report.md
           code=$?
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
-          python -m blastradius.cli --repo . --base "$BASE_SHA" --head "$HEAD_SHA" --terraform-dir "$TERRAFORM_DIR" --format sarif > ../blastradius.sarif
+          python -m blastradius.cli --repo . --base "$BASE_SHA" --head "$HEAD_SHA" --terraform-dir "$TERRAFORM_DIR" --fail-on-review --format sarif > ../blastradius.sarif
           cat ../blastradius-report.md >> "$GITHUB_STEP_SUMMARY"
           exit 0
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

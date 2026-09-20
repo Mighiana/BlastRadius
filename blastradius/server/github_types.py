@@ -74,7 +74,7 @@ class Pull(ProviderModel):
 
 
 class PullEvent(ProviderModel):
-    action: Literal["opened", "synchronize", "reopened"]
+    action: Literal["opened", "synchronize", "reopened", "edited"]
     number: Id
     installation: Identity
     repository: Identity

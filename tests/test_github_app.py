@@ -301,6 +301,49 @@ def run_record(app):
         return session.scalar(select(GitHubRun))
 
 
+@pytest.mark.parametrize("response", [{"result": {}}, [], None])
+def test_malformed_worker_response_finishes_run(harness, monkeypatch, response):
+    app, client, provider, _, _ = harness
+    monkeypatch.setattr("blastradius.server.github_service.execute", lambda *_: response)
+    assert send(harness).status_code == 202
+    drain(app)
+    run = run_record(app)
+    job = client.get(f"/api/analyses/{run.analysis_id}").json()
+    assert job["status"] == "failed" and job["result"] is None and job["decision"] is None
+    assert job["error"] == "invalid_worker_result"
+    assert run.status == "published"
+    assert provider.checks[0]["conclusion"] == "failure"
+    assert "SAFE TO MERGE" not in provider.comments[0]["body"]
+    assert client.get(f"/api/analyses/{run.analysis_id}/report").status_code == 409
+    assert client.get(f"/api/analyses/{run.analysis_id}/artifacts").json()["artifacts"] == []
+    with app.state.db.session() as session:
+        assert session.get(GitHubDelivery, "delivery-1").status == "handled"
+
+
+def test_base_retarget_with_unchanged_head_recomputes_result(harness):
+    app, _, provider, _, _ = harness
+    provider.files[BASE] = provider.files[HEAD]
+    assert send(harness).json() == {"status": "queued"}
+    drain(app)
+    assert provider.checks[-1]["conclusion"] == "success"
+    new_base = "c" * 40
+    provider.pull["base"].update(sha=new_base, ref="release")
+    provider.files[new_base] = (ROOT / "examples/safe/main.tf").read_bytes()
+    event = provider.event("edited")
+    event["changes"] = {"base": {"ref": {"from": "main"}, "sha": {"from": BASE}}}
+    assert send(harness, event, delivery="retarget").json() == {"status": "queued"}
+    drain(app)
+    assert provider.checks[-1]["head_sha"] == HEAD
+    assert provider.checks[-1]["conclusion"] == "failure"
+    assert "BLOCK CHANGE" in provider.comments[0]["body"]
+    with app.state.db.session() as session:
+        assert session.scalar(select(func.count()).select_from(Analysis)) == 2
+        assert session.scalar(select(func.count()).select_from(GitHubRun)) == 2
+    requests = len(provider.requests)
+    assert send(harness, event, delivery="retarget-replay").json() == {"status": "duplicate"}
+    assert len(provider.requests) == requests
+
+
 def test_pr_to_real_isolated_analysis_check_comment_and_replay(harness, caplog):
     app, client, provider, project, _ = harness
     assert send(harness).json() == {"status": "queued"}

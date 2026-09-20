@@ -232,9 +232,26 @@ No webhook payload is retained for autonomous replay. Security deduplication
 hashes and publication tombstones remain stored; there is no automatic age purge
 of GitHub delivery rows or old run metadata. Current retention gates all report
 reads and run status visibility, and normal operator cleanup removes evidence.
-Redelivery retries publication of an existing run; it does not rerun an already
-failed analysis or refund quota. Changed commits, root, policy or model version
-produce a new analysis identity.
+Redelivery retries publication of an existing retryable delivery; an already
+handled body remains a duplicate, even under a new delivery ID. It does not rerun
+an already failed analysis or refund quota. Authenticated pull-request `edited`
+events are revalidated against GitHub and base retargets produce a new analysis,
+including when the head is unchanged. Unchanged edits reuse the existing run.
+
+After a workspace policy, Terraform root or model change, require a new head
+commit and its fresh completed check before merging. Changing configuration alone
+does not refresh existing checks; replaying the original body cannot do so.
+There is no authorized refresh endpoint. Keep merges paused until that new-head
+check completes. Same-head required-check behavior after base retargeting still
+needs real GitHub acceptance; local provider mocks do not establish hosted merge
+behavior.
+
+The example and repository Actions gates also run on PR edits and use
+`--fail-on-review`: REVIEW and BLOCK both fail the gate. Historical hosted green
+checks documented before this change are not evidence of complete SAFE analysis
+under the current model. The immutable example analyzer pin supports the flag;
+hosted acceptance of this stricter gate
+remains a release-owner action.
 
 The integration currently supports GitHub.com, one explicit Terraform root,
 one repository per project and an operator-managed installation process.

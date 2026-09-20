@@ -290,7 +290,7 @@ def github_router(db: Database, settings: Settings, service: GitHubService) -> A
                 obj = json.loads(raw)
                 if not isinstance(obj, dict):
                     raise ValueError
-                if obj.get("action") in ("opened", "synchronize", "reopened"):
+                if obj.get("action") in ("opened", "synchronize", "reopened", "edited"):
                     payload = PullEvent.model_validate(obj)
             elif event in ("installation", "installation_repositories"):
                 payload = LifecycleEvent.model_validate_json(raw)

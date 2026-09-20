@@ -7,7 +7,7 @@
 #        -> checkout (full history, so the base ref exists locally)
 #        -> BlastRadius compares base vs PR head
 #        -> attack-path analysis
-#        -> exit 0 = no blocking modeled findings, exit 1 = blocked
+#        -> exit 0 = SAFE TO MERGE, exit 1 = BLOCK CHANGE or REVIEW REQUIRED
 #        -> the check passes or fails, with artifacts and a best-effort PR comment
 #
 # No AWS account, credentials or cloud access is required: the analysis is
@@ -16,7 +16,7 @@ name: BlastRadius
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
 
 permissions:
   contents: read
@@ -90,7 +90,7 @@ jobs:
           set +e
           "$RUNNER_TEMP/blastradius-env/bin/python" -I -m blastradius.cli \
             --github-action --repo "$GITHUB_WORKSPACE/terraform-repo" \
-            --terraform-dir "$TERRAFORM_DIR" --format summary \
+            --terraform-dir "$TERRAFORM_DIR" --format summary --fail-on-review \
             --report-dir "$RUNNER_TEMP/blastradius-reports" \
             --github-output "$GITHUB_OUTPUT" --github-summary "$GITHUB_STEP_SUMMARY"
           code=$?

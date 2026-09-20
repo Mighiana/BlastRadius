@@ -2,7 +2,7 @@ name: BlastRadius Hosted Acceptance
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
 
 permissions:
   contents: read
@@ -62,7 +62,7 @@ jobs:
           set +e
           "$RUNNER_TEMP/blastradius-env/bin/python" -I -m blastradius.cli \
             --github-action --repo "$GITHUB_WORKSPACE/terraform-repo" \
-            --terraform-dir examples/hosted-pr --format summary \
+            --terraform-dir examples/hosted-pr --format summary --fail-on-review \
             --report-dir "$RUNNER_TEMP/blastradius-reports" \
             --github-output "$GITHUB_OUTPUT" --github-summary "$GITHUB_STEP_SUMMARY"
           code=$?
