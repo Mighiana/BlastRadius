@@ -5,9 +5,9 @@ blocked. Local shell verification of the integrated commercial-beta implementati
 passed; final browser/responsive acceptance on this implementation is **pending**
 and owned by the parent session. This is not a security certification.
 
-Integrated implementation revision: `5be27d0` on
-`devin/1789903228-saas-verification`; subsequent changes to this assessment and
-the container evidence document do not change runtime code.
+Defensive security revision: `abfe328` on
+`devin/1789903228-saas-verification`, following integrated head `5cc9257`.
+This revision hardens OIDC claim provenance and restores beta/operator deep links.
 The existing [draft PR #3](https://github.com/Mighiana/BlastRadius/pull/3) remains
 unmerged. PR #2 was previously merged outside this integration stage. No new PR,
 merge, force push, provider provisioning, payment activation or public deployment
@@ -28,7 +28,7 @@ changes require acceptance again; prior browser evidence below is historical.
 | RBAC / tenant isolation | Authorization matrix and beta/feedback/operator regressions pass in full backend suite; workspace ownership does not grant platform access |
 | Fail-closed analysis | Engine/worker/restart regressions pass; errors/incomplete results never become SAFE; SAFE means “No new modeled blocking findings detected.” |
 | Container security | Promotion blocked: database 1 CRITICAL / 54 HIGH; app reports zero but retains assessed zlib MEDIUM risk; [full inventory](container-security.md) |
-| CI | First integrated push `5be27d0`: 2 passed, 4 pending, 1 skipped when inspected. Final documentation push requires its own CI result; local promotion check is deliberately red |
+| CI | Historical integrated push `5be27d0`: 2 passed, 4 pending, 1 skipped when inspected. Final security/evidence push requires its own CI result; local promotion check is deliberately red |
 | Responsive / browser | **0 browser cases executed in this integration stage**; 29 collected (19 existing + 10 new). Six requested widths and new beta/feedback/operator flows await parent acceptance |
 | Onboarding | Demo/HCL/plan choices, result guidance, beta/pricing/trust wording implemented; 141 frontend unit tests pass; browser usability and time-to-value not measured here |
 | Beta access | Persisted consent-based intake, strict schema, exact Origin/CSRF, bounded storage/rate limits and privacy notice verified by API/unit tests; no invitation/email promise |
@@ -43,12 +43,53 @@ changes require acceptance again; prior browser evidence below is historical.
 | Backups / restore | Disposable logical dump/restore matches schema/data, preserves source/usage and verifies bounded deletion/cascades; encrypted off-host backup/PITR and disaster recovery remain unverified |
 | Monitoring | Health/readiness, bounded logs and alert/scheduling runbooks exist; delivery of real alarms and deployed schedules not verified |
 | Legal / trust | Explicit static-analysis/model/retention boundaries and synthetic customer materials exist; legal entity, contacts, terms/subprocessors and beta approval remain owner work |
-| Test counts | 1,140 backend/engine; 42 release with opt-in Docker drill; 141 frontend; 5 additional isolated-wheel CLI cases; 9 container worker cases; 0 new browser executions |
-| Commits pushed / PR #3 | Contributor integration and recovery/docs glue pushed through `5be27d0`; [delivery branch](https://github.com/Mighiana/BlastRadius/tree/devin/1789903228-saas-verification) carries the later evidence-only commit. PR #3 remains draft/unmerged |
+| Test counts | 1,144 backend/engine; 42 release with opt-in Docker drill; 141 frontend; 5 additional isolated-wheel CLI cases; 9 container worker cases; 0 new browser executions |
+| Delivery / PR #3 | Consume the [delivery branch](https://github.com/Mighiana/BlastRadius/tree/devin/1789903228-saas-verification) directly; `abfe328` includes all prior integrated changes plus security fixes. PR #3 remains draft/unmerged |
 
 ## IMPLEMENTED AND VERIFIED
 
-### Measured verification
+### Defensive security reassessment
+
+The final defensive review at `abfe328` found and fixed two issues:
+
+* An OIDC token response could supply plain `userinfo` without an ID token.
+  Authlib only replaces that field when it parses an ID token; the callback had
+  treated the supplied claims as verified. The registered client now discards
+  token-response `userinfo` before Authlib's signed-token validation. This is a
+  claim-provenance boundary defect, not evidence of an attacker controlling the
+  configured provider or TLS. The negative test reproduced HTTP 303 before the
+  fix and now requires HTTP 400, no authenticated user or platform capability,
+  and HTTP 401 from the operator API. Valid signed callbacks still pass.
+* Direct GET/HEAD navigation to `/beta` and `/operator` returned 404. Both now
+  use the exact SPA shell allowlist; POST remains 405 and API-like paths remain
+  404. No operator data is embedded in that anonymous shell.
+
+Complete shell verification after both fixes passed: **1,144 backend/engine
+tests, zero skipped, 160.43s**, including disposable PostgreSQL 16.15;
+**42 release tests, zero skipped, 10.59s** with `BR_RUN_OPS_DRILL=1`;
+**141 frontend tests across 10 files**, ESLint, TypeScript and Vite build;
+Ruff/mypy/docs; dependency audits; wheel/content verification and fresh isolated
+server-only wheel installation. The wheel reached migration `0004` twice with
+one commercial-lock row and readiness true. Five isolated CLI cases preserved
+exits **1/0/0/1/2** with parseable JSON/SARIF.
+
+Both runtime images were rebuilt and checked again for migrations, idempotency,
+data-preserving dump/restore, nine installed-worker cases, binary psycopg,
+health/static assets, nonroot/read-only roots, preserved package metadata,
+absent build tools and exit-2 entrypoint errors. Image/repository secret checks
+passed. New vulnerability scans retain database **1 CRITICAL / 54 HIGH / 80
+MEDIUM / 104 LOW / 6 UNKNOWN**; the application reports zero but retains the
+documented zlib residual. The unchanged promotion gate failed with **make exit
+2**. No suppression or severity adjustment was added.
+
+The [security shell evidence](https://app.devin.ai/attachments/48613f5e-db67-4065-86e4-c2cac80db482/security-shell-evidence.tar.gz)
+contains check/build/audit logs and raw scans, excluding databases, environment
+files and installed environments. Current image digests and scanner provenance
+are in [container security](container-security.md#defensive-security-reassessment).
+One Starlette/httpx deprecation warning remains. No browser or hosted-provider
+actions were run; the parent must accept the new auth and deep-link behavior.
+
+### Prior integrated verification
 
 These are integrated shell results at `5be27d0`, not the historical browser run.
 

@@ -8,6 +8,37 @@ MEDIUM finding that Alpine's scanner feed omits.
 
 ## Evidence and inventory
 
+### Defensive security reassessment
+
+Runtime revision `abfe328` adds the OIDC claim-provenance fix and beta/operator
+deep links after the prior integrated head `5cc9257`. Both images were rebuilt
+and rescanned with Trivy 0.74.0 and the same database update timestamp above.
+Raw current scans:
+[application](https://app.devin.ai/attachments/f7a73168-55f2-4d78-9519-ca8977649499/app.json),
+[database](https://app.devin.ai/attachments/9ab00555-74ab-4264-9f69-b9800328228a/database.json),
+[scanner provenance](https://app.devin.ai/attachments/4936ae52-3584-41f6-ae86-64f27b003881/scanner.json).
+The [security shell evidence](https://app.devin.ai/attachments/48613f5e-db67-4065-86e4-c2cac80db482/security-shell-evidence.tar.gz)
+includes builds, container checks, repository/image secret scans and the
+unchanged promotion failure (make exit 2).
+
+Current local Linux amd64 image index digests (not published):
+
+```text
+blastradius:local
+sha256:41a5bcccbf6fcb9c64032f69ce758f9836a82ee5afeb0888d34d891c19888785
+blastradius-postgres:local
+sha256:a5b7f4a9f4305aa2affb350705551a6adae2e607351e27f11f84c3fc911b987e
+```
+
+Counts remain database **1 CRITICAL / 54 HIGH / 80 MEDIUM / 104 LOW / 6 UNKNOWN**,
+application scanner-reported **0**. The separate zlib MEDIUM residual remains;
+no feed silence is interpreted as a fix. Prior ledgers, source advisories and
+supplied baseline findings below are retained. Runtime metadata, nonroot
+operation, read-only roots, restore/migration behavior, psycopg binary support,
+nine installed-worker cases and entrypoint failure behavior all passed again.
+No Dockerfile, dependency, runtime policy or scanner suppression changed.
+Promotion remains blocked; final browser/hosted acceptance is still pending.
+
 ### Integrated release reassessment
 
 The integrated implementation at `5be27d0` was rebuilt and rescanned after all
