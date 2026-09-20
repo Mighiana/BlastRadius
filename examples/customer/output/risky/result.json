@@ -1,0 +1,107 @@
+{
+  "decision": "BLOCK CHANGE",
+  "analysis_complete": true,
+  "analysis": {
+    "before": {
+      "complete": true,
+      "paths_truncated": false,
+      "path_work": 0
+    },
+    "after": {
+      "complete": true,
+      "paths_truncated": false,
+      "path_work": 10
+    }
+  },
+  "coverage_diagnostics": [],
+  "edge_evidence": [
+    {
+      "source": "INTERNET",
+      "target": "aws_security_group.web",
+      "relationship": "INGRESS_ALLOWS",
+      "reason": "Security group allows 0.0.0.0/0 on port 22 (SSH)",
+      "risk": "CRITICAL",
+      "terraform_resource": "aws_security_group.web",
+      "evidence": "ingress { protocol = \"tcp\", from_port = 22, to_port = 22, cidr_blocks = [\"0.0.0.0/0\"] }",
+      "metadata": {
+        "cidr": "0.0.0.0/0",
+        "from_port": 22,
+        "to_port": 22,
+        "protocol": "tcp",
+        "admin_port": true
+      },
+      "confidence": "modeled",
+      "category": "exposure",
+      "source_file": "main.tf",
+      "remediation": "Restrict ingress to intended CIDRs and ports."
+    }
+  ],
+  "passed": false,
+  "policy_notes": [
+    "New critical attack paths are prohibited",
+    "New sensitive resource exposure is prohibited",
+    "New public administrative ingress (SSH/RDP/all ports) is prohibited"
+  ],
+  "verdict": "SECURITY REGRESSION",
+  "score": {
+    "before": 100,
+    "after": 20,
+    "delta": -80
+  },
+  "risk_level": {
+    "before": "LOW",
+    "after": "CRITICAL"
+  },
+  "new_critical_paths": [
+    [
+      "Internet",
+      "Sample Web",
+      "Web Server",
+      "Sample App",
+      "Blastradius Synthetic Customer Data",
+      "Sensitive Data"
+    ]
+  ],
+  "removed_critical_paths": [],
+  "newly_exposed": [
+    "aws_iam_role.app",
+    "aws_instance.web_server",
+    "aws_s3_bucket.customer_data"
+  ],
+  "newly_reachable_sensitive": [
+    "aws_s3_bucket.customer_data"
+  ],
+  "reasons": [
+    {
+      "label": "New critical attack paths",
+      "detail": "1 new path from the internet to data marked sensitive",
+      "delta": 1,
+      "severity": "CRITICAL"
+    },
+    {
+      "label": "Newly reachable sensitive resources",
+      "detail": "aws_s3_bucket.customer_data",
+      "delta": 1,
+      "severity": "CRITICAL"
+    },
+    {
+      "label": "Newly internet-reachable resources",
+      "detail": "aws_iam_role.app, aws_instance.web_server, aws_s3_bucket.customer_data",
+      "delta": 3,
+      "severity": "HIGH"
+    },
+    {
+      "label": "Security score delta",
+      "detail": "Score dropped by 80 points",
+      "delta": 80,
+      "severity": "MEDIUM"
+    }
+  ],
+  "security_score_before": 100,
+  "security_score_after": 20,
+  "critical_paths_added": 1,
+  "sensitive_resources_added": 1,
+  "exit_code": 1,
+  "diagnostics": [],
+  "unsupported_resource_types": []
+}

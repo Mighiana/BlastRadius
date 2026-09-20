@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "BlastRadius",
+          "version": "0.1.0",
+          "rules": [
+            {
+              "id": "BR001",
+              "name": "NewCriticalAttackPath",
+              "shortDescription": {
+                "text": "New internet-to-sensitive-data attack path"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "security-severity": "9.0"
+              }
+            },
+            {
+              "id": "BR002",
+              "name": "NewInternetExposure",
+              "shortDescription": {
+                "text": "New internet-facing attack path"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "security-severity": "6.0"
+              }
+            },
+            {
+              "id": "BR003",
+              "name": "PolicyGateViolation",
+              "shortDescription": {
+                "text": "Repository security policy blocks this change"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "BR004",
+              "name": "IncompleteAnalysis",
+              "shortDescription": {
+                "text": "Static analysis coverage diagnostic"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            }
+          ]
+        }
+      },
+      "results": [],
+      "invocations": [
+        {
+          "executionSuccessful": true
+        }
+      ],
+      "properties": {
+        "decision": "SAFE TO MERGE",
+        "analysisComplete": true,
+        "pathsTruncated": false,
+        "unsupportedResourceTypes": []
+      }
+    }
+  ]
+}
