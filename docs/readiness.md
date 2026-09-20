@@ -1,6 +1,6 @@
 # Commercial-beta readiness
 
-Assessment: 2026-09-19, integration of frontend
+Assessment updated: 2026-09-20, browser acceptance of `ce77f98`, following integration of frontend
 `36df10877fd9a1d141805f7a7d160acfa4f61b8e` and operations
 `6364e1f7fb2b2553a93272ae276a31fb28ea898c`.
 This assessment supersedes the earlier sandbox-billing/12-browser-test snapshot.
@@ -19,13 +19,27 @@ It does not certify public production operation or cloud security.
 | Evidence/history | Findings, path hops, provenance, summaries, filtered/paginated retained history; JSON/Markdown and plan-gated SARIF including nested exports |
 | Plans/usage | Singular backend catalog, UTC monthly reservations, active project and invitation/member limits, read-time retention, audited local operator grants |
 | GitHub | Tenant installation mappings, signed/idempotent events, bounded file snapshots, quota, policy, PR freshness, app-owned publication; mocked GitHub API with real worker |
-| Browser implementation | Lifecycle pages, graph controls, responsive CSS, API-backed plans, Zod schemas, trust templates; unit/lint/type/build checks. No browser acceptance claim for this integration |
+| Browser acceptance | 18/18 cases on `ce77f98`; 90 inspected geometry states across seven widths, including mobile menus, graph/evidence and lifecycle pages; local invitation/role/session fixtures and actual origin rejection |
 | Compatibility | Original one-line fixture, demo, CLI exit/report, trusted Actions and legacy functional tests retained |
 | Payment removal | No payment SDK or active checkout/portal/payment-webhook routes; hostile legacy environment flags cannot activate payments |
 
 Exact commands, installed-package/container checks and downstream acceptance
 instructions are in [release integration](release-integration.md).
 Provider-mocked tests do not establish real external service behavior.
+
+Final local checks passed: **579 Python tests with disposable PostgreSQL and no
+skips**, **22 release tests**, **78 frontend tests**, Ruff/mypy/ESLint/TypeScript,
+production frontend build and documentation links. Independent recorded acceptance
+verified the workspace URL-context and persistent save-feedback regressions.
+Unchanged core-flow evidence from `d36c9ed` covers HCL BLOCK → manual repair → SAFE,
+plan analysis, exports, quota/archive lifecycle and policy effects on future
+analyses while historical reports remain unchanged.
+
+Supplemental issued-session fixtures verified email-bound single-use invitations,
+role controls and denied viewer mutations, protected ownership, individual/global
+session revocation and alternate-origin rejection. These fixtures are application
+tests, not real OIDC acceptance. The browser pass did not repeat Docker or live
+provider acceptance; earlier package/container evidence retains its original scope.
 
 ## IMPLEMENTED BUT REQUIRES EXTERNAL CONFIGURATION
 
@@ -93,20 +107,17 @@ these results are not a waiver.
 
 1. Resolve or obtain an explicitly approved risk disposition for container OS
    findings under the existing promotion policy; rebuild/rescan exact final images.
-2. Parent-owned browser acceptance on the integrated revision at
-   320/375/430/768/1024/1440/1920px, including graph controls, errors, uploads,
-   role boundaries, history, exports, trust pages and absence of payment actions.
-3. Real OIDC verified-email login/invitation acceptance and GitHub installation,
+2. Real OIDC verified-email login/invitation acceptance and GitHub installation,
    signed delivery, stale PR and publication acceptance in an approved environment.
-4. Production TLS/secrets/database configuration, backup/PITR restore drill,
+3. Production TLS/secrets/database configuration, backup/PITR restore drill,
    deletion replay, retention scheduling, monitoring, incident response and load
    validation for the documented single-process operating envelope.
-5. **LEGAL REVIEW REQUIRED:** approve privacy/terms/support/security contacts,
+4. **LEGAL REVIEW REQUIRED:** approve privacy/terms/support/security contacts,
    data lifecycle promises and commercial-beta terms. No payment activation is
    part of this release.
-6. Owner approval of release artifacts and public deployment. No new deployment,
+5. Owner approval of release artifacts and public deployment. No new deployment,
    DNS change, purchase or registry publication was performed by this integration.
 
-Next phase: finish external and browser acceptance, remediate promotion blockers,
+Next phase: finish external acceptance, remediate promotion blockers,
 and approve a constrained beta. Add enterprise capability or payment processing
 only through separate reviewed scopes.

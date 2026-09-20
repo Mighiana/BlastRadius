@@ -3,7 +3,8 @@
 This commercial-beta integration preserves frontend commit
 `36df10877fd9a1d141805f7a7d160acfa4f61b8e` and operations commit
 `6364e1f7fb2b2553a93272ae276a31fb28ea898c` through a normal merge.
-Historical release-only/browser results are not current acceptance evidence.
+The final browser pass on `ce77f98` is recorded below; earlier package/container
+checks retain their original scope.
 
 ## Contracts
 
@@ -137,7 +138,8 @@ npm --prefix web run test:e2e
 The existing Playwright harness owns its isolated database/server and operator
 plan command. The parent testing agent owns actual browser execution/recording,
 including the seven widths, sessions, roles, state/error handling and trust pages.
-This integration does not claim browser results.
+Final browser acceptance on `ce77f98` passed all 18 cases, with recorded
+supplemental checks detailed below.
 
 ## Evidence and remaining boundaries
 
@@ -145,8 +147,8 @@ The integration ran on Linux/amd64, Python 3.12.14 and Node 24.19.0:
 
 | Check | Result |
 | --- | --- |
-| `BR_TEST_DATABASE_URL=<disposable PostgreSQL 16.15> make check` | 561 Python tests, no skips; 22 release tests; Ruff, mypy and 38-document link check passed |
-| `make frontend` | Clean npm install, lint, types, 75 tests across 8 files and production build passed |
+| `BR_TEST_DATABASE_URL=<disposable PostgreSQL 16.15> make check` | Final parent verification: 579 Python tests, no skips; 22 release tests; Ruff, mypy and 38-document link check passed |
+| Frontend | Clean install/build verified during integration; final lint, types, 78 tests across 8 files and production build passed |
 | `make audit`; `python -m pip check` | No known dependency vulnerabilities; no broken requirements |
 | Ruff formatting | 39 server/script/integration-test files passed; canonical generated fixtures excluded |
 | Wheel | Every packaged module checked; clean core installation outside checkout ran 9 scenario cases plus plan JSON/SARIF with isolated Python and expected exits; no FastAPI/Streamlit dependency |
@@ -155,7 +157,10 @@ The integration ran on Linux/amd64, Python 3.12.14 and Node 24.19.0:
 | Real HTTP → frontend Zod | 31 actual container responses across 17 schemas; all public demo states, isolated analysis, operator inspection/grants, Free/Team export gates, policies, sessions, history and deletion passed |
 | Fresh local clone | No inherited environment/build artifacts; Node24 `cp .env.example .env && make dev` installed, checked/built, migrated and started; the same 31-response API smoke passed |
 | Trivy 0.74.0 | Source/image secret checks passed; app 0 CRITICAL/44 HIGH and DB 1 CRITICAL/61 HIGH reproduced, no listed fixes. Existing promotion gate failed as intended; full severities retained |
-| Browser inventory only | 18 Playwright definitions listed; no browser test executed by this integration |
+| Browser suite | 18/18 Playwright cases passed on `ce77f98`, including metadata save confirmation and selected workspace/project persistence after reload |
+| Responsive inspection | 90 geometry states: 84 page/report states at 320/375/430/768/1024/1440/1920px plus six mobile-menu states; no detected document/panel overflow or undersized standalone targets. Inline prose links are separately scoped |
+| Recorded core/policy evidence | Preserved unchanged `d36c9ed` HCL BLOCK → manual repair → SAFE, plan analysis, history, real JSON/Markdown/Pro SARIF downloads, quota/archive/restore and score-policy effects; historical evidence unchanged |
+| Supplemental browser fixtures | On `ce77f98`: single-use/email-bound invitations, revocation, viewer/developer/admin controls, protected owner, valid viewer mutations denied with 403, individual/global session revocation and real alternate-origin 403; no browser page errors |
 
 The fresh clone was a full local Git clone of the integration branch with
 `--no-hardlinks`; it did not reuse ignored venv, Node, assets or database files.
@@ -168,6 +173,9 @@ The final handoff includes image IDs and complete scan evidence. Provider tests
 use mocked HTTP; no live App/OIDC writes are part of these commands. External
 TLS, managed PostgreSQL/PITR, production retention jobs, email delivery and
 load/SLO acceptance remain unverified.
+Issued local sessions exercised application authorization; they did not exercise
+a real identity provider, email delivery or GitHub installation. The final browser
+pass did not repeat Docker acceptance or publish a hosted preview.
 The [readiness report](readiness.md) is authoritative for launch blockers.
 
 ## Tooling scope
