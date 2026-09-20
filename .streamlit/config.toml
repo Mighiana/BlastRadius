@@ -11,3 +11,10 @@ font = "sans serif"
 
 [browser]
 gatherUsageStats = false
+
+[client]
+showErrorDetails = "none"
+
+[server]
+maxUploadSize = 1
+enableXsrfProtection = true
