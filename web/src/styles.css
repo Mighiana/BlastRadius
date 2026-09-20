@@ -517,7 +517,7 @@ progress::-webkit-progress-bar{background:#26374a;border-radius:5px}progress::-w
 .facts dt{font-size:.75rem;color:var(--muted);margin-bottom:6px}
 .facts dd{margin:0;overflow-wrap:anywhere}
 .management-list article{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;padding-block:18px;border-top:1px solid var(--border)}
-.management-list article>div{min-width:0}
+.management-list article>div{min-width:0;overflow-wrap:anywhere}
 .management-list p,.management-list small{font-size:.78rem;color:var(--muted)}
 .management-list .button-row{align-items:end}
 .management-list .confirm-delete{width:100%}
