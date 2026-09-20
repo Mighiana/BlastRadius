@@ -113,3 +113,14 @@ def test_disposable_postgres_recovery(tmp_path: Path) -> None:
     assert report["schema_and_data_match"] is True
     assert report["source_unchanged"] is True
     assert report["nonempty_restore_refused"] is True
+    assert report["commercial_retention"] == {
+        "batches": [
+            {"beta_interest": 1, "analysis_feedback": 1, "product_events": 1},
+            {"beta_interest": 1, "analysis_feedback": 1, "product_events": 1},
+            {"beta_interest": 0, "analysis_feedback": 0, "product_events": 0},
+        ],
+        "remaining_per_table": 1,
+        "analysis_cascades": True,
+        "usage_preserved": True,
+        "audited": True,
+    }

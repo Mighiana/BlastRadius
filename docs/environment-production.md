@@ -94,6 +94,7 @@ BR_AUTO_MIGRATE=false
 BR_DATA_DIR=/app/.local
 BR_STATIC_DIR=/app/web/dist
 BR_ADMIN_ENABLED=false
+BR_WEB_ADMIN_USER_IDS=
 ```
 
 This skeleton intentionally cannot start by itself. Supply `BR_DATABASE_URL`,
@@ -111,6 +112,9 @@ Keep a secret inventory of owner, purpose, expiry, rotation/revocation procedure
 and reference name, never secret values. Rehearse rotation before beta; changing
 the session signing key invalidates transient OIDC state, not automatically all
 opaque DB-backed application sessions. Use session revocation for those.
+Enable the separate UUID web-operator allowlist only after following
+[operator setup](owner-setup.md#web-operator-and-commercial-data-setup); it does
+not depend on the CLI flag.
 
 ### Database role handoff
 

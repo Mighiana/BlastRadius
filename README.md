@@ -10,6 +10,7 @@ application adds private workspaces, projects, persistent analyses, history,
 policies and GitHub PR checks around the existing Python engine.
 
 [Get started](docs/getting-started.md) · [Documentation](docs/index.md) ·
+[Private-beta guide](docs/beta-guide.md) · [Customer samples](docs/customer-samples.md) ·
 [GitHub App](docs/github.md) · [Actions](docs/github-actions.md) ·
 [Readiness and launch blockers](docs/readiness.md)
 

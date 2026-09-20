@@ -13,6 +13,8 @@ separates verified implementation, external configuration and launch blockers.
 | GitHub | [GitHub App setup](github.md), [Actions onboarding](github-actions.md) |
 | CLI | [Inputs, output formats and exits](cli.md) |
 | API | [Routes, configuration and errors](api.md) |
+| Commercial beta | [Customer guide](beta-guide.md), [interest/feedback/operator API](beta-api.md) |
+| Customer validation | [Synthetic samples](customer-samples.md), [demo scripts](demo-sales.md), [interview](customer-interview.md), [buyer hypotheses](buyer-personas.md) |
 | Policies | [Trusted policy and inheritance](policy.md) |
 | Reports | [Evidence and exports](reports.md), [sample report](sample-report.md) |
 | Deployment | [Containers, migration and ingress](deployment.md) |
@@ -26,6 +28,8 @@ separates verified implementation, external configuration and launch blockers.
 ## Operating and contributing
 
 [Operations and administration](operations.md) · [Data lifecycle](data-lifecycle.md) ·
+[Owner setup checklist](owner-setup.md) · [Deployment choices](deployment-patterns.md) ·
+[Container security evidence](container-security.md) ·
 [Frontend contract](frontend.md) · [Integration acceptance](release-integration.md) ·
 [Development environment](environment-development.md) ·
 [Devin preview](environment-preview.md) ·

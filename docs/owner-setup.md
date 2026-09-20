@@ -10,6 +10,49 @@ created by these instructions.
 Record an accountable person and an access-controlled evidence reference for each
 gate. Never put credentials, customer dumps or private keys in the checklist.
 
+## Web operator and commercial data setup
+
+1. Before schema changes, stop admission and the API, take the approved backup,
+   and retain the previous image. As the migration role, run
+   `python -m blastradius.server.migrate` with the release's installed package and
+   configured database. Verify head `0004`, rerun idempotently, then reapply
+   runtime-role grants to the new tables using
+   [database role handoff](environment-production.md#database-role-handoff).
+2. Configure and verify [OIDC](auth.md) before enabling web operators. Have the
+   intended operator sign in through that provider with a verified email.
+   In the restricted CLI environment, run
+   `BR_ADMIN_ENABLED=true blastradius-admin inspect users --limit 100 --offset 0`;
+   page as needed. Verify the identity against the provider and record its
+   persisted `users.id`, not an email, workspace ID or provider subject.
+3. Set `BR_WEB_ADMIN_USER_IDS` in the service environment to the reviewed
+   comma-separated canonical UUIDs (at most 50); restart the one API process.
+   Unset/empty disables all web operators. `BR_ADMIN_ENABLED` stays disabled in
+   the service. Workspace owner/admin roles and demo sessions cannot qualify.
+4. Sign out and sign in again through OIDC. Sessions predating `0004` have no
+   OIDC session marker. Confirm `/api/me` reports `capabilities.platform_admin`
+   only for the allowlisted verified identity, then open `/operator`. Verify an
+   ordinary identity gets 403 and an anonymous caller gets 401 on admin routes.
+   Inspect plans/usage/failures; avoid copying private request/feedback content
+   into logs, screenshots or public issues. Remove the UUID and restart to
+   revoke platform access; revoke application sessions separately when needed.
+5. Review the `/beta` privacy notice, legal entity/contact and 90-day policy
+   before inviting people to submit. A saved request does not create an account,
+   send email or grant a plan. Operator invitations and plan assignment remain
+   manual under [commercial beta API](beta-api.md) and [plans](billing.md).
+6. Install and monitor the two separate bounded cleanup jobs in the restricted
+   operator environment: `blastradius-admin cleanup --limit 100` for plan-based
+   analysis retention, and `blastradius-admin cleanup-commercial --limit 100`
+   for commercial records. Enable `BR_ADMIN_ENABLED=true` only for those jobs.
+   The latter removes up to 100 from each of three tables, not 100 total.
+   Stop bounded repetition when all counts are zero; alert on failure/backlog.
+   Retention hides expired data immediately, but physical deletion requires
+   these jobs. Reapply deletion records after backup restore.
+7. Run the [disposable restore drill](operations.md#local-postgresql-restore-drill)
+   at `0004`; separately rehearse provider-encrypted backup/PITR recovery and
+   review synthetic feedback/event aggregates. Activity counts measure use,
+   not willingness to pay. Complete parent-owned browser acceptance on the
+   integrated revision before allowing external beta users.
+
 ## 1. Release and hosting decision
 
 - [ ] Select a [deployment pattern](deployment-patterns.md) and approved geography.

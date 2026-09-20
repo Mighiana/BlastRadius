@@ -9,8 +9,14 @@ can evaluate it alongside their existing review and security tools.
 
 The recommended starting point is a small, authorized AWS Terraform root in a
 GitHub repository. Evaluate synthetic inputs first. This guide describes the
-current implementation; it does not announce a public service, new registration
-form, paid subscription or completed hosted-provider acceptance.
+current implementation; it does not announce a public service, paid subscription
+or completed hosted-provider acceptance.
+
+On an operator-approved deployment, **Request beta access** opens `/beta`. Review
+the privacy notice and explicitly consent before submitting. The saved response
+means the request was stored for operator review; it is not an account, invitation
+or confirmation email. Do not submit Terraform, credentials or private
+infrastructure details. Account access uses the configured OIDC provider.
 
 ## Start with a known example
 
@@ -141,11 +147,14 @@ edge is not proof of absent access.
 
 ## Feedback and support
 
+Use **Give feedback** on a retained completed or failed analysis for a Yes/No
+usefulness response and optional short message. Feedback is private operator
+review content under the 90-day policy; keep infrastructure and secrets out.
 Use [project issues](https://github.com/Mighiana/BlastRadius/issues) for non-sensitive
-product feedback and questions. Explain your review workflow, what decision
+product questions. Explain your review workflow, what decision
 you were trying to make, what confused you, and what evidence was missing.
 The [interview questionnaire](customer-interview.md) can structure a conversation.
-No new feedback or beta-interest UI is assumed.
+The [commercial API contract](beta-api.md) describes storage and deletion limits.
 
 For vulnerabilities, follow [SECURITY.md](../SECURITY.md): use GitHub private
 vulnerability reporting if enabled; otherwise request a private contact route

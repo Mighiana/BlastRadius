@@ -219,6 +219,9 @@ pg_restore --username br_migrator --dbname br_drill_restore --no-owner --no-priv
 It applies the installed migrations twice, seeds a synthetic owner/project and
 two explicitly failed sentinel analyses, restores to the empty second DB, and
 compares every public table's row counts/data hash plus a schema catalog hash.
+At migration `0004`, the seed also includes fresh/expired synthetic beta
+requests, feedback and product events, so commercial records participate in
+the same restore comparison.
 The schema signature covers column order/types/length/precision/null/defaults,
 constraint names/types/keys/referenced tables/actions/validation, and indexes.
 It excludes CHECK expression text because PostgreSQL can rewrite equivalent
@@ -232,6 +235,10 @@ ASGI transport. The real operator cleanup command deletes one expired analysis
 and its artifact, preserves usage/current evidence, audits the deletion and
 removes zero on repetition. The source stays unchanged; a second nonempty restore
 is refused.
+Analysis deletion also proves feedback/event foreign-key cascades. The separate
+`cleanup-commercial --limit 1` command runs three times: each of the first two
+calls removes one expired row from each commercial table, and the third removes
+zero. One fresh row per table survives; audits and usage preservation are checked.
 
 Exit 0 writes `evidence.json` with exact invocation, pinned image, migration head,
 counts/hashes, privilege/integrity/readiness/retention outcomes and measured
@@ -347,6 +354,7 @@ approved schedule and recovery controls remains a promotion blocker.
 | Daily | Database operator: encrypted backup; verify completion/size and a 30-day retention policy | Backup inventory and checksum; alert on missed/empty backup |
 | Daily | Service operator: inspect disk/WAL/scratch and failed/restarted jobs | Capacity trend, cleanup failures; do not delete active scratch |
 | Daily initially | Data owner: `BR_ADMIN_ENABLED=true blastradius-admin cleanup --limit 100` in the restricted operator environment | Exit status and JSON `removed` count; alert on failure or persistent backlog, audit `retention.cleanup` |
+| Daily initially | Data owner: `BR_ADMIN_ENABLED=true blastradius-admin cleanup-commercial --limit 100` | Up to 100 expired rows from **each** of beta requests, feedback and product events; counts only, audit `commercial.cleanup` |
 | Daily | Data owner: process approved deletion requests through tenant-authorized application paths | Access-controlled deletion log retained independently of backups |
 | Weekly and before risky migrations | Database operator: restore into isolation and verify data/deletion replay | Measured restore duration and recorded recovery point |
 | Daily | Logging owner: expire centralized logs after approved 14-day window | Retention job status; local size rotation alone is insufficient |
@@ -377,6 +385,11 @@ at zero rather than an unbounded tight loop. Free/Pro/Team retention defaults ar
 7/90/365 days and Enterprise is configured through the plan policy. Review holds
 and plan changes before enabling the schedule. Keep `BR_ADMIN_ENABLED=true`
 confined to that job; never set it globally for the serving app.
+Commercial records expire after 90 days independently of plan history.
+For commercial cleanup, stop only when all three returned counts are zero;
+repeat bounded invocations if any table has a backlog. Review and alert on
+capacity (10,000 beta requests, 50,000 feedback records, 100,000 activity events).
+Event capacity evicts oldest activity and is not a durable accounting ledger.
 
 ## Incident workflow
 
@@ -405,10 +418,14 @@ BR_ADMIN_ENABLED=true blastradius-admin inspect users --limit 100
 BR_ADMIN_ENABLED=true blastradius-admin inspect projects --limit 100
 BR_ADMIN_ENABLED=true blastradius-admin inspect failures --limit 100
 BR_ADMIN_ENABLED=true blastradius-admin inspect usage --limit 100
+BR_ADMIN_ENABLED=true blastradius-admin inspect beta-requests --limit 100
+BR_ADMIN_ENABLED=true blastradius-admin inspect feedback --limit 100
+BR_ADMIN_ENABLED=true blastradius-admin inspect events
 BR_ADMIN_ENABLED=true blastradius-admin assign-plan WORKSPACE_ID team
 BR_ADMIN_ENABLED=true blastradius-admin assign-plan WORKSPACE_ID enterprise \
   --limits '{"projects":50,"analyses_per_month":10000,"retention_days":180,"members":50}'
 BR_ADMIN_ENABLED=true blastradius-admin cleanup --limit 100
+BR_ADMIN_ENABLED=true blastradius-admin cleanup-commercial --limit 100
 ```
 
 Assign-plan locks the workspace, persists the central plan identifier and
@@ -421,6 +438,12 @@ Both read inspection and plan assignments are audited as `operator`.
 Cleanup removes bounded batches of expired analysis records and child evidence;
 see [retention and scheduling](data-lifecycle.md). Usage is not refunded.
 The API never invokes cleanup based on a user request or environment timer.
+
+The separate read-only `/operator` UI requires verified OIDC and
+`BR_WEB_ADMIN_USER_IDS`; CLI enablement and workspace roles do not grant access.
+Follow [web operator setup](owner-setup.md#web-operator-and-commercial-data-setup)
+and the [commercial contract](beta-api.md). Beta requests and feedback contain
+private review text; do not copy them into monitoring, public issues or URLs.
 
 The worker emits JSON `event:"analysis.completed"` logs with `analysis_id`,
 `request_id`, `organization_id`, `project_id`, `outcome` and `duration_ms`.

@@ -25,9 +25,12 @@ from blastradius.server.db import Database
 from blastradius.server.models import (
     Analysis,
     AnalysisArtifact,
+    AnalysisFeedback,
+    BetaInterest,
     Membership,
     Organization,
     Project,
+    ProductEvent,
     Usage,
     User,
 )
@@ -249,6 +252,30 @@ def seed(db: Database) -> tuple[str, str]:
             ))
             ids.append(analysis.id)
         session.add(Usage(organization_id=org.id, period="2000-01", analyses=2, exports=0))
+        for age in (92 * 86400, 91 * 86400, 0):
+            reviewer = User(issuer="urn:blastradius:disposable-drill", subject=str(age),
+                            name="Synthetic feedback reviewer")
+            session.add(reviewer)
+            session.flush()
+            session.add(BetaInterest(
+                name="Synthetic beta request", email="synthetic@example.test",
+                company="", role="", problem="Synthetic retention probe",
+                privacy_version="2026-09-20", created_at=now - age,
+            ))
+            session.add(AnalysisFeedback(
+                analysis_id=ids[1], project_id=project.id, organization_id=org.id,
+                user_id=reviewer.id, useful=False, message="Synthetic feedback probe",
+                created_at=now - age, updated_at=now - age,
+            ))
+            session.add(ProductEvent(name="beta_interest_submitted", created_at=now - age))
+        session.add(AnalysisFeedback(
+            analysis_id=ids[0], project_id=project.id, organization_id=org.id,
+            user_id=user.id, useful=False, message="Synthetic cascade probe",
+        ))
+        session.add(ProductEvent(
+            name="analysis_failed", analysis_id=ids[0], project_id=project.id,
+            organization_id=org.id, user_id=user.id,
+        ))
     return ids[0], ids[1]
 
 
@@ -300,18 +327,37 @@ def integrity_checks(pg: DisposablePostgres) -> list[str]:
     return [name for name, _, _ in checks]
 
 
-def cleanup_cli(settings: Settings) -> int:
+def operator_env(settings: Settings) -> dict[str, str]:
     env = {key: value for key, value in os.environ.items() if not key.startswith("BR_")}
     env.update({
         "BR_ENV": "test", "BR_AUTH_MODE": "disabled", "BR_ADMIN_ENABLED": "true",
         "BR_AUTO_MIGRATE": "false", "BR_DATABASE_URL": settings.database_url,
         "BR_DATA_DIR": str(settings.data_dir), "BR_PUBLIC_URL": settings.public_url,
     })
+    return env
+
+
+def cleanup_cli(settings: Settings) -> int:
     output = json.loads(command(
-        [sys.executable, "-m", "blastradius.server.admin", "cleanup", "--limit", "1"], env=env,
+        [sys.executable, "-m", "blastradius.server.admin", "cleanup", "--limit", "1"],
+        env=operator_env(settings),
     ))
     require(isinstance(output, dict) and type(output.get("removed")) is int, "bad_cleanup_result")
     return int(output["removed"])
+
+
+def commercial_cleanup_cli(settings: Settings) -> dict[str, int]:
+    output = json.loads(command(
+        [sys.executable, "-m", "blastradius.server.admin", "cleanup-commercial", "--limit", "1"],
+        env=operator_env(settings),
+    ))
+    require(isinstance(output, dict) and isinstance(output.get("removed"), dict),
+            "bad_commercial_cleanup_result")
+    removed = output["removed"]
+    require(set(removed) == {"beta_interest", "analysis_feedback", "product_events"}
+            and all(type(count) is int for count in removed.values()),
+            "bad_commercial_cleanup_counts")
+    return {str(name): int(count) for name, count in removed.items()}
 
 
 def run(directory: Path) -> dict[str, object]:
@@ -366,7 +412,32 @@ def run(directory: Path) -> dict[str, object]:
             require(conn.execute(
                 "SELECT count(*) FROM audit_events WHERE action='retention.cleanup'"
             ).fetchone() == (1,), "retention_audit_missing")
+            require(conn.execute(
+                "SELECT count(*) FROM analysis_feedback WHERE analysis_id = %s", (expired,),
+            ).fetchone() == (0,), "feedback_cascade_failed")
+            require(conn.execute(
+                "SELECT count(*) FROM product_events WHERE analysis_id = %s", (expired,),
+            ).fetchone() == (0,), "event_cascade_failed")
             head = conn.execute("SELECT version_num FROM alembic_version").fetchone()
+        commercial_batches = [commercial_cleanup_cli(runtime_settings) for _ in range(3)]
+        expected_batch = {"beta_interest": 1, "analysis_feedback": 1, "product_events": 1}
+        require(commercial_batches == [
+            expected_batch, expected_batch, dict.fromkeys(expected_batch, 0),
+        ], "commercial_retention_not_bounded_or_idempotent")
+        with pg.connect(TARGET, RUNTIME) as conn:
+            for table in expected_batch:
+                require(conn.execute(sql.SQL("SELECT count(*) FROM {}").format(
+                    sql.Identifier(table),
+                )).fetchone() == (1,), "commercial_retention_kept_wrong_rows")
+                require(conn.execute(sql.SQL(
+                    "SELECT count(*) FROM {} WHERE created_at <= %s"
+                ).format(sql.Identifier(table)), (time.time() - 90 * 86400,)).fetchone()
+                    == (0,), "commercial_retention_kept_expired_rows")
+            require(conn.execute(
+                "SELECT count(*) FROM audit_events WHERE action='commercial.cleanup'"
+            ).fetchone() == (3,), "commercial_cleanup_audit_missing")
+            require(conn.execute("SELECT analyses FROM usage").fetchall() == [(2,)],
+                    "commercial_retention_refunded_usage")
         require(expired != current and snapshot(pg, SOURCE) == before, "source_was_modified")
         return {
             "status": "passed", "scope": "synthetic disposable local logical recovery only",
@@ -388,6 +459,10 @@ def run(directory: Path) -> dict[str, object]:
             "health": {"live": 200, "ready": 200, "transport": "in-process ASGI"},
             "retention": {"removed": removed, "repeat_removed": 0, "cascade": True,
                           "usage_preserved": True, "audited": True},
+            "commercial_retention": {
+                "batches": commercial_batches, "remaining_per_table": 1,
+                "analysis_cascades": True, "usage_preserved": True, "audited": True,
+            },
             "source_unchanged": True, "duration_seconds": round(time.monotonic() - started, 3),
             "limitations": [
                 "No live database, customer evidence, browser, external provider or TLS tested.",

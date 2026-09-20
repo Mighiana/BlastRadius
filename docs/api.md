@@ -13,7 +13,8 @@ Use `.env.example`, [authentication](auth.md) and `Settings` in
 `BR_AUTH_MODE` (`demo`, `oidc`, `disabled`), `BR_DATABASE_URL`, `BR_DATA_DIR`,
 `BR_STATIC_DIR`, `BR_AUTO_MIGRATE`, `BR_SESSION_SECRET`, `BR_SESSION_TTL`,
 `BR_OIDC_ISSUER`, `BR_OIDC_CLIENT_ID`, `BR_OIDC_CLIENT_SECRET`, body/file/resource/
-job/worker/rate limits and the operator-only `BR_ADMIN_ENABLED`. Unknown old
+job/worker/rate limits, CLI-only `BR_ADMIN_ENABLED`, and the separate web operator
+allowlist `BR_WEB_ADMIN_USER_IDS`. Unknown old
 `BR_STRIPE_*` settings have no effect. No payment SDK or payment API remains.
 
 ```bash
@@ -23,21 +24,28 @@ python -m uvicorn blastradius.server.app:app --host 127.0.0.1 --port 8000 \
 ```
 
 Migrations support fresh databases and upgrading existing revision `0001` to
-`0002`. Readiness follows Alembic's actual head. Migration Python files and the
+current head `0004`. Revision `0003` adds GitHub integration; `0004` adds beta
+interest, analysis feedback, bounded product events, the commercial singleton
+lock and the session OIDC marker. Readiness follows Alembic's actual head. Migration Python files and the
 autogeneration template ship in wheels. Back up and stop API processes before
 schema migration. Reverting 0002 requires restoring the pre-upgrade backup;
 lossy schema downgrade is explicitly rejected. Legacy `member` becomes
 `developer`; existing roles/data/results are preserved. Existing users must
 reauthenticate through verified OIDC to establish verified-email status.
+After `0004`, existing sessions cannot qualify for web operator access until a
+new successful OIDC sign-in; workspace access is otherwise preserved.
 
 ## Authentication and errors
 
 `GET /api/me` creates an anonymous CSRF session if necessary. Authenticated
 responses include `user {id,name,email,email_verified,created_at}`,
 `organizations [{id,name,role,plan,usage}]`, `csrf_token`, `auth`, and
-`billing {enabled:false,mode:"commercial_beta"}`. Mutations require the session
+`billing {enabled:false,mode:"commercial_beta"}` and
+`capabilities {platform_admin:boolean}`. Mutations require the session
 cookie and `X-CSRF-Token`; optional Origin must match `BR_PUBLIC_URL`, and
-cross-site browser mutations are rejected. Never put CSRF tokens in URLs.
+cross-site browser mutations are rejected. Beta-interest and analysis-feedback
+mutations additionally require an explicit, exact matching Origin; omission
+is rejected. Never put CSRF tokens in URLs.
 
 * `POST /api/auth/demo`: disposable development identity, disabled in production.
 * `GET /api/auth/login`, `/api/auth/callback`: OIDC state/nonce/PKCE/signed claims.
@@ -182,6 +190,20 @@ version. Deleting analyses cascades all children.
 remain public synthetic samples; all formats including SARIF remain available.
 They do not create tenant analyses or consume usage. Supported scenarios are
 returned by the catalog. They use the same isolated engine and resource limits.
+
+## Commercial beta and platform inspection
+
+[Commercial beta API](beta-api.md) defines the strict schemas, error codes,
+90-day retention, submission limits, event allowlist and operator authorization:
+
+* Public `GET /api/beta-interest/privacy` and `POST /api/beta-interest`, with
+  anonymous `/api/me` bootstrap, exact Origin, CSRF and explicit consent.
+* Authenticated `GET`/`PUT /api/analyses/{id}/feedback`, scoped to the current
+  user's tenant-visible, retained terminal analysis.
+* Read-only `GET /api/admin/{resource}` for independently authorized platform
+  operators. Workspace roles and `BR_ADMIN_ENABLED` grant no web access.
+* Server-generated activity counts; there is no browser event-ingestion route,
+  automatic invitation, email delivery, payment or web administrator write.
 
 ## Execution boundary and verification
 

@@ -1,7 +1,7 @@
 # BlastRadius web application
 
 The React app in `web/` consumes the FastAPI contracts in [api.md](api.md),
-[billing.md](billing.md) and [github.md](github.md). Python remains the security
+[billing.md](billing.md), [beta-api.md](beta-api.md) and [github.md](github.md). Python remains the security
 analysis engine. The frontend displays validated nodes, edges, paths, diagnostics,
 source evidence and reports; it does not calculate replacement security results.
 Public demo comparisons and the landing preview use actual engine fixtures.
@@ -54,6 +54,8 @@ Real accounts require the operator-configured OIDC provider.
 | `/` | Product, real SSH preview, workflow guidance and FAQ |
 | `/demo` | Three engine comparisons, before/after, evidence and public exports |
 | `/pricing` | Public API-backed Free/Pro/Team/Enterprise catalog |
+| `/beta` | Anonymous beta-interest form, explicit privacy consent and persistence acknowledgement |
+| `/operator` | Read-only platform inspection; verified OIDC plus server UUID allowlist required |
 | `/guide` | Upload, CLI, Actions/App, model and data guidance |
 | `/security`, `/privacy`, `/terms` | Public trust templates with legal-review warning |
 | `/dashboard` | Workspace selection, projects, uploads and persisted reports |
@@ -77,8 +79,21 @@ need additional project-list pagination.
 `GET /api/plans` supplies prices, limits and feature flags; no prices or quota
 values are hardcoded in rendering. Current catalog defaults are Free $0, Pro $49
 proposed/month, Team $149 proposed/month and Enterprise configurable/contact.
-Free onboarding goes to the real configured sign-in/demo entry. Paid actions
-are disabled with an operator-beta explanation, not fake checkout.
+Free onboarding goes to the real configured sign-in/demo entry. Primary proposed
+paid-plan actions open the beta-interest form; checkout remains disabled.
+
+The beta form bootstraps `/api/me` and fetches the current privacy notice.
+Submission acknowledges storage only; it does not send email or create an
+account. **Give feedback** on a retained terminal analysis loads the user's
+feedback on demand; PUT sends only `useful` and optional bounded `message`.
+The server derives all user/workspace/project/analysis context.
+
+Operator navigation requires `capabilities.platform_admin`; the API independently
+checks every request. General inspection omits identity and infrastructure text.
+Beta requests and feedback are explicitly private operator review surfaces.
+Plans and events use bounded aggregates; list resources use server pagination.
+There is no web plan assignment or cleanup action. See the
+[operator setup procedure](owner-setup.md#web-operator-and-commercial-data-setup).
 
 `GET /api/organizations/{id}/usage` supplies current usage, active project count,
 members, pending invitations, exports, limits and entitlements. Read-time
