@@ -85,6 +85,22 @@ describe('policy role and plan gates', () => {
 });
 
 describe('project lifecycle', () => {
+  it('keeps save feedback after reloading changed metadata and scopes it to the saved project', async () => {
+    let saved = false;
+    mockApi(account, (url, options) => {
+      if (url.startsWith('/api/projects?')) return { projects: [{ ...project, description: saved ? 'Saved context' : '', updated_at: saved ? 200 : 100 }, { ...project, id: 'other', name: 'Other project' }] };
+      if (options?.method === 'PATCH') { saved = true; return {}; }
+      return { policy: null, version: 0 };
+    });
+    mount(<Settings />);
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Description' }), 'Saved context');
+    await userEvent.click(screen.getByRole('button', { name: 'Save project' }));
+    expect(await screen.findByText('Project saved.')).toBeVisible();
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Description' })).toHaveValue('Saved context'));
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Project' }), 'other');
+    expect(await screen.findByRole('textbox', { name: 'Project name' })).toHaveValue('Other project');
+    expect(screen.queryByText('Project saved.')).not.toBeInTheDocument();
+  });
   it('keeps workspace and project context in navigation, selection and fresh page loads', async () => {
     const secondOrg = { ...organization, id: 'second-org', name: 'Second workspace' };
     const firstProject = { ...project, id: 'second-project', organization_id: secondOrg.id, name: 'First project in second workspace' };

@@ -173,6 +173,7 @@ for (const width of widths) {
       const savedProject = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname.startsWith('/api/projects/'));
       await page.getByRole('button', { name: 'Save project', exact: true }).click();
       expect((await savedProject).ok()).toBe(true);
+      await expect(page.getByText('Project saved.', { exact: true })).toBeVisible();
       await page.reload();
       await expect(page.getByRole('combobox', { name: 'Workspace', exact: true }).locator('option:checked')).toHaveText(`Review workspace ${width} · owner`);
       await expect(page.getByRole('textbox', { name: 'Description', exact: true })).toHaveValue(`Saved project metadata at ${width}px`);

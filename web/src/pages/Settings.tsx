@@ -21,7 +21,7 @@ function WorkspaceSettings({ organization }: { organization: Organization }) {
     <p className="muted">Your role: {organization.role}. Owners and admins manage settings; developers run analyses; viewers read and export evidence.</p>
   </section>;
 }
-function ProjectSettings({ project, editable, reload }: { project: Project; editable: boolean; reload: () => void }) {
+function ProjectSettings({ project, editable, reload, onSaveStart, onSaved }: { project: Project; editable: boolean; reload: () => void; onSaveStart: () => void; onSaved: (projectId: string) => void }) {
   const [values, setValues] = useState({
     name: project.name, description: project.description, repository: project.repository, repository_provider: project.repository_provider,
     default_branch: project.default_branch, environment: project.environment, terraform_root: project.terraform_root, archived: !!project.archived_at,
@@ -31,7 +31,8 @@ function ProjectSettings({ project, editable, reload }: { project: Project; edit
   const { refresh } = useSession();
   function save(event: FormEvent) {
     event.preventDefault();
-    void action.run(async () => { await mutate(`/api/projects/${encodeURIComponent(project.id)}`, 'PATCH', values); reload(); await refresh(); }, 'Project saved.');
+    onSaveStart();
+    void action.run(async () => { await mutate(`/api/projects/${encodeURIComponent(project.id)}`, 'PATCH', values); onSaved(project.id); reload(); await refresh(); });
   }
   return <section className="panel"><h2>Project settings</h2><form className="settings-form" onSubmit={save}>
     <fieldset disabled={!editable || action.busy}><legend>Infrastructure metadata</legend><div className="form-grid">
@@ -61,11 +62,12 @@ function SettingsContent() {
   const { organization } = useOrganization();
   const selection = useProjectSelection(organization);
   const [policyRevision, setPolicyRevision] = useState(0);
+  const [savedProjectId, setSavedProjectId] = useState<string | null>(null);
   return <><WorkspaceNav />{organization ? <div className="report-stack">
     <WorkspaceSettings key={organization.id} organization={organization} />
     <PolicyEditor key={`org-${organization.id}`} organization={organization} onChange={() => setPolicyRevision(value => value + 1)} />
     <ProjectPicker selection={selection} />
-    {selection.project && <><ProjectSettings key={`${selection.project.id}-${selection.project.updated_at}`} project={selection.project} editable={canManage(organization.role)} reload={selection.projects.reload} /><PolicyEditor key={`${selection.project.id}-${policyRevision}`} organization={organization} projectId={selection.project.id} /></>}
+    {selection.project && <><ProjectSettings key={`${selection.project.id}-${selection.project.updated_at}`} project={selection.project} editable={canManage(organization.role)} reload={selection.projects.reload} onSaveStart={() => setSavedProjectId(null)} onSaved={setSavedProjectId} />{savedProjectId === selection.project.id && <p role="status">Project saved.</p>}<PolicyEditor key={`${selection.project.id}-${policyRevision}`} organization={organization} projectId={selection.project.id} /></>}
   </div> : <p className="notice">Create a workspace to manage settings.</p>}</>;
 }
 export default function Settings() {

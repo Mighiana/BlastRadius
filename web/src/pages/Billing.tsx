@@ -50,7 +50,7 @@ function Usage() {
 }
 export function Pricing() {
   return <div className="container page"><PageHeading eyebrow="COMMERCIAL BETA" title="A plan for every review.">Proposed pricing. No payment processing. Start on Free; paid plans require operator-granted beta access.</PageHeading><PlanCards />
-    <section className="panel pricing-note"><h2>What counts as an analysis?</h2><p>A job accepted for processing counts toward the monthly UTC quota, including a job that later fails. Rejected submissions do not count. Public demos do not use workspace quota.</p><p>All plans provide static evidence, not proof of security. AWS credentials are not required; BlastRadius does not deploy infrastructure.</p><Link to="/guide">Read the guide</Link></section>
+    <section className="panel pricing-note"><h2>What counts as an analysis?</h2><p>A job accepted for processing counts toward the monthly UTC quota, including a job that later fails. Rejected submissions do not count. Public demos do not use workspace quota.</p><p>All plans provide static evidence, not proof of security. AWS credentials are not required; BlastRadius does not deploy infrastructure.</p><Link className="text-link" to="/guide">Read the guide</Link></section>
   </div>;
 }
 export default function Billing() {
