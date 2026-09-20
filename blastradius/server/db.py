@@ -48,11 +48,11 @@ class Database:
     @contextmanager
     def session(self, write: bool = False) -> Iterator[Session]:
         with self.sessions() as session:
-            if write and self.engine.dialect.name == "sqlite":
-                session.connection().exec_driver_sql("BEGIN IMMEDIATE")
             try:
                 if self.fence:
                     self.fence(session)
+                if write and self.engine.dialect.name == "sqlite":
+                    session.connection().exec_driver_sql("BEGIN IMMEDIATE")
                 yield session
                 if self.fence:
                     self.fence(session)
