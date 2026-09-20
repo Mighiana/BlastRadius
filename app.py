@@ -86,7 +86,7 @@ HOP_REASON_TITLES = {
 
 CSS = """
 <style>
-  .block-container { padding-top: 1.6rem; max-width: 1560px; }
+  .block-container { padding-top: 4.5rem; max-width: 1560px; }
 
   /* ---------- Product identity ---------- */
   .br-title { font-size: 5rem; font-weight: 900; letter-spacing: -3px; margin: 0; line-height: 1;
