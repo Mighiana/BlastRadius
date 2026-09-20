@@ -1,0 +1,18 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "BlastRadius"
+        }
+      },
+      "results": [],
+      "invocations": [
+        {
+          "executionSuccessful": false
+        }
+      ]
+    }
+  ]
+}
