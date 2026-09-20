@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import { ArrowRight, FolderPlus, RefreshCw, Trash2 } from 'lucide-react';
-import { canAnalyze, canManage, historySchema, projectsSchema, jobError, jobSchema, mutate, projectSchema, request, type Job, type Organization } from '../api';
+import { canAnalyze, canManage, historySchema, jobError, jobSchema, mutate, projectSchema, request, type Job, type Organization } from '../api';
 import { useResource } from '../hooks';
 import { useOrganization, useSession } from '../session';
 import { AnalysisForm } from '../components/AnalysisForm';
@@ -10,6 +10,7 @@ import { AuthGate } from '../components/AuthGate';
 import { Decision, Empty, ErrorNotice, Loading, PageHeading } from '../components/UI';
 import { ReportView } from '../components/ReportView';
 import { WorkspaceNav } from '../components/WorkspaceNav';
+import { ProjectPagination, useProjectSelection } from '../components/ProjectPicker';
 
 function JobView({ id, onComplete }: { id: string; onComplete: () => void }) {
   const [job, setJob] = useState<Job | null>(null);
@@ -62,14 +63,12 @@ function WorkspaceContent() {
   const historyOnly = location.pathname === '/history';
   const [params, setParams] = useSearchParams();
   const { organization: org, selectOrganization: setOrgId } = useOrganization();
-  const projectId = params.get('project') ?? '';
   const analysisId = params.get('analysis') ?? '';
-  const projects = useResource(org ? `/api/projects?organization_id=${encodeURIComponent(org.id)}&limit=100` : null, projectsSchema);
-  const linkedProject = useResource(projectId ? `/api/projects/${encodeURIComponent(projectId)}` : null, projectSchema);
+  const selection = useProjectSelection(org);
+  const { projects, linkedProject, project } = selection;
   useEffect(() => {
     if (!params.has('organization') && linkedProject.data && session?.organizations.some(item => item.id === linkedProject.data?.organization_id)) setOrgId(linkedProject.data.organization_id);
   }, [linkedProject.data, params, session, setOrgId]);
-  const project = projectId ? projects.data?.projects.find(item => item.id === projectId) : projects.data?.projects[0];
   const [historyLimit, setHistoryLimit] = useState(50);
   const [historyPage, setHistoryPage] = useState(0);
   const [filters, setFilters] = useState({ status: '', decision: '', input_type: '', branch: '', since: '', until: '' });
@@ -136,8 +135,9 @@ function WorkspaceContent() {
       <p className="muted">Organize comparisons by repository or environment.</p>
       {projects.loading && <Loading>Loading projects…</Loading>}
       <ErrorNotice error={projects.error} retry={projects.reload} />
-      <div className="project-list">{projects.data?.projects.map(item => <button key={item.id} aria-pressed={item.id === project?.id} onClick={() => selectProject(item.id)}>{item.name}{item.archived_at ? ' · archived' : ''}<ArrowRight size={15} aria-hidden="true" /></button>)}</div>
-      {projects.data?.projects.length === 0 && <p>No projects yet. Create your first to get started.</p>}
+      <div className="project-list">{selection.choices.map(item => <button key={item.id} aria-pressed={item.id === project?.id} onClick={() => selectProject(item.id)}>{item.name}{item.archived_at ? ' · archived' : ''}<ArrowRight size={15} aria-hidden="true" /></button>)}</div>
+      {projects.data?.projects.length === 0 && <p>{selection.page ? 'No projects on this page. Go back to the previous page.' : 'No projects yet. Create your first to get started.'}</p>}
+      <ProjectPagination selection={selection} />
       {canManage(org?.role) && org && <form className="project-form" onSubmit={event => { void createProject(event); }}><label>Project name<input placeholder="e.g. payments-production" required maxLength={100} value={projectName} onChange={event => setProjectName(event.target.value)} /></label><button className="button secondary" disabled={busy || org.usage.projects >= org.usage.limits.projects}><FolderPlus size={16} aria-hidden="true" />Create project</button>{org.usage.projects >= org.usage.limits.projects && <p className="notice">Project limit reached. Check usage and ask your operator about beta entitlements.</p>}</form>}
       {org && <p className="footnote">Up to {org.usage.limits.projects} projects · {org.usage.limits.members} members</p>}
     </aside>
