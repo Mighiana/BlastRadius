@@ -5,6 +5,7 @@ import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
+from uuid import UUID
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class Settings:
     oidc_client_id: str = ""
     oidc_client_secret: str = ""
     admin_enabled: bool = False
+    web_admin_user_ids: tuple[str, ...] = ()
     github_app_id: int = 0
     github_app_slug: str = ""
     github_private_key_file: Path | None = field(default=None, repr=False)
@@ -58,6 +60,10 @@ class Settings:
         )
 
     def validate(self) -> None:
+        if len(self.web_admin_user_ids) > 50 or any(
+            str(UUID(value)) != value for value in self.web_admin_user_ids
+        ):
+            raise ValueError("BR_WEB_ADMIN_USER_IDS requires at most 50 canonical user UUIDs")
         if self.github_app_id < 0:
             raise ValueError("BR_GITHUB_APP_ID must be nonnegative (0 disables integration)")
         if self.github_webhook_secret and len(self.github_webhook_secret) < 32:
@@ -155,6 +161,11 @@ class Settings:
             oidc_client_id=env.get("BR_OIDC_CLIENT_ID", ""),
             oidc_client_secret=env.get("BR_OIDC_CLIENT_SECRET", ""),
             admin_enabled=env.get("BR_ADMIN_ENABLED") == "true",
+            web_admin_user_ids=tuple(
+                value.strip()
+                for value in env.get("BR_WEB_ADMIN_USER_IDS", "").split(",")
+                if value.strip()
+            ),
             github_app_id=int(env.get("BR_GITHUB_APP_ID", "0")),
             github_app_slug=env.get("BR_GITHUB_APP_SLUG", ""),
             github_private_key_file=(

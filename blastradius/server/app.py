@@ -24,15 +24,18 @@ from blastradius.server.auth import (
     require_user,
 )
 from blastradius.server.config import Settings
+from blastradius.server.beta import beta_router
 from blastradius.server.db import Database, LeaseLost
 from blastradius.server.demos import build_demos
 from blastradius.server.fixtures import FIXTURES
+from blastradius.server.events import record_event
 from blastradius.server.github_routes import github_router
 from blastradius.server.github_service import GitHubService
 from blastradius.server.jobs import JobManager
 from blastradius.server.lease import ServiceLease
 from blastradius.server.middleware import GuardMiddleware
 from blastradius.server.models import Analysis, Membership, Organization, Project, User
+from blastradius.server.operator import is_platform_admin, operator_router
 from blastradius.server.plans import catalog, entitlements, require_feature
 from blastradius.server.quotas import lock_org, quota, usage_payload, usage_row
 from blastradius.server.lifecycle import authorized_org, lifecycle_router
@@ -162,6 +165,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(GuardMiddleware, settings=settings)
     app.include_router(lifecycle_router(db, settings))
     app.include_router(github_router(db, settings, github))
+    app.include_router(beta_router(db, settings))
+    app.include_router(operator_router(db, settings))
 
     @app.get("/api/plans")
     def plans():
@@ -186,7 +191,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/health/ready")
     def ready():
         if (
-            not lease.healthy() or not db.ready() or len(demos) != 9
+            not lease.healthy()
+            or not db.ready()
+            or len(demos) != 9
             or jobs.persistence_failed.is_set()
         ):
             raise HTTPException(503, "not_ready")
@@ -233,6 +240,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "login_url": "/api/auth/login" if settings.auth_mode == "oidc" else None,
                 },
                 "billing": {"enabled": False, "mode": "commercial_beta"},
+                "capabilities": {"platform_admin": is_platform_admin(user, login, settings)},
             }
 
     @app.post("/api/auth/demo")
@@ -287,7 +295,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 old = current_session(request, session)
                 if old:
                     session.delete(old)
-                create_session(response, session, settings, user.id)
+                create_session(response, session, settings, user.id, oidc_authenticated=True)
             return response
         except Exception:
             raise HTTPException(400, "authentication_failed") from None
@@ -343,6 +351,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             session.add(org)
             session.flush()
             session.add(Membership(user_id=user.id, organization_id=org.id, role="owner"))
+            record_event(session, "workspace_created", user_id=user.id, organization_id=org.id)
             return {"id": org.id, "name": org.name, "role": "owner", "plan": org.plan}
 
     @app.get("/api/projects")
@@ -382,6 +391,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             project = Project(**body.model_dump())
             session.add(project)
             session.flush()
+            record_event(
+                session,
+                "project_created",
+                user_id=user.id,
+                organization_id=org.id,
+                project_id=project.id,
+            )
             return project_payload(project)
 
     @app.get("/api/projects/{project_id}")
@@ -539,6 +555,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 require_feature(org, "sarif")
             if format != "web":
                 usage_row(session, org).exports += 1
+                record_event(
+                    session,
+                    "report_exported",
+                    user_id=user.id,
+                    organization_id=org.id,
+                    project_id=job.project_id,
+                    analysis_id=job.id,
+                )
             result = public_result(job.result, entitlements(org).sarif)
             assert result is not None
             if format == "markdown":

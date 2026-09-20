@@ -20,6 +20,7 @@ class GuardMiddleware:
         self.app = app
         self.settings = settings
         self.buckets: dict[tuple[str, str], tuple[float, int]] = {}
+        self.submissions: dict[str, tuple[float, int]] = {}
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -55,8 +56,19 @@ class GuardMiddleware:
                 await error(415, "content_encoding_unsupported")
                 return
             path = scope["path"]
+            submission = (
+                "beta"
+                if path.rstrip("/") == "/api/beta-interest" and scope["method"] == "POST"
+                else "feedback"
+                if path.startswith("/api/analyses/")
+                and path.rstrip("/").endswith("/feedback")
+                and scope["method"] == "PUT"
+                else None
+            )
             category = (
-                "auth"
+                submission
+                if submission
+                else "auth"
                 if path.startswith("/api/auth/")
                 else "demo"
                 if path.startswith("/api/demo")
@@ -70,18 +82,34 @@ class GuardMiddleware:
                 "auth": self.settings.auth_rate_limit,
                 "demo": self.settings.demo_rate_limit,
                 "api": self.settings.rate_limit,
+                "beta": 5,
+                "feedback": 30,
             }[category]
             window, count = self.buckets.get(key, (now, 0))
             if count >= limit or (key not in self.buckets and len(self.buckets) >= 10000):
                 await error(429, "rate_limit_exceeded")
                 return
             self.buckets[key] = (window, count + 1)
+            if submission:
+                global_window, global_count = self.submissions.get(submission, (now, 0))
+                if now - global_window >= 60:
+                    global_window, global_count = now, 0
+                if global_count >= {"beta": 60, "feedback": 120}[submission]:
+                    await error(429, "rate_limit_exceeded")
+                    return
+                self.submissions[submission] = (global_window, global_count + 1)
+            body_limit = min(
+                self.settings.max_body_bytes,
+                {"beta": 8192, "feedback": 4096}.get(
+                    submission or "", self.settings.max_body_bytes
+                ),
+            )
             try:
                 length = int(headers.get("content-length", "0"))
             except ValueError:
                 await error(400, "invalid_content_length")
                 return
-            if length < 0 or length > self.settings.max_body_bytes:
+            if length < 0 or length > body_limit:
                 await error(413, "body_too_large")
                 return
             body = bytearray()
@@ -92,7 +120,7 @@ class GuardMiddleware:
                         if message["type"] == "http.disconnect":
                             return
                         body.extend(message.get("body", b""))
-                        if len(body) > self.settings.max_body_bytes:
+                        if len(body) > body_limit:
                             await error(413, "body_too_large")
                             return
                         if not message.get("more_body", False):

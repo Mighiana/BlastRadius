@@ -13,11 +13,12 @@ from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Callable
 from pathlib import Path
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from blastradius.server.config import Settings
 from blastradius.server.db import Database, LeaseLost
+from blastradius.server.events import analysis_event, terminal_events
 from blastradius.server.models import Analysis, GitHubRun
 from blastradius.server.persistence import persist_result
 from blastradius.server.results import worker_response
@@ -112,12 +113,27 @@ class JobManager:
         self.persistence_failed = threading.Event()
 
     def recover(self) -> None:
-        with self.db.session(write=True) as session:
-            session.execute(
-                update(Analysis)
-                .where(Analysis.status.in_(("queued", "running")))
-                .values(status="failed", error="server_restarted", completed_at=time.time())
-            )
+        while True:
+            with self.db.session(write=True) as session:
+                rows = list(
+                    session.scalars(
+                        select(Analysis)
+                        .where(Analysis.status.in_(("queued", "running")))
+                        .order_by(Analysis.id)
+                        .limit(100)
+                        .with_for_update()
+                    )
+                )
+                for job in rows:
+                    job.status, job.error, job.completed_at = (
+                        "failed",
+                        "server_restarted",
+                        time.time(),
+                    )
+                    job.result, job.decision = None, None
+                    terminal_events(session, job)
+            if len(rows) < 100:
+                break
         directory = self.settings.data_dir / "jobs"
         if directory.exists():
             for path in directory.glob("job-*"):
@@ -151,8 +167,11 @@ class JobManager:
                     job.error = validated.get("error")
                     if not job.error:
                         persist_result(session, job, validated["result"])
+                    else:
+                        job.result, job.decision = None, None
                     job.status = "failed" if job.error else "succeeded"
                     job.completed_at = time.time()
+                    terminal_events(session, job)
                     if run_id:
                         run = session.get(GitHubRun, run_id)
                         if run:
@@ -182,6 +201,7 @@ class JobManager:
                 if not job or job.status != "queued":
                     return
                 job.status, job.started_at = "running", time.time()
+                analysis_event(session, job, "analysis_started")
                 policy_snapshot = job.policy_snapshot
                 context.update(
                     {

@@ -77,6 +77,7 @@ class LoginSession(Base):
     csrf_token: Mapped[str] = mapped_column(String(100))
     expires_at: Mapped[float] = mapped_column(index=True)
     created_at: Mapped[float | None] = mapped_column(default=time.time)
+    oidc_authenticated: Mapped[bool] = mapped_column(default=False, server_default=false())
 
 
 class Project(Base):
@@ -303,3 +304,53 @@ class GitHubRun(Base):
     check_uncertain: Mapped[bool] = mapped_column(default=False)
     comment_uncertain: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[float] = mapped_column(default=time.time)
+
+
+class CommercialLock(Base):
+    __tablename__ = "commercial_lock"
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+
+class BetaInterest(Base):
+    __tablename__ = "beta_interest"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=identifier)
+    name: Mapped[str] = mapped_column(String(100))
+    email: Mapped[str] = mapped_column(String(320))
+    company: Mapped[str] = mapped_column(String(120))
+    role: Mapped[str] = mapped_column(String(80))
+    team_size: Mapped[int | None]
+    repository_count: Mapped[int | None]
+    primary_cloud: Mapped[str | None] = mapped_column(String(20))
+    source_control: Mapped[str | None] = mapped_column(String(20))
+    problem: Mapped[str] = mapped_column(String(1000))
+    privacy_version: Mapped[str] = mapped_column(String(20))
+    created_at: Mapped[float] = mapped_column(default=time.time, index=True)
+
+
+class AnalysisFeedback(Base):
+    __tablename__ = "analysis_feedback"
+    __table_args__ = (UniqueConstraint("analysis_id", "user_id"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=identifier)
+    analysis_id: Mapped[str] = mapped_column(
+        ForeignKey("analyses.id", ondelete="CASCADE"), index=True
+    )
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    useful: Mapped[bool]
+    message: Mapped[str] = mapped_column(String(1000))
+    created_at: Mapped[float] = mapped_column(default=time.time, index=True)
+    updated_at: Mapped[float] = mapped_column(default=time.time)
+
+
+class ProductEvent(Base):
+    __tablename__ = "product_events"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=identifier)
+    name: Mapped[str] = mapped_column(String(40), index=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    organization_id: Mapped[str | None] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE")
+    )
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    analysis_id: Mapped[str | None] = mapped_column(ForeignKey("analyses.id", ondelete="CASCADE"))
+    created_at: Mapped[float] = mapped_column(default=time.time, index=True)

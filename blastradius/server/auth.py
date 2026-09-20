@@ -10,6 +10,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from blastradius.server.config import Settings
+from blastradius.server.events import record_event
 from blastradius.server.models import LoginSession, Membership, Organization, User
 from blastradius.server.schemas import email_identity
 
@@ -49,7 +50,12 @@ def current_session(request: Request, db: Session) -> LoginSession | None:
 
 
 def create_session(
-    response: Response, db: Session, settings: Settings, user_id: str | None = None
+    response: Response,
+    db: Session,
+    settings: Settings,
+    user_id: str | None = None,
+    *,
+    oidc_authenticated: bool = False,
 ) -> LoginSession:
     db.execute(delete(LoginSession).where(LoginSession.expires_at <= time.time()))
     token = secrets.token_urlsafe(32)
@@ -58,6 +64,7 @@ def create_session(
         user_id=user_id,
         csrf_token=secrets.token_urlsafe(32),
         expires_at=time.time() + settings.session_ttl_seconds,
+        oidc_authenticated=oidc_authenticated,
     )
     db.add(session)
     response.set_cookie(
@@ -136,4 +143,6 @@ def provision(
     db.add(org)
     db.flush()
     db.add(Membership(user_id=user.id, organization_id=org.id, role="owner"))
+    record_event(db, "account_created", user_id=user.id)
+    record_event(db, "workspace_created", user_id=user.id, organization_id=org.id)
     return user
