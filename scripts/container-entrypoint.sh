@@ -11,6 +11,11 @@ case "${1:-serve}" in
     exec python -I -m uvicorn blastradius.server.app:app \
       --host 0.0.0.0 --port 8000 --workers 1 --no-access-log --no-proxy-headers
     ;;
+  sh)
+    shift
+    [ "${1:-}" = "/app/scripts/container-entrypoint.sh" ] && shift
+    exec sh /app/scripts/container-entrypoint.sh "$@"
+    ;;
   migrate)
     if [ -z "${BLASTRADIUS_ALEMBIC_CONFIG:-}" ] || [ ! -f "$BLASTRADIUS_ALEMBIC_CONFIG" ]; then
       echo "Set BLASTRADIUS_ALEMBIC_CONFIG to the server's existing Alembic config." >&2

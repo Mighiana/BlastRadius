@@ -14,6 +14,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -151,7 +152,11 @@ def create_app(
             if settings.lease_wait_seconds <= 0:
                 raise
             starting.set()
-            db.fence = lambda _session: (_ for _ in ()).throw(LeaseLost("service_starting"))
+
+            def reject_while_starting(_session: Session) -> None:
+                raise LeaseLost("service_starting")
+
+            db.fence = reject_while_starting
             db.lease_healthy = lambda: False
             deadline = time.monotonic() + settings.lease_wait_seconds
 

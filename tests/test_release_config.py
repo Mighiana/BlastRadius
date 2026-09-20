@@ -36,3 +36,5 @@ def test_container_entrypoint_opts_into_proxy_headers_only_for_render():
     assert '[ "${BR_TRUST_PROXY_HEADERS:-false}" = "true" ]' in entrypoint
     assert "--proxy-headers --forwarded-allow-ips='*'" in entrypoint
     assert "--no-proxy-headers" in entrypoint
+    assert '  sh)' in entrypoint
+    assert '[ "${1:-}" = "/app/scripts/container-entrypoint.sh" ] && shift' in entrypoint

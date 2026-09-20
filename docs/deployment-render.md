@@ -4,6 +4,10 @@ This guide deploys the integrated FastAPI and React service with a Render-manage
 PostgreSQL database. The repository's root `render.yaml` is the Blueprint for
 this deployment.
 
+The migration pre-deploy command is accepted whether Render preserves the
+Docker entrypoint or invokes `sh /app/scripts/container-entrypoint.sh migrate`
+directly.
+
 ## Create the Render resources
 
 1. Connect or fork the GitHub repository in Render.
