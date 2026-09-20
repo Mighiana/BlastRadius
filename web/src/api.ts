@@ -71,6 +71,7 @@ const organization = z.object({
 });
 export const sessionSchema = z.object({
   authenticated: z.boolean(),
+  capabilities: z.object({ platform_admin: z.boolean() }).optional(),
   user: z.object({ id: z.string(), name: z.string(), email: z.string(), email_verified: z.boolean(), created_at: z.number() }).nullable(),
   organizations: z.array(organization), csrf_token: z.string(),
   auth: z.object({ enabled: z.boolean(), mode: z.enum(['disabled', 'demo', 'oidc']), public_url: z.string().url(), login_url: z.string().nullable() }),
@@ -173,6 +174,11 @@ export type AnalysisInput = {
 } & ({ before_files: Record<string, string>; after_files: Record<string, string> } | { plan: Record<string, unknown> });
 
 const errorMessages: Record<string, string> = {
+  platform_admin_required: 'Platform operator access is required. Workspace roles do not grant this access.',
+  submission_storage_full: 'Submissions are temporarily unavailable. Contact your deployment operator through your established channel.',
+  analysis_not_terminal: 'Wait for this analysis to finish before sending feedback.',
+  feedback_expired: 'This feedback has expired and cannot be edited.',
+  body_too_large: 'This submission is too large. Shorten the text and try again.',
   invalid_request: 'Check the input format, filenames and required fields.',
   csrf_required: 'Your session changed. Refresh your session, then try again.',
   invalid_origin: 'This address does not match the server’s trusted origin. Ask the operator to set BR_PUBLIC_URL to this site’s exact origin, including scheme and port, then restart the service.',

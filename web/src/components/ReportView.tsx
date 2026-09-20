@@ -25,7 +25,7 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
   return <div className="report-stack">
     <section className={`verdict-panel ${report.decision === 'BLOCK CHANGE' ? 'blocked' : ''}`} aria-label="Analysis decision">
       <div><Decision decision={report.decision} /><h2>{report.headline}</h2>
-        <p>{report.decision === 'BLOCK CHANGE' ? 'Review the new exposure, supporting evidence and remediation before merging.' : 'No new modeled critical paths does not prove safety. Review evidence and coverage before merging.'}</p></div>
+        <p>{report.decision === 'BLOCK CHANGE' ? 'Review the new exposure, supporting evidence and remediation before merging.' : report.decision === 'SAFE TO MERGE' ? 'No new modeled blocking findings detected. No new modeled critical paths does not prove safety. Review evidence and coverage before merging.' : 'Review nonblocking findings and coverage before merging. This decision does not prove safety.'}</p></div>
       <div className="verdict-mark">{report.decision === 'BLOCK CHANGE' ? <ShieldAlert size={40} aria-hidden="true" /> : report.decision === 'SAFE TO MERGE' ? <ShieldCheck size={40} aria-hidden="true" /> : <ShieldQuestion size={40} aria-hidden="true" />}</div>
     </section>
     {report.analysis_complete === false && <div role="alert" className="notice error">Analysis incomplete. Counts are lower bounds within the modeled coverage. Resolve the coverage diagnostics before treating this change as safe.</div>}
@@ -37,7 +37,7 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
       <div className="metric"><span>New exposed resources</span><strong>{report.newly_exposed.length}</strong><small>{report.before.risk_level} → {report.after.risk_level}</small></div>
     </div>
     <section className="panel change-summary" aria-label="Responsible change">
-      <div><h2><GitBranch size={18} aria-hidden="true" />Responsible change</h2>
+      <div><p className="eyebrow">WHAT CAUSED IT?</p><h2><GitBranch size={18} aria-hidden="true" />Responsible change</h2>
         <p>{report.demo?.stage === 'safe' ? 'Baseline configuration — no candidate change yet.' : report.responsible_change || 'Review the modeled changes and relationship evidence below.'}</p></div>
       <nav className="button-row" aria-label="Report sections"><a className="button secondary" href="#remediation">Review remediation</a><a className="button secondary" href="#report-export">Export</a></nav>
     </section>
@@ -52,7 +52,7 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
       <Graph key={`${side}-${report.demo?.stage ?? jobId}`} snapshot={report[side]} />
     </section>
     <div className="report-columns">
-      <section className="panel"><div className="panel-heading"><h2>Source changes</h2></div>
+      <section className="panel"><p className="eyebrow">WHAT CHANGED?</p><div className="panel-heading"><h2>Source changes</h2></div>
         {report.responsible_changes.map(change => <details key={change.file}>
           <summary>{change.file}</summary><pre className="diff"><code>{change.diff}</code></pre>
         </details>)}
@@ -62,10 +62,11 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
         <h3>Sensitive resources</h3>
         {report.newly_reachable_sensitive.length ? <ul className="resource-list">{report.newly_reachable_sensitive.map(id => <li key={id}><code>{id}</code></li>)}</ul> : <p className="muted">No newly reachable sensitive resources.</p>}
         <h3>Decision evidence</h3>
+        <p className="muted">Why it matters: follow the modeled relationships and findings below. Reachability is evidence to review, not proof of successful exploitation.</p>
         <ul className="findings">{report.findings.map((finding, index) => <li key={index}><strong>{finding.label}</strong><p>{finding.detail}</p></li>)}</ul>
       </section>
     </div>
-    <section className="panel" id="remediation"><p className="eyebrow">CLOSE THE PATH</p><h2>Review the remediation</h2>
+    <section className="panel" id="remediation"><p className="eyebrow">HOW CAN I FIX IT?</p><h2>Review the remediation</h2>
       <p className="muted">Proposed Terraform edits require review. Downloads do not change your infrastructure.</p>
       {report.demo?.remediation_kind === 'reviewed_fixture' && <div className="notice">{report.demo.note}</div>}
       {report.remediation.recommendations.map((item, i) => <details className="recommendation" key={`${item.resource}-${i}`}>
@@ -79,6 +80,7 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
       </details>}
     </section>
     <section className="panel"><h2>Coverage & scoring</h2>
+      <h3>Recommended next step</h3><p>{report.decision === 'BLOCK CHANGE' ? 'Review the responsible change and supporting paths, validate suggested edits, then upload the updated candidate for another comparison.' : 'Review existing exposure and coverage gaps with your team before deciding to merge. If you change the candidate, run a new comparison.'} Export evidence when you need a record for the review.</p>
       {report.limitations.map(text => <p key={text}>{text}</p>)}
       <details open={report.analysis_complete === false}><summary>Coverage diagnostics ({report.diagnostics.length})</summary><ul className="findings">{report.diagnostics.map((d, i) => <li key={i}><strong>{d.code}</strong><p>{d.message}</p>{d.phase && <p>{d.phase}: <code>{d.resource}</code>{d.attribute && ` · ${d.attribute}`}{d.source_file && ` · ${d.source_file}`}</p>}</li>)}</ul></details>
       <details><summary>How the heuristic score was calculated</summary><div className="code-pair">{(['before', 'after'] as const).map(key => <div key={key}><h3>{key === 'before' ? 'Before' : 'After'}: {report[key].score}/100</h3><ul className="findings">{report[key].score_breakdown.map(item => <li key={item.finding}>{item.finding}: {item.points} points ({item.count})</li>)}</ul>{!report[key].score_breakdown.length && <p>No score penalties in this model.</p>}</div>)}</div><p className="muted">Scores start at 100 and subtract capped findings. The score is not a calibrated measure of real-world risk.</p></details>
