@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import secrets
 import subprocess
 import threading
 import time
@@ -205,7 +206,7 @@ def test_environment_origin_defaults_and_explicit_https(monkeypatch, environment
             monkeypatch.delenv(name)
     for name, value in {
         "BR_ENV": environment,
-        "BR_SESSION_SECRET": "a" * 48,
+        "BR_SESSION_SECRET": secrets.token_urlsafe(48),
         "BR_AUTH_MODE": "oidc",
         "BR_OIDC_ISSUER": "https://issuer.example",
         "BR_OIDC_CLIENT_ID": "client",
@@ -524,13 +525,44 @@ def test_production_requires_explicit_environment_secret(monkeypatch):
     monkeypatch.delenv("BR_SESSION_SECRET", raising=False)
     with pytest.raises(ValueError):
         Settings.from_env()
-    monkeypatch.setenv("BR_SESSION_SECRET", "a" * 48)
+    monkeypatch.setenv("BR_SESSION_SECRET", secrets.token_urlsafe(48))
     settings = Settings.from_env()
     assert settings.production and not settings.auto_migrate
     with pytest.raises(ValueError):
         replace(settings, auto_migrate=True).validate()
     with pytest.raises(ValueError):
         replace(settings, auth_mode="demo").validate()
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"public_url": "https://localhost"},
+        {"public_url": "https://app.internal"},
+        {"session_secret": "a" * 48},
+        {"log_level": "DEBUG"},
+        {"github_app_id": 1},
+        {"github_webhook_secret": "x" * 40},
+        {"database_url": "postgresql+psycopg:///br"},
+    ],
+)
+def test_production_rejects_unsafe_configuration_variants(settings, updates):
+    production = replace(
+        settings,
+        environment="production",
+        database_url="postgresql+psycopg://db.example:5432/br",
+        public_url="https://app.example",
+        auth_mode="oidc",
+        oidc_issuer="https://issuer.example",
+        oidc_client_id="client",
+        oidc_client_secret="oidc-client-secret",
+        session_secret=secrets.token_urlsafe(48),
+        auto_migrate=False,
+    )
+    production.validate()
+    with pytest.raises(ValueError):
+        replace(production, **updates).validate()
+    replace(production, environment="development", **updates).validate()
 
 
 def test_oidc_redirect_uses_state_nonce_pkce_and_rejects_invalid_state(

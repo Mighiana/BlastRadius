@@ -110,6 +110,36 @@ class Settings:
             raise ValueError(
                 "Production requires OIDC, PostgreSQL, HTTPS, a session secret and explicit migrations"
             )
+        if self.production:
+            hostname = url.hostname or ""
+            if hostname in {"localhost", "127.0.0.1", "::1", "0.0.0.0"} or hostname.endswith(
+                (".localhost", ".local", ".internal")
+            ):
+                raise ValueError("Production BR_PUBLIC_URL must not use a local hostname")
+            if len(set(self.session_secret)) < 10 or self.session_secret in {
+                self.oidc_client_secret,
+                self.github_webhook_secret,
+            }:
+                raise ValueError("Production session secret must not be a low-entropy or placeholder value")
+            if self.log_level == "DEBUG":
+                raise ValueError("Production BR_LOG_LEVEL must not be DEBUG")
+            github_configured = (
+                bool(self.github_app_id),
+                bool(self.github_app_slug),
+                self.github_private_key_file is not None,
+                bool(self.github_webhook_secret),
+            )
+            if any(github_configured) and not all(github_configured):
+                raise ValueError(
+                    "GitHub App requires BR_GITHUB_APP_ID, BR_GITHUB_APP_SLUG, "
+                    "BR_GITHUB_PRIVATE_KEY_FILE and BR_GITHUB_WEBHOOK_SECRET together"
+                )
+            if all(github_configured) and (
+                self.github_private_key_file is None or not self.github_private_key_file.is_file()
+            ):
+                raise ValueError("BR_GITHUB_PRIVATE_KEY_FILE must be an existing regular file")
+            if not urlsplit(self.database_url).hostname:
+                raise ValueError("Production PostgreSQL URL must include a hostname")
         if self.auth_mode == "oidc":
             issuer = urlsplit(self.oidc_issuer)
             if (

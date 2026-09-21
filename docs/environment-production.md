@@ -6,12 +6,14 @@ development credentials into a hosted instance.
 
 Required: `BR_ENV=production`, `BR_AUTH_MODE=oidc`, `BR_AUTO_MIGRATE=false`,
 `BR_DATABASE_URL=postgresql+psycopg://…`, `BR_PUBLIC_URL=https://…`,
-a stable `BR_SESSION_SECRET` of at least 32 characters, `BR_OIDC_ISSUER`,
+a stable `BR_SESSION_SECRET` of at least 32 characters with at least 10 distinct
+characters (and different from the OIDC/GitHub secrets), `BR_OIDC_ISSUER`,
 `BR_OIDC_CLIENT_ID` and `BR_OIDC_CLIENT_SECRET`. Invalid combinations fail startup.
 See [auth](auth.md) for cookies, CSRF and OIDC validation and [API](api.md) for quotas.
 Payments stay disabled; do not provision payment-provider credentials.
 `BR_PUBLIC_URL` has no default in production and must name the explicitly trusted
-HTTPS origin. Request headers never select it. The separate
+HTTPS origin; loopback, `.localhost`, `.local` and `.internal` hostnames are
+rejected. Request headers never select it. The separate
 [private preview profile](environment-preview.md) does not change production's
 OIDC, PostgreSQL, secret, host-validation or migration requirements.
 
@@ -40,7 +42,8 @@ configuration defaults are not credentials.
 
 Use PostgreSQL with certificate verification (`sslmode=verify-full` and the
 provider's CA configuration), encrypted storage, and separately scoped migration
-and application roles. This is a deployment requirement, not evidence that a
+roles. Production PostgreSQL URLs must include a hostname. This is a deployment
+requirement, not evidence that a
 managed service or its certificates have been tested. The Compose database has no
 TLS setup, runs a local initialization superuser, and is not that production role
 or network design.
