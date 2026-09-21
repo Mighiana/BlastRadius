@@ -977,6 +977,56 @@ def test_request_log_is_structured_and_privacy_safe(client, settings, caplog):
     assert request["path"] == "/api/nope/*" and "analysis_id" not in request
 
 
+def test_lifespan_logs_start_ready_and_stop(app, caplog):
+    caplog.set_level(logging.INFO, logger="blastradius.server.app")
+    with TestClient(app):
+        events = [
+            json.loads(record.message).get("event")
+            for record in caplog.records
+            if record.name == "blastradius.server.app"
+        ]
+        assert events[:2] == ["service.starting", "service.ready"]
+    events = [
+        json.loads(record.message).get("event")
+        for record in caplog.records
+        if record.name == "blastradius.server.app"
+    ]
+    assert events[-1] == "service.stopping"
+
+
+def test_request_logging_redacts_credentials_and_payload(client, settings, caplog):
+    caplog.set_level(logging.INFO, logger="blastradius")
+    response = client.post(
+        "/api/projects",
+        headers={
+            "Authorization": "Bearer SECRET-BEARER",
+            "Cookie": "br_session=SECRET-COOKIE",
+        },
+        json={
+            "name": "x",
+            "note": "AKIASECRETKEYVALUE",
+            "organization_id": "org",
+        },
+    )
+    assert response.status_code == 422
+    records = [
+        json.loads(JsonFormatter().format(record))
+        for record in caplog.records
+        if record.name.startswith("blastradius")
+    ]
+    assert any(record.get("status") == 422 and record.get("error") == "invalid_request" for record in records)
+    assert all(
+        secret not in caplog.text
+        for secret in (
+            "SECRET-BEARER",
+            "SECRET-COOKIE",
+            "AKIASECRETKEYVALUE",
+            "postgresql+psycopg",
+            settings.session_secret,
+        )
+    )
+
+
 def test_rate_limits_separate_demo_auth_and_general(settings, demo_results, monkeypatch):
     monkeypatch.setattr("blastradius.server.app.build_demos", lambda _: demo_results)
     with TestClient(

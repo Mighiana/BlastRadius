@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import secrets
@@ -59,7 +60,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def _fatal_startup(reason: str) -> None:
-    LOGGER.error("Fatal service startup failure: %s", reason)
+    LOGGER.error(json.dumps({"event": "service.fatal", "reason": reason}))
     os.kill(os.getpid(), signal.SIGTERM)
 
 
@@ -144,6 +145,15 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        LOGGER.info(
+            json.dumps(
+                {
+                    "event": "service.starting",
+                    "environment": settings.environment,
+                    "auth_mode": settings.auth_mode,
+                }
+            )
+        )
         starting.clear()
         stop_wait = threading.Event()
         _app.state.starting = starting
@@ -180,6 +190,7 @@ def create_app(
                         fatal("startup_failed")
                         return
                     starting.clear()
+                    LOGGER.info(json.dumps({"event": "service.ready"}))
                     return
 
             wait_thread = threading.Thread(
@@ -189,8 +200,10 @@ def create_app(
         try:
             if not starting.is_set():
                 await run_in_threadpool(start_components)
+                LOGGER.info(json.dumps({"event": "service.ready"}))
             yield
         finally:
+            LOGGER.info(json.dumps({"event": "service.stopping"}))
             await run_in_threadpool(github.shutdown)
             await run_in_threadpool(jobs.shutdown)
             if starting.is_set():
