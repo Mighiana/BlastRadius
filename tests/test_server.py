@@ -56,9 +56,10 @@ from blastradius.server.models import (
     User,
 )
 from blastradius.server.observability import JsonFormatter
-from blastradius.server.persistence import cleanup, run_retention_sweep
+from blastradius.server.persistence import cleanup
 from blastradius.server.plans import PLANS
 from blastradius.server.quotas import lock_org, period, quota
+from blastradius.server.retention import run_retention_sweep
 from blastradius.server.schemas import AnalysisInput, EnterpriseLimits
 
 
