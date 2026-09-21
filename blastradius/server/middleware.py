@@ -193,8 +193,13 @@ class GuardMiddleware:
                 await self.app(scope, replay, safe_send)
             except Exception as exc:
                 logger.warning(
-                    json.dumps({"request_id": request_id, "event": "unhandled_exception"}),
-                    exc_info=(type(exc), type(exc)(), None),
+                    json.dumps(
+                        {
+                            "request_id": request_id,
+                            "event": "unhandled_exception",
+                            "exception": type(exc).__name__,
+                        }
+                    )
                 )
                 if not response_started:
                     await error(500, "internal_error")
