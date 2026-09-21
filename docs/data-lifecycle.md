@@ -61,7 +61,11 @@ It selects a bounded candidate batch using workspace retention settings, then
 locks only those workspaces and rechecks the current window before deletion.
 It is idempotent; repeating after exhaustion reports `{"removed":0}`. Schedule
 this command hourly with an operator-controlled timer, repeating bounded batches
-as needed. There is no in-process scheduler, external email or queue service.
+as needed. Operators may instead opt in to the bounded in-process sweep with
+`BR_RETENTION_SWEEP_SECONDS`; it runs only on the lease-holding instance,
+performs its first sweep at startup, and repeats at the configured interval.
+Manual cleanup commands remain the authoritative path. Sleeping free instances
+only sweep while awake. There is no external email or queue service.
 Audit events record counts and workspace identity without retaining evidence.
 Monitor command exit codes and backlog on the chosen deployment.
 

@@ -393,6 +393,11 @@ For commercial cleanup, stop only when all three returned counts are zero;
 repeat bounded invocations if any table has a backlog. Review and alert on
 capacity (10,000 beta requests, 50,000 feedback records, 100,000 activity events).
 Event capacity evicts oldest activity and is not a durable accounting ledger.
+The optional `BR_RETENTION_SWEEP_SECONDS` timer runs both bounded cleanup passes
+only on the lease-holding instance, immediately at startup and then at the
+configured interval. Manual commands remain authoritative; user requests never
+trigger cleanup, and the operator may opt in to the timer via
+`BR_RETENTION_SWEEP_SECONDS`.
 
 ## Incident workflow
 
@@ -440,7 +445,8 @@ Both read inspection and plan assignments are audited as `operator`.
 
 Cleanup removes bounded batches of expired analysis records and child evidence;
 see [retention and scheduling](data-lifecycle.md). Usage is not refunded.
-The API never invokes cleanup based on a user request or environment timer.
+User requests never trigger cleanup; the operator may opt in to the timer via
+`BR_RETENTION_SWEEP_SECONDS`.
 
 The separate read-only `/operator` UI requires verified OIDC and
 `BR_WEB_ADMIN_USER_IDS`; CLI enablement and workspace roles do not grant access.

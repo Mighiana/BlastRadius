@@ -27,6 +27,8 @@ services:
         value: "false"
       - key: BR_LEASE_WAIT_SECONDS
         value: "120"
+      - key: BR_RETENTION_SWEEP_SECONDS
+        value: "3600"
       - key: BR_TRUST_PROXY_HEADERS
         value: "true"
       - key: BR_SESSION_SECRET

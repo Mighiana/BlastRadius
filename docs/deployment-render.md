@@ -83,6 +83,10 @@ continues to derive cookies and Origin checks from `BR_PUBLIC_URL`. Do not set
 this flag when untrusted clients can connect directly, and do not weaken the
 application's Origin, CSRF or host validation.
 
+The Blueprint sets `BR_RETENTION_SWEEP_SECONDS=3600`. The optional sweep runs
+only on the lease-holding instance, immediately at startup and hourly
+afterward; sleeping free instances sweep only while awake.
+
 The Blueprint deliberately configures one web instance and does not enable
 autoscaling. The database lease is a single-service-process guard; additional
 instances require a separate architecture and review.

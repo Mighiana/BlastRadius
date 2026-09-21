@@ -47,7 +47,13 @@ from blastradius.server.operator import is_platform_admin, operator_router
 from blastradius.server.plans import catalog, entitlements, require_feature
 from blastradius.server.quotas import lock_org, quota, usage_payload, usage_row
 from blastradius.server.lifecycle import authorized_org, lifecycle_router
-from blastradius.server.persistence import effective_policy, visible_analysis, cutoff, public_result
+from blastradius.server.persistence import (
+    cutoff,
+    effective_policy,
+    public_result,
+    run_retention_sweep,
+    visible_analysis,
+)
 from blastradius.server.schemas import (
     AnalysisInput,
     OrganizationInput,
@@ -158,6 +164,36 @@ def create_app(
         stop_wait = threading.Event()
         _app.state.starting = starting
         wait_thread: threading.Thread | None = None
+        retention_thread: threading.Thread | None = None
+
+        def start_retention_worker() -> None:
+            nonlocal retention_thread
+            if settings.retention_sweep_seconds <= 0 or retention_thread is not None:
+                return
+
+            def sweep() -> None:
+                while True:
+                    if lease.healthy():
+                        try:
+                            counts = run_retention_sweep(db)
+                            LOGGER.info(json.dumps({"event": "retention.sweep", **counts}))
+                        except Exception as error:
+                            LOGGER.error(
+                                json.dumps(
+                                    {
+                                        "event": "retention.sweep_failed",
+                                        "exception": type(error).__name__,
+                                    }
+                                )
+                            )
+                    if stop_wait.wait(settings.retention_sweep_seconds):
+                        return
+
+            retention_thread = threading.Thread(
+                target=sweep, name="retention-sweep", daemon=True
+            )
+            retention_thread.start()
+
         try:
             lease.acquire()
         except RuntimeError:
@@ -191,6 +227,7 @@ def create_app(
                         return
                     starting.clear()
                     LOGGER.info(json.dumps({"event": "service.ready"}))
+                    start_retention_worker()
                     return
 
             wait_thread = threading.Thread(
@@ -201,13 +238,16 @@ def create_app(
             if not starting.is_set():
                 await run_in_threadpool(start_components)
                 LOGGER.info(json.dumps({"event": "service.ready"}))
+                start_retention_worker()
             yield
         finally:
             LOGGER.info(json.dumps({"event": "service.stopping"}))
+            stop_wait.set()
+            if retention_thread is not None:
+                retention_thread.join(timeout=5)
             await run_in_threadpool(github.shutdown)
             await run_in_threadpool(jobs.shutdown)
             if starting.is_set():
-                stop_wait.set()
                 if wait_thread is not None:
                     wait_thread.join(timeout=2)
             else:

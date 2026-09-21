@@ -19,6 +19,7 @@ def test_render_blueprint_has_production_single_instance_contract():
     assert values["BR_ENV"]["value"] == "production"
     assert values["BR_AUTH_MODE"]["value"] == "oidc"
     assert values["BR_AUTO_MIGRATE"]["value"] == "false"
+    assert values["BR_RETENTION_SWEEP_SECONDS"]["value"] == "3600"
     assert values["BR_SESSION_SECRET"]["generateValue"] is True
     assert values["BR_DATABASE_URL"]["fromDatabase"]["name"] == "blastradius-db"
     for key in ("BR_PUBLIC_URL", "BR_OIDC_ISSUER", "BR_OIDC_CLIENT_ID", "BR_OIDC_CLIENT_SECRET"):

@@ -38,6 +38,7 @@ class Settings:
     demo_rate_limit: int = 60
     auto_migrate: bool = True
     lease_wait_seconds: int = 0
+    retention_sweep_seconds: int = 0
     log_level: str = "INFO"
 
     @property
@@ -171,6 +172,8 @@ class Settings:
             raise ValueError("Limits must be positive")
         if not 0 <= self.lease_wait_seconds <= 600:
             raise ValueError("BR_LEASE_WAIT_SECONDS must be between 0 and 600")
+        if self.retention_sweep_seconds != 0 and not 60 <= self.retention_sweep_seconds <= 86400:
+            raise ValueError("BR_RETENTION_SWEEP_SECONDS must be 0 or between 60 and 86400")
         if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
             raise ValueError("BR_LOG_LEVEL must be DEBUG, INFO, WARNING or ERROR")
         if self.workers > self.max_jobs:
@@ -227,6 +230,7 @@ class Settings:
             demo_rate_limit=int(env.get("BR_DEMO_RATE_LIMIT", "60")),
             auto_migrate=env.get("BR_AUTO_MIGRATE", "false" if production else "true") == "true",
             lease_wait_seconds=int(env.get("BR_LEASE_WAIT_SECONDS", "0")),
+            retention_sweep_seconds=int(env.get("BR_RETENTION_SWEEP_SECONDS", "0")),
             log_level=env.get("BR_LOG_LEVEL", "INFO"),
         )
         settings.validate()

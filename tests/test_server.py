@@ -41,6 +41,7 @@ from blastradius.server.lease import ServiceLease
 from blastradius.server.models import (
     Analysis,
     AnalysisArtifact,
+    AnalysisFeedback,
     AttackPath,
     AttackPathHop,
     AuditEvent,
@@ -55,7 +56,7 @@ from blastradius.server.models import (
     User,
 )
 from blastradius.server.observability import JsonFormatter
-from blastradius.server.persistence import cleanup
+from blastradius.server.persistence import cleanup, run_retention_sweep
 from blastradius.server.plans import PLANS
 from blastradius.server.quotas import lock_org, period, quota
 from blastradius.server.schemas import AnalysisInput, EnterpriseLimits
@@ -1904,3 +1905,107 @@ def test_bounded_cleanup_on_both_databases(migration_database):
     assert cleanup(database, 1) == 0
     with database.session() as session:
         assert session.scalar(select(func.count()).select_from(Analysis)) == 1
+
+
+@pytest.mark.parametrize("value, valid", [(-1, False), (30, False), (0, True), (3600, True)])
+def test_retention_sweep_setting_bounds(settings, value, valid):
+    configured = replace(settings, retention_sweep_seconds=value)
+    if valid:
+        configured.validate()
+    else:
+        with pytest.raises(ValueError, match="BR_RETENTION_SWEEP_SECONDS"):
+            configured.validate()
+
+
+def test_retention_sweep_removes_expired_analysis_and_children(client, app):
+    me = login(client)
+    proj = project(client, me)
+    old_job = terminal(client, submit(client, proj["id"]).json()["id"])
+    fresh_job = terminal(client, submit(client, proj["id"]).json()["id"])
+    with app.state.db.session(write=True) as session:
+        old = session.get(Analysis, old_job["id"])
+        old.created_at = time.time() - 8 * 86400
+        user_id = session.scalar(select(User.id))
+        session.add(
+            AnalysisFeedback(
+                analysis_id=old.id,
+                project_id=proj["id"],
+                organization_id=proj["organization_id"],
+                user_id=user_id,
+                useful=True,
+                message="feedback",
+            )
+        )
+    counts = run_retention_sweep(app.state.db)
+    assert counts["analyses"] == 1
+    with app.state.db.session() as session:
+        assert session.get(Analysis, old_job["id"]) is None
+        assert session.get(Analysis, fresh_job["id"]) is not None
+        for model in (Finding, AttackPath, AnalysisArtifact, AnalysisFeedback):
+            assert (
+                session.scalar(
+                    select(func.count())
+                    .select_from(model)
+                    .where(model.analysis_id == old_job["id"])
+                )
+                == 0
+            )
+        path_ids = select(AttackPath.id).where(AttackPath.analysis_id == old_job["id"])
+        assert (
+            session.scalar(
+                select(func.count()).select_from(AttackPathHop).where(
+                    AttackPathHop.path_id.in_(path_ids)
+                )
+            )
+            == 0
+        )
+
+
+def test_retention_sweep_worker_runs_immediately_and_stops(settings, demo_results, monkeypatch):
+    called = threading.Event()
+
+    def sweep(_db, _limit=100):
+        called.set()
+        return {
+            "analyses": 0,
+            "beta_interest": 0,
+            "analysis_feedback": 0,
+            "product_events": 0,
+            "passes": 2,
+        }
+
+    monkeypatch.setattr("blastradius.server.app.build_demos", lambda _: demo_results)
+    monkeypatch.setattr("blastradius.server.app.run_retention_sweep", sweep)
+    configured = replace(settings, retention_sweep_seconds=60)
+    with TestClient(create_app(configured)):
+        assert called.wait(2)
+    assert not any(
+        thread.name == "retention-sweep" and thread.is_alive()
+        for thread in threading.enumerate()
+    )
+
+
+def test_retention_sweep_worker_logs_failures_and_continues(
+    settings, demo_results, monkeypatch, caplog
+):
+    called = threading.Event()
+
+    def sweep(_db, _limit=100):
+        called.set()
+        raise RuntimeError("test failure")
+
+    monkeypatch.setattr("blastradius.server.app.build_demos", lambda _: demo_results)
+    monkeypatch.setattr("blastradius.server.app.run_retention_sweep", sweep)
+    caplog.set_level(logging.INFO, logger="blastradius.server.app")
+    logger = logging.getLogger("blastradius")
+    logger.addHandler(caplog.handler)
+    try:
+        with TestClient(create_app(replace(settings, retention_sweep_seconds=60))):
+            assert called.wait(2)
+            assert "retention.sweep_failed" in caplog.text
+            assert any(
+                thread.name == "retention-sweep" and thread.is_alive()
+                for thread in threading.enumerate()
+            )
+    finally:
+        logger.removeHandler(caplog.handler)
