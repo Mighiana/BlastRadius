@@ -88,8 +88,8 @@ The default Blueprint costs $0 on Render's free tiers. The free web service
 sleeps after 15 minutes of inactivity and has an approximately 50-second cold
 start, so it is suitable for a demo rather than latency-sensitive production
 traffic. The free PostgreSQL database is deleted 30 days after creation unless
-it is upgraded; the owner must upgrade it or export the data before that
-deadline. Prices and plan behavior are provider-controlled; verify the current
+it is upgraded; the owner must upgrade it or move the data before that
+deadline using [the database move procedure](database-migration.md). Prices and plan behavior are provider-controlled; verify the current
 Render limits and lifecycle terms before provisioning.
 
 ## Upgrading later
