@@ -190,7 +190,7 @@ It ignores application database settings and never attaches existing volumes.
 Pull the reviewed digest explicitly; the drill itself uses `--pull=never`:
 
 ```bash
-docker pull postgres:16.15-trixie@sha256:a3b7f434b2dc57ce85a67e171163eb8ab1a1ebcb39d27484661f26b1dfbe30d6
+docker pull postgres:16.15-alpine3.23@sha256:621a761097839bdb50207afd6b87a72f38e2d718dd46c3d744828d8917c4f1e0
 .venv/bin/python scripts/ops_restore_drill.py \
   --output-dir ".local/ops-drill/$(date -u +%Y%m%dT%H%M%SZ)"
 .venv/bin/python -m pytest -o addopts='' -q scripts/test_release_ops_drill.py
@@ -250,13 +250,14 @@ also holds a mode-0600 `synthetic.dump`. Share the **JSON**, not a real DB dump.
 The file format is not encryption. Drill time is not a production recovery-time
 objective: it excludes provision, download, decryption and real data volume.
 
-For Bookworm → Trixie, dump from the running old image before changing it, retain
-that image and volume, then use a separately reviewed operator procedure to
-restore into a new Trixie database/volume. This synthetic-only script deliberately
+For a glibc-based PostgreSQL image → Alpine, dump from the running old image before
+changing it, retain that image and volume, then use a separately reviewed operator
+procedure to restore into a new Alpine database/volume. This synthetic-only script deliberately
 cannot accept that live backup. Validate locale/collation-dependent indexes and
-queries before cutover; do not mount the old data directory into the new OS
-image. PostgreSQL major upgrades additionally require their reviewed upgrade
-procedure. The local drill is not certification of arbitrary existing data.
+queries before cutover; do not mount the old data directory into the new OS image.
+Indexes are rebuilt by logical restore. PostgreSQL major upgrades additionally
+require their reviewed upgrade procedure. The local drill is not certification of
+arbitrary existing data.
 
 The dump is plaintext on disk despite custom format. Production needs encrypted
 backup storage, access controls, an independently stored key and restore tests;

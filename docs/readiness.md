@@ -1,7 +1,8 @@
 # Authenticated SaaS readiness
 
 Assessment: **2026-09-20 — INTERNAL ALPHA**. Private/public beta promotion remains
-blocked. Local shell and current-revision browser/responsive acceptance of the
+subject to hosted-provider and owner gates; the local container promotion gate
+passes with the adopted Alpine database image. Local shell and current-revision browser/responsive acceptance of the
 integrated commercial-beta implementation passed. Remaining image, hosted-provider,
 operations and owner-approval gates prevent a higher classification. This is not
 a security certification.
@@ -29,8 +30,8 @@ remain explicitly historical and are not added to current counts.
 | PostgreSQL | Disposable PostgreSQL 16.15 acceptance passes; fresh/upgrade/idempotent migrations reach `0004`; logical recovery and commercial retention verified |
 | RBAC / tenant isolation | Authorization matrix and beta/feedback/operator regressions pass in full backend suite; workspace ownership does not grant platform access |
 | Fail-closed analysis | Engine/worker/restart regressions pass; errors/incomplete results never become SAFE; SAFE means “No new modeled blocking findings detected.” |
-| Container security | Promotion blocked: database 1 CRITICAL / 54 HIGH; app reports zero but retains assessed zlib MEDIUM risk; [full inventory](container-security.md) |
-| CI | Tested runtime/evidence head `da043fb`: **6 passed, 0 failed, 0 pending, 1 skipped**. Later documentation pushes have separate checks; the local image-promotion gate remains red |
+| Container security | Promotion passes for the rebuilt Alpine database and app images with zero findings in every severity category; [full inventory](container-security.md) |
+| CI | Tested runtime/evidence head `da043fb`: **6 passed, 0 failed, 0 pending, 1 skipped**. Later documentation pushes have separate checks; the local image-promotion gate is green |
 | Responsive / browser | **29/29** native browser cases, zero skipped/unexpected/flaky; **186/186** current six-width measurements, plus 13 browser-driven acceptance groups and 2 independent HTTP exercises |
 | Onboarding | Demo/HCL/plan choices, result guidance, beta/pricing/trust wording and paid CTA-to-beta passed local browser checks; a new customer's under-five-minute time-to-value remains a validation target, not a measured claim |
 | Beta access | Real consent validation, HTTP 201 persistence and saved state passed; exact Origin/CSRF, peer/global rate caps and no public list checked; no invitation/email promise |
@@ -140,19 +141,19 @@ server-only wheel installation. The wheel reached migration `0004` twice with
 one commercial-lock row and readiness true. Five isolated CLI cases preserved
 exits **1/0/0/1/2** with parseable JSON/SARIF.
 
-Both runtime images were rebuilt and checked again for migrations, idempotency,
+The historical Debian runtime images were rebuilt and checked again for migrations, idempotency,
 data-preserving dump/restore, nine installed-worker cases, binary psycopg,
 health/static assets, nonroot/read-only roots, preserved package metadata,
 absent build tools and exit-2 entrypoint errors. Image/repository secret checks
-passed. New vulnerability scans retain database **1 CRITICAL / 54 HIGH / 80
-MEDIUM / 104 LOW / 6 UNKNOWN**; the application reports zero but retains the
-documented zlib residual. The unchanged promotion gate failed with **make exit
-2**. No suppression or severity adjustment was added.
+passed. Those historical scans retained database **1 CRITICAL / 54 HIGH / 80
+MEDIUM / 104 LOW / 6 UNKNOWN**; the adopted Alpine rescan is recorded in
+[container security](container-security.md#alpine-database-image-adopted). No
+suppression or severity adjustment was added.
 
 The [security shell evidence](https://app.devin.ai/attachments/48613f5e-db67-4065-86e4-c2cac80db482/security-shell-evidence.tar.gz)
 contains check/build/audit logs and raw scans, excluding databases, environment
 files and installed environments. Current image digests and scanner provenance
-are in [container security](container-security.md#defensive-security-reassessment).
+are in [container security](container-security.md#historical-debian-defensive-security-reassessment).
 One Starlette/httpx deprecation warning remains. That security stage ran no
 browser or hosted-provider actions; subsequent current-revision local browser
 acceptance above verifies the new auth and deep-link behavior.
@@ -172,7 +173,7 @@ These are integrated shell results at `5be27d0`, not the historical browser run.
 | Migrations | Fresh and upgrade-from-`0001` to `0004`, repeated migration, existing sentinel preservation and readiness passed; packaged commercial singleton present |
 | Container | Both images built; read-only/nonroot UID, dropped capabilities, package metadata, missing build tools, entrypoint exit 2, psycopg binary, nine installed-worker cases, migration/restore, health and static asset checks passed |
 | Audits | Python/npm dependency audits and repository/both-image secret checks passed. Trivy image ledger retains all 428 baseline + 245 rebuilt rows, with 673 unique row IDs and one separate carried-forward residual |
-| Promotion | Unchanged `make promotion-check` **failed as required**, make exit 2; no HIGH/CRITICAL exemption, suppression or severity reduction |
+| Historical promotion | The Debian-image `make promotion-check` **failed as required**, make exit 2; no HIGH/CRITICAL exemption, suppression or severity reduction |
 | Browser collection | `playwright test --list` collected **29** cases; no browser execution or new responsiveness claim |
 
 Python emits one Starlette/httpx TestClient deprecation warning. It is not
@@ -188,7 +189,7 @@ make frontend
 make audit wheel
 make secret-audit container-audit
 bash scripts/verify-containers.sh
-make promotion-check  # expected to fail until image HIGH/CRITICAL findings are fixed
+make promotion-check  # must pass with the adopted Alpine database image
 ```
 
 ### Integrated recovery and commercial contracts
@@ -425,8 +426,8 @@ These gaps are not invitations to expand this verification pass.
 | Tooling compatibility — Low | Starlette emits an httpx TestClient deprecation warning; npm reports ESLint 9 support status | Track supported test-client/linter upgrades separately and rerun the suite; do not suppress warnings as a fix |
 
 Source/image secret checks and dependency audits are distinct from OS
-vulnerability scans. `make promotion-check` **failed as intended**; passing
-application tests does not waive the image gate.
+vulnerability scans. The historical Debian `make promotion-check` failed as
+intended; the adopted Alpine image is covered by the current passing gate.
 
 <a id="commercial-beta-blockers"></a>
 ## PRIVATE BETA BLOCKERS

@@ -1,7 +1,7 @@
-FROM postgres:16.15-trixie@sha256:a3b7f434b2dc57ce85a67e171163eb8ab1a1ebcb39d27484661f26b1dfbe30d6 AS database
-RUN apt-get purge --yes --auto-remove gnupg gnupg-l10n gpg gpg-agent gpgconf gpgsm dirmngr \
-    && rm /usr/local/bin/gosu /etc/ssl/private/ssl-cert-snakeoil.key /etc/ssl/certs/ssl-cert-snakeoil.pem \
-    && rm -rf /var/lib/apt/lists/* /var/cache/apt/*
+FROM postgres:16.15-alpine3.23@sha256:621a761097839bdb50207afd6b87a72f38e2d718dd46c3d744828d8917c4f1e0 AS database
+RUN apk upgrade --no-cache \
+    && rm /usr/local/bin/gosu \
+    && rm -rf /var/cache/apk/*
 USER postgres
 
 FROM node:24.19.0-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df AS frontend

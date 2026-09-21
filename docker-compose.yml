@@ -17,12 +17,12 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-blastradius}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a local database password in .env}
     volumes:
-      - postgres-trixie-data:/var/lib/postgresql/data
+      - postgres-alpine-data:/var/lib/postgresql/data
     user: postgres
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
-      - /var/run/postgresql:size=16m,uid=999,gid=999,mode=3775
+      - /var/run/postgresql:size=16m,uid=70,gid=70,mode=3775
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     cpus: 1.0
@@ -90,5 +90,5 @@ services:
     logging: *logging
 
 volumes:
-  postgres-trixie-data:
+  postgres-alpine-data:
   app-data:

@@ -25,8 +25,8 @@ app_options=(--network "$network" "${hardening[@]}"
   -e "BR_DATABASE_URL=postgresql+psycopg://container_test:local-container-test-only@$db:5432/container_test")
 
 docker run -d --name "$db" --network "$network" "${hardening[@]}" \
-  --tmpfs /var/lib/postgresql/data:size=256m,uid=999,gid=999,mode=700 \
-  --tmpfs /var/run/postgresql:size=16m,uid=999,gid=999,mode=3775 \
+  --tmpfs /var/lib/postgresql/data:size=256m,uid=70,gid=70,mode=700 \
+  --tmpfs /var/run/postgresql:size=16m,uid=70,gid=70,mode=3775 \
   -e POSTGRES_USER=container_test -e POSTGRES_DB=container_test \
   -e POSTGRES_PASSWORD=local-container-test-only \
   --health-cmd='pg_isready -U container_test -d container_test' \
@@ -48,10 +48,10 @@ wait_healthy() {
 }
 wait_healthy "$db"
 docker exec "$db" sh -ec '
-  test "$(id -u)" = 999
+  test "$(id -u)" = 70
   test ! -w /etc/passwd
   test ! -e /usr/local/bin/gosu
-  test -s /var/lib/dpkg/status
+  test -s /lib/apk/db/installed
   for tool in gcc cc make gpg gpgconf dirmngr; do
     ! command -v "$tool"
   done

@@ -36,8 +36,8 @@ from blastradius.server.models import (
 )
 
 IMAGE = (
-    "postgres:16.15-trixie@sha256:"
-    "a3b7f434b2dc57ce85a67e171163eb8ab1a1ebcb39d27484661f26b1dfbe30d6"
+    "postgres:16.15-alpine3.23@sha256:"
+    "621a761097839bdb50207afd6b87a72f38e2d718dd46c3d744828d8917c4f1e0"
 )
 LABEL = "io.blastradius.disposable-ops-drill"
 SOURCE = "br_drill_source"
@@ -99,8 +99,8 @@ class DisposablePostgres:
             "--user", "postgres", "--read-only", "--cap-drop=ALL",
             "--security-opt=no-new-privileges:true", "--memory=1g", "--cpus=1",
             "--pids-limit=128", "--log-driver=none",
-            "--tmpfs", "/var/lib/postgresql/data:rw,noexec,nosuid,size=512m,uid=999,gid=999",
-            "--tmpfs", "/var/run/postgresql:rw,noexec,nosuid,size=16m,uid=999,gid=999",
+            "--tmpfs", "/var/lib/postgresql/data:rw,noexec,nosuid,size=512m,uid=70,gid=70",
+            "--tmpfs", "/var/run/postgresql:rw,noexec,nosuid,size=16m,uid=70,gid=70",
             "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
             "--publish", "127.0.0.1::5432", "--env", "POSTGRES_PASSWORD", IMAGE,
         ], env={**os.environ, "POSTGRES_PASSWORD": self.password})

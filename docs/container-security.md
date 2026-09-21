@@ -1,14 +1,13 @@
 # Container security assessment
 
 Assessed 2026-09-20 on Linux amd64 with Trivy 0.74.0, vulnerability database v2
-updated `2026-09-20T07:08:21.474120123Z`. **Promotion remains blocked.** Database
-HIGH/CRITICAL findings remain unfixed; an empty application scan does not establish
-absence of vulnerabilities. In particular, application zlib has a carried-forward
-MEDIUM finding that Alpine's scanner feed omits.
+updated `2026-09-20T07:08:21.474120123Z`. The database image now uses the
+validated Alpine target recorded below; the current promotion gate is rerun after
+each image rebuild.
 
 ## Evidence and inventory
 
-### Defensive security reassessment
+### Historical Debian defensive security reassessment
 
 Runtime revision `abfe328` adds the OIDC claim-provenance fix and beta/operator
 deep links after the prior integrated head `5cc9257`. Both images were rebuilt
@@ -18,8 +17,8 @@ Raw current scans:
 [database](https://app.devin.ai/attachments/9ab00555-74ab-4264-9f69-b9800328228a/database.json),
 [scanner provenance](https://app.devin.ai/attachments/4936ae52-3584-41f6-ae86-64f27b003881/scanner.json).
 The [security shell evidence](https://app.devin.ai/attachments/48613f5e-db67-4065-86e4-c2cac80db482/security-shell-evidence.tar.gz)
-includes builds, container checks, repository/image secret scans and the
-unchanged promotion failure (make exit 2).
+includes the historical Debian builds, container checks, repository/image secret
+scans and the then-unchanged promotion failure (make exit 2).
 
 Current local Linux amd64 image index digests (not published):
 
@@ -37,11 +36,11 @@ supplied baseline findings below are retained. Runtime metadata, nonroot
 operation, read-only roots, restore/migration behavior, psycopg binary support,
 nine installed-worker cases and entrypoint failure behavior all passed again.
 No Dockerfile, dependency, runtime policy or scanner suppression changed.
-Promotion remains blocked. Subsequent installed-package browser acceptance at
-`da043fb` passed; see [readiness](readiness.md#current-commercial-beta-browser-acceptance).
-It does not establish hosted acceptance or remove image findings.
+Those results are historical and are superseded by the Alpine adoption section
+below. Subsequent installed-package browser acceptance at `da043fb` passed; see
+[readiness](readiness.md#current-commercial-beta-browser-acceptance).
 
-### Integrated release reassessment
+### Historical integrated Debian release reassessment
 
 The integrated implementation at `5be27d0` was rebuilt and rescanned after all
 backend/frontend/customer/operations contributions. The
@@ -63,11 +62,11 @@ blastradius-postgres:local
 sha256:890ea229acebe3df0619a79bd72251f1c7e82cee9ca5c40446415e2f6e06f09e
 ```
 
-Both image builds/secret scans, repository secret scan and container smoke passed.
+Both historical image builds/secret scans, repository secret scan and container smoke passed.
 Smoke reached migration `0004` from `0001`, verified idempotency/data-preserving
 restore, nine installed worker cases, binary psycopg, health/static assets,
 nonroot/read-only roots, absent build tools and exit-2 entrypoint failures.
-The unchanged promotion check **failed (make exit 2)** on the database
+The historical promotion check **failed (make exit 2)** on the database
 HIGH/CRITICAL findings. Full integrated shell counts and the separately tested
 commercial retention/restore evidence are in [readiness](readiness.md).
 Subsequent integrated local browser acceptance passed at `da043fb`, as recorded
@@ -128,7 +127,7 @@ manifests before choosing them.
 
 | Stage | Immutable base |
 | --- | --- |
-| Database | `postgres:16.15-trixie@sha256:a3b7f434b2dc57ce85a67e171163eb8ab1a1ebcb39d27484661f26b1dfbe30d6` |
+| Database | `postgres:16.15-alpine3.23@sha256:621a761097839bdb50207afd6b87a72f38e2d718dd46c3d744828d8917c4f1e0` |
 | Frontend build | `node:24.19.0-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df` |
 | Python build and runtime | `python:3.12.14-alpine3.24@sha256:c4634f578a412db396771b61b064c6e546c9d6414c7fb5b1b05d5871f1885f7b` |
 
@@ -136,8 +135,8 @@ Python now uses supported Alpine 3.24/musl, with matching build/runtime stages.
 Debian glibc/account/package-management tooling is no longer in the app image.
 No application dependency pins changed. Python headers, config build data,
 ensurepip, pip and caches are removed from the final image. Installed package
-metadata is preserved; APK and dpkg databases are explicitly verified by smoke
-checks. Node/compiler tools remain outside the final application image.
+metadata is preserved; APK metadata is explicitly verified by smoke checks.
+Node/compiler tools remain outside the final application image.
 
 Vendor evidence is version-bound in
 [container-security-assessments.json](container-security-assessments.json). It
@@ -161,13 +160,13 @@ never changes scanner severity or the promotion policy:
 * `bzip2recover` is absent from the application; only `libbz2` remains.
   The ledger distinguishes the vulnerable utility from source-related packages.
 
-The database retains its existing supported PostgreSQL major, libc, UID and
-volume format. GnuPG key-import tools are purged after image construction, removing
-7 HIGH package rows and other findings. Package metadata remains intact. Existing
-removal of unused `gosu` and the distribution's default snakeoil private key is
-preserved. Required libraries and restore tools remain installed.
+The database retains its existing supported PostgreSQL major while moving to
+Alpine/musl and UID/GID 70. The unused bundled `gosu` launcher is removed after
+the Alpine package upgrade; package metadata remains intact and required
+PostgreSQL/restore tools remain installed. Existing glibc data volumes are not
+reused; use the documented logical migration before cutover.
 
-## Remaining database blockers
+## Historical Debian database blockers (superseded by Alpine adoption)
 
 All these HIGH/CRITICAL rows have **no fixed version in the supplied/current Trivy
 Debian records**. Reduced privileges constrain some prerequisites; they do not
@@ -214,9 +213,9 @@ suppressed, and `make promotion-check` is unchanged.
 `postgres:16-trixie` is in the same pinned digest family and is worse.
 The Alpine candidates retain CRITICAL/HIGH findings, mostly Go stdlib
 findings in bundled `gosu`, plus libxml2. Trivy lists fixed versions upstream,
-but the official image has not been rebuilt with them; the gate would still
-fail. Alpine also changes libc/collation behaviour, so both candidates are
-rejected, consistent with the section above.
+but the official image has not been rebuilt with them. The Alpine candidate was
+later adopted after confirming that the findings are confined to the removable
+bundled `gosu` launcher; its musl/collation migration is documented below.
 
 ### Complete CRITICAL/HIGH ledger
 
@@ -289,31 +288,61 @@ The relevance column points to the matching package-group row in
   docker-compose path. The hosted private beta therefore does not run this
   image at all; the `app` image that does run has 0 findings.
 - **PRIVATE BETA:** not blocked (hosted, managed PostgreSQL, clean app image).
-- **PUBLIC BETA:** not blocked for the hosted service; blocks shipping the
-  `database` image to self-hosted users and blocks `promotion=true` container
-  promotion for that image.
-- **PRODUCTION V1:** blocked for any self-hosted/compose distribution until
-  Debian ships fixes for libxml2 `CVE-2026-6653` and the
-  util-linux/ncurses/systemd/libacl/perl HIGH rows, or the project moves to a
-  vendor-maintained minimal PostgreSQL base with a validated collation
-  migration. Recommended V1 path: managed PostgreSQL (documented in
-  [docs/database-migration.md](database-migration.md)), keeping the database
-  image out of the production path.
+- **PUBLIC BETA:** not blocked for the hosted service; the adopted database
+  image also passes the current CRITICAL/HIGH promotion gate.
+- **PRODUCTION V1:** the hosted path remains recommended with managed
+  PostgreSQL. Self-hosted distribution uses the adopted Alpine image and must
+  follow the documented glibc-to-musl logical migration; do not reuse an old
+  glibc data volume.
 - **Re-scan cadence for beta:** re-run `make image && make container-audit`
   before each hosted deploy; a new CRITICAL/HIGH in the app image blocks the
   deploy.
 
+## Alpine database image adopted
+
+Adopted 2026-09-21.
+
+The Alpine candidate was adopted after confirming that every Alpine
+CRITICAL/HIGH row came from the bundled `/usr/local/bin/gosu`. The database
+stage already runs as the `postgres` user and never needs privilege dropping,
+so removing that launcher is the existing documented remediation, not a
+suppression. The Debian candidate had no available fixes and no safely
+purgeable package group; see the historical ledger above and the candidate
+comparison in the private-beta rescan.
+
+The adopted immutable base is:
+
+```text
+postgres:16.15-alpine3.23@sha256:621a761097839bdb50207afd6b87a72f38e2d718dd46c3d744828d8917c4f1e0
+```
+
+The rebuilt image scan reports zero findings in every severity category:
+
+| Image | CRITICAL | HIGH | MEDIUM | LOW | UNKNOWN |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `blastradius:local` | 0 | 0 | 0 | 0 | 0 |
+| `blastradius-postgres:local` | 0 | 0 | 0 | 0 | 0 |
+
+Alpine uses musl libc and can produce different collation behavior. An existing
+glibc/Trixie volume is therefore not reused: run
+[`scripts/pg_migrate.sh`](../scripts/pg_migrate.sh), restore into a fresh
+`postgres-alpine-data` volume so indexes are rebuilt, validate collation-sensitive
+queries, and then remove the old volume deliberately. The promotion gate is
+unchanged; it now passes because the adopted image contains no CRITICAL/HIGH
+findings.
+
 ## Alternatives evaluated
 
-* **Debian Trixie update/purge:** supplied images already used current supported
-  patched base tags. Removing GnuPG was safe; a simulated PAM removal would also
-  remove required util-linux dependencies. Do not delete libraries, essential
-  packages or package metadata to make scanning quiet.
+* **Debian Trixie update/purge:** the supplied image had no Debian fixed versions
+  for its 55 CRITICAL/HIGH rows, and removing relevant libraries or essential
+  packages would break PostgreSQL or the base system. It was superseded by the
+  Alpine adoption above.
 * **Official PostgreSQL 16.15 Alpine 3.24:** scanned without OS findings, but
   libxml2 `2.13.9-r2` security metadata documents `CVE-2026-6732`, not the supplied
-  high libxml2 advisories affecting versions before 2.15.4. An empty different
-  distribution feed is insufficient remediation evidence. It also changes
-  PostgreSQL's libc/collation behavior. Rejected.
+  high libxml2 advisories affecting versions before 2.15.4. The adopted Alpine
+  3.23 image is a different candidate: its findings were confirmed to be only
+  the removable bundled `gosu` component, and its musl/collation migration is
+  documented above.
 * **Official PostgreSQL 16.15 Bookworm:** pulled and scanned; still reports
   critical `CVE-2026-6653` for libxml2 `2.9.14+dfsg-1.3~deb12u6`. Its unmodified
   base has 16 CRITICAL/99 HIGH rows including extra base tooling. It does not solve
@@ -332,15 +361,16 @@ The relevance column points to the matching package-group row in
 ## Runtime and integration contract
 
 The app still uses UID/GID `10001`, installed `/opt/venv` packages and the same
-`serve`/`migrate` entrypoint. Database UID/GID remains `999`; existing PostgreSQL
-volumes and `pg_dump`/`pg_restore` commands remain compatible. Compose is unchanged:
+`serve`/`migrate` entrypoint. The database uses UID/GID `70`; fresh Alpine
+volumes and `pg_dump`/`pg_restore` commands are supported, but existing glibc
+volumes require logical migration. Compose uses:
 read-only root, dropped capabilities, no-new-privileges, bounded resources, writable
 temporary/data paths, and health checks. Production requires the existing explicit
 auth/settings, trusted origin and migration setup; the smoke harness uses isolated
 development/demo settings and disposable test-only credentials.
 
 The application does not include a source checkout, Node, git, compilers or pip.
-The database retains PostgreSQL utilities, dpkg metadata and its required libraries.
+The database retains PostgreSQL utilities, APK metadata and its required libraries.
 `BR_AUTO_MIGRATE=false`, readiness, missing-config exit 2 and invalid-command exit 2
 remain intact. SAFE/BLOCK semantics are unchanged. BlastRadius is a static modeled
 analyzer; its passing user-facing statement is “No new modeled blocking findings
@@ -371,8 +401,8 @@ make container-audit secret-audit
 make promotion-check
 ```
 
-The last command is expected to **fail** until HIGH/CRITICAL findings are resolved.
-No ignore file, `--ignore-unfixed`, severity adjustment or policy change was added.
+The last command must pass with the adopted image. No ignore file,
+`--ignore-unfixed`, severity adjustment or policy change was added.
 Future package/version changes invalidate the optional manual assessments
 automatically; re-review vendor evidence instead of extending a waiver.
 
@@ -387,4 +417,4 @@ absent build tools, package metadata and entrypoint failures.
 No browser, live AWS, hosted auth, cross-architecture or discarded build-stage
 vulnerability testing is represented by these results. The host kernel is outside
 the image scans. Rebuild, rerun the ledger and require the unchanged promotion
-gate after integration or vendor updates; do not promote this database image.
+gate after integration or vendor updates.

@@ -71,9 +71,9 @@ wheels are removed from the runtime. Install dependencies in the build stage
 and rebuild the image when they change.
 
 Image versions and multi-platform manifest digests are explicit. The handoff uses
-Node 24.19.0, Python 3.12.14 on Debian 13 and PostgreSQL 16.15 on Debian 13.
-The PostgreSQL target removes the unnecessary privileged `gosu` launcher and
-upstream's default snake-oil TLS key/certificate, then runs as `postgres` (UID 999).
+Node 24.19.0, Python 3.12.14 on Debian 13 and PostgreSQL 16.15 on Alpine 3.23
+(musl). The PostgreSQL target removes the unnecessary privileged `gosu` launcher,
+then runs as `postgres` (UID 70).
 Root startup is unsupported in that target. PostgreSQL's official non-root
 initialization path was exercised with a fresh named volume.
 Image rebuilds can be newer than the underlying version release.
@@ -85,6 +85,8 @@ Do not call this a bit-reproducible build.
 
 ## Scan evidence and promotion gate
 
+The following Debian-image evidence is historical and superseded by the Alpine
+database adoption documented in [container security](container-security.md).
 Integration Linux/amd64 rescan on 2026-09-19: Trivy **0.74.0**, vulnerability database
 updated **2026-09-19T07:03:12Z**. Counts include findings without available fixes;
 no ignore files, severity overrides, or vulnerability suppressions were added.
@@ -99,11 +101,11 @@ no ignore files, severity overrides, or vulnerability suppressions were added.
 The integrated images had no detected secrets or language-package vulnerabilities.
 These point-in-time counts reproduced the operations handoff. Rescan every final
 release image before promotion; source/image secret scans do not clear OS findings.
-The remaining database critical finding is `CVE-2026-6653` in
+The historical remaining database critical finding was `CVE-2026-6653` in
 `libxml2 2.12.7+dfsg+really2.9.14-2.1+deb13u3`; the scanner lists no fix.
 The Python image was retained because replacing the tested runtime does not
-establish vulnerability remediation. A missing fixed version is not a safety
-claim: **both final images still fail promotion**.
+establish vulnerability remediation. A missing fixed version was not a safety
+claim: **both historical final images failed promotion**.
 
 Pinned multi-platform manifests:
 
@@ -173,12 +175,13 @@ application. `BLASTRADIUS_ALEMBIC_CONFIG=/app/alembic.ini` uses packaged migrati
 resources and the same `Settings` as `python -m blastradius.server.migrate`.
 `BR_AUTO_MIGRATE=false` ensures the service checks the schema instead of changing it.
 
-The database uses `pg_isready`, persists in `postgres-trixie-data`, and exposes no
-host port. **Do not attach an existing Bookworm data volume to this image.**
-The new volume deliberately leaves the old `postgres-data` volume untouched;
-an existing installation must follow the [logical backup/restore procedure](operations.md#backup-and-recovery)
-and validate collation/index behavior before switching traffic. A newly empty
-database must never be mistaken for a successful upgrade.
+The database uses `pg_isready`, persists in `postgres-alpine-data`, and exposes no
+host port. **Do not attach an existing glibc/Trixie data volume to this image.**
+Alpine uses musl libc with different collation behavior, so move data with
+[`scripts/pg_migrate.sh`](../scripts/pg_migrate.sh): dump from the old container,
+restore into the fresh Alpine volume (indexes are rebuilt by restore), then remove
+the old volume deliberately. A newly empty database must never be mistaken for a
+successful upgrade.
 
 App traffic binds only to `127.0.0.1:8000` by default. The app filesystem is
 read-only except `/app/.local` and a bounded `/tmp`; all services drop capabilities,
