@@ -41,6 +41,7 @@ from blastradius.server.jobs import JobManager
 from blastradius.server.lease import ServiceLease
 from blastradius.server.middleware import GuardMiddleware
 from blastradius.server.models import Analysis, Membership, Organization, Project, User
+from blastradius.server.observability import configure_logging
 from blastradius.server.operator import is_platform_admin, operator_router
 from blastradius.server.plans import catalog, entitlements, require_feature
 from blastradius.server.quotas import lock_org, quota, usage_payload, usage_row
@@ -122,6 +123,7 @@ def create_app(
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     settings.validate()
+    configure_logging(settings)
     fatal = fatal or _fatal_startup
     db = Database(settings)
     oauth = oauth_client(settings)

@@ -23,7 +23,7 @@ OIDC, PostgreSQL, secret, host-validation or migration requirements.
 | Static files | `/app/web/dist` integration verified; no secrets in `VITE_*` |
 | Limits | Input bytes/files/resources/path count, timeout, per-tenant usage and concurrent jobs |
 | Scratch | Isolated bounded directories; cleanup and crash recovery policy |
-| Logging | Structured redacted logs, access policy and approved retention |
+| Logging | Structured redacted logs, access policy and approved retention; set `BR_LOG_LEVEL` to `DEBUG`, `INFO`, `WARNING` or `ERROR` |
 | Payments | Disabled; no checkout, payment credentials or automatic activation |
 | Operations | Real readiness endpoint, alarms, operator access and incident owner |
 | Legal | Controller/entity, subprocessors, geography, retention, support and terms approved |

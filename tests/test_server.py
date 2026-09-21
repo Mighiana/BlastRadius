@@ -53,6 +53,7 @@ from blastradius.server.models import (
     Usage,
     User,
 )
+from blastradius.server.observability import JsonFormatter
 from blastradius.server.persistence import cleanup
 from blastradius.server.plans import PLANS
 from blastradius.server.quotas import lock_org, period, quota
@@ -77,9 +78,16 @@ def settings(tmp_path):
 
 
 @pytest.fixture
-def app(settings, demo_results, monkeypatch):
+def app(settings, demo_results, monkeypatch, caplog):
     monkeypatch.setattr("blastradius.server.app.build_demos", lambda _: demo_results)
-    return create_app(settings)
+    app = create_app(settings)
+    logger = logging.getLogger("blastradius")
+    caplog.handler.setLevel(logging.WARNING)
+    logger.addHandler(caplog.handler)
+    try:
+        yield app
+    finally:
+        logger.removeHandler(caplog.handler)
 
 
 @pytest.fixture
@@ -231,6 +239,21 @@ def test_database_url_normalization(monkeypatch, database_url, expected):
             monkeypatch.delenv(name)
     monkeypatch.setenv("BR_DATABASE_URL", database_url)
     assert Settings.from_env().database_url == expected
+
+
+@pytest.mark.parametrize("value", ["DEBUG", "INFO", "WARNING", "ERROR"])
+def test_log_level_from_environment(monkeypatch, value):
+    for name in list(os.environ):
+        if name.startswith("BR_"):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("BR_LOG_LEVEL", value)
+    assert Settings.from_env().log_level == value
+
+
+def test_invalid_log_level_is_rejected(monkeypatch):
+    monkeypatch.setenv("BR_LOG_LEVEL", "verbose")
+    with pytest.raises(ValueError, match="BR_LOG_LEVEL"):
+        Settings.from_env()
 
 
 @pytest.mark.parametrize("value", ["601", "-1"])
@@ -844,6 +867,68 @@ def test_body_file_resource_limits_and_sanitized_errors(client, app, monkeypatch
     assert response.status_code == 500 and response.json() == {"detail": "internal_error"}
     assert response.headers["x-request-id"]
     assert "private-secret" not in caplog.text
+    records = [
+        json.loads(JsonFormatter().format(record))
+        for record in caplog.records
+        if record.name == "blastradius.http"
+    ]
+    assert any(
+        record.get("status") == 500 and record.get("error") == "internal_error"
+        for record in records
+    )
+    assert any(
+        record.get("event") == "unhandled_exception"
+        and record.get("exception") == "ValueError"
+        for record in records
+    )
+    assert "Traceback" not in caplog.text
+
+
+def test_request_log_is_structured_and_privacy_safe(client, settings, caplog):
+    caplog.set_level(logging.INFO, logger="blastradius.http")
+    response = client.get("/api/me?code=SECRET-QUERY&state=abc")
+    records = [
+        json.loads(JsonFormatter().format(record))
+        for record in caplog.records
+        if record.name == "blastradius.http"
+    ]
+    request = records[-1]
+    assert (
+        request["request_id"] == response.headers["x-request-id"]
+        and request["method"] == "GET"
+        and request["status"] == 200
+        and request["endpoint"] == "/api/me"
+        and request["duration_ms"] >= 0
+    )
+    assert "SECRET-QUERY" not in caplog.text
+
+    caplog.clear()
+    me = login(client)
+    client.headers.pop("X-CSRF-Token")
+    rejected = client.post(
+        "/api/projects",
+        json={"name": "Missing CSRF", "organization_id": me["organizations"][0]["id"]},
+        headers={"Origin": settings.public_url},
+    )
+    assert rejected.status_code == 403
+    request = json.loads(JsonFormatter().format(caplog.records[-1]))
+    assert request["status"] == 403 and request["error"] == "csrf_required"
+
+    caplog.clear()
+    analysis_id = str(uuid.uuid4())
+    missing = client.get(f"/api/analyses/{analysis_id}")
+    assert missing.status_code == 404
+    request = json.loads(JsonFormatter().format(caplog.records[-1]))
+    assert (
+        request["endpoint"] == "/api/analyses/{analysis_id}"
+        and request["analysis_id"] == analysis_id
+    )
+
+    caplog.clear()
+    unmatched = client.get("/api/nope/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    assert unmatched.status_code == 404
+    request = json.loads(JsonFormatter().format(caplog.records[-1]))
+    assert request["path"] == "/api/nope/*" and "analysis_id" not in request
 
 
 def test_rate_limits_separate_demo_auth_and_general(settings, demo_results, monkeypatch):
@@ -1645,15 +1730,21 @@ def test_migration_0001_populated_upgrade_preserves_evidence_and_roles(migration
 
 
 @pytest.fixture
-def backend_client(migration_database, settings, demo_results, monkeypatch):
+def backend_client(migration_database, settings, demo_results, monkeypatch, caplog):
     settings = replace(
         settings,
         database_url=migration_database.engine.url.render_as_string(hide_password=False),
     )
     monkeypatch.setattr("blastradius.server.app.build_demos", lambda _: demo_results)
     app = create_app(settings)
+    logger = logging.getLogger("blastradius")
+    caplog.handler.setLevel(logging.WARNING)
+    logger.addHandler(caplog.handler)
     with TestClient(app) as client:
-        yield client, app
+        try:
+            yield client, app
+        finally:
+            logger.removeHandler(caplog.handler)
 
 
 def test_atomic_project_slots_and_export_accounting(backend_client):

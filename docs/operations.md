@@ -32,6 +32,8 @@ Observe actual input mix and memory/CPU saturation before increasing limits.
 
 Default `BR_WORKERS=2` is the analysis subprocess pool, not the ASGI process count.
 `BR_MAX_JOBS=8` bounds admitted/running jobs; `BR_JOB_TIMEOUT=30` bounds each worker.
+`BR_LOG_LEVEL` controls structured application log verbosity and accepts `DEBUG`,
+`INFO`, `WARNING` or `ERROR` (default `INFO`).
 The queue is in memory. The configured shutdown grace is 150 seconds; this is not
 a verified worst-case drain bound. GitHub jobs use a separate single-thread
 pipeline plus provider requests, so eight GitHub jobs can exceed that grace even

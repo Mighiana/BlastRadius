@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 
@@ -13,6 +14,40 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from blastradius.server.config import Settings
 
 logger = logging.getLogger("blastradius.http")
+_SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9_.-]{1,40}$")
+_UUID_SEGMENT = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+_HEX_SEGMENT = re.compile(r"^[0-9a-fA-F]{32,}$")
+_DETAIL = re.compile(r"^[a-z_]{1,64}$")
+
+
+def _sanitized_path(path: str) -> str:
+    segments = []
+    for segment in path.split("/"):
+        if not segment:
+            continue
+        if (
+            not _SAFE_SEGMENT.fullmatch(segment)
+            or _UUID_SEGMENT.fullmatch(segment)
+            or _HEX_SEGMENT.fullmatch(segment)
+            or len(segment) > 40
+        ):
+            segments.append("*")
+        else:
+            segments.append(segment)
+    return "/" + "/".join(segments)
+
+
+def _error_detail(body: bytearray, too_large: bool) -> str | None:
+    if too_large:
+        return None
+    try:
+        detail = json.loads(body)
+    except (UnicodeDecodeError, TypeError, ValueError):
+        return None
+    value = detail.get("detail") if isinstance(detail, dict) else None
+    return value if isinstance(value, str) and _DETAIL.fullmatch(value) else None
 
 
 class GuardMiddleware:
@@ -31,9 +66,11 @@ class GuardMiddleware:
         scope.setdefault("state", {})["request_id"] = request_id
         status = 500
         response_started = False
+        error_body = bytearray()
+        error_body_too_large = False
 
         async def safe_send(message: Message) -> None:
-            nonlocal status, response_started
+            nonlocal error_body_too_large, status, response_started
             if message["type"] == "http.response.start":
                 response_started = True
                 status = message["status"]
@@ -45,6 +82,17 @@ class GuardMiddleware:
                 headers["X-Frame-Options"] = "DENY"
                 if self.settings.production:
                     headers["Strict-Transport-Security"] = "max-age=31536000"
+            elif message["type"] == "http.response.body" and status >= 400:
+                body = message.get("body", b"")
+                remaining = 512 - len(error_body)
+                if not error_body_too_large:
+                    if len(body) > remaining:
+                        error_body.extend(body[:remaining])
+                        error_body_too_large = True
+                    else:
+                        error_body.extend(body)
+                        if message.get("more_body") and len(error_body) >= 512:
+                            error_body_too_large = True
             await send(message)
 
         async def error(code: int, detail: str) -> None:
@@ -143,17 +191,36 @@ class GuardMiddleware:
 
             try:
                 await self.app(scope, replay, safe_send)
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    json.dumps({"request_id": request_id, "event": "unhandled_exception"}),
+                    exc_info=(type(exc), type(exc)(), None),
+                )
                 if not response_started:
                     await error(500, "internal_error")
         finally:
-            logger.info(
-                json.dumps(
-                    {
-                        "request_id": request_id,
-                        "method": scope["method"],
-                        "status": status,
-                        "duration_ms": round((time.monotonic() - start) * 1000, 2),
-                    }
-                )
+            route = scope.get("route")
+            event = {
+                "request_id": request_id,
+                "method": scope["method"],
+                "status": status,
+                "duration_ms": round((time.monotonic() - start) * 1000, 2),
+            }
+            endpoint = getattr(route, "path", None)
+            if endpoint:
+                event["endpoint"] = endpoint
+            else:
+                event["path"] = _sanitized_path(scope["path"])
+            try:
+                analysis_id = scope.get("path_params", {}).get("analysis_id")
+                event["analysis_id"] = str(uuid.UUID(analysis_id))
+            except (AttributeError, TypeError, ValueError):
+                pass
+            if status >= 400:
+                detail = _error_detail(error_body, error_body_too_large)
+                if detail:
+                    event["error"] = detail
+            logger.log(
+                logging.WARNING if status >= 500 else logging.INFO,
+                json.dumps(event),
             )
