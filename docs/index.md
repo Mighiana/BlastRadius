@@ -18,7 +18,7 @@ separates verified implementation, external configuration and launch blockers.
 | Customer validation | [Synthetic samples](customer-samples.md), [demo scripts](demo-sales.md), [interview](customer-interview.md), [buyer hypotheses](buyer-personas.md) |
 | Policies | [Trusted policy and inheritance](policy.md) |
 | Reports | [Evidence and exports](reports.md), [sample report](sample-report.md) |
-| Deployment | [Containers, migration and ingress](deployment.md) |
+| Deployment | [Containers, migration and ingress](deployment.md), [Backup and restore](backup-restore.md) |
 | Authentication | [OIDC, sessions, CSRF and email](auth.md) |
 | Organizations | [Workspaces, roles, invitations and projects](organizations.md) |
 | Pricing | [Plans, entitlements and operator grants](billing.md) |
@@ -29,6 +29,7 @@ separates verified implementation, external configuration and launch blockers.
 ## Operating and contributing
 
 [Operations and administration](operations.md) · [Data lifecycle](data-lifecycle.md) ·
+[Backup and restore](backup-restore.md) ·
 [Owner setup checklist](owner-setup.md) · [Deployment choices](deployment-patterns.md) ·
 [Container security evidence](container-security.md) ·
 [Frontend contract](frontend.md) · [Integration acceptance](release-integration.md) ·

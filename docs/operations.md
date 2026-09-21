@@ -171,9 +171,10 @@ time in the owner checklist.
 
 ## Backup and recovery
 
-Use encrypted PostgreSQL backups with restricted operator access and independently
-tested restore. Record snapshot time, migration head, model/service version and
-retention. Keep backup credentials separate from application credentials.
+Use [the backup and restore runbook](backup-restore.md) for encrypted PostgreSQL
+backups with restricted operator access and independently tested restore. Record
+snapshot time, migration head, model/service version and retention. Keep backup
+credentials separate from application credentials.
 
 After restore: verify schema compatibility, confirm tenant-scoped reads/deletes,
 reapply recorded deletion requests, and ensure interrupted jobs are not replayed
