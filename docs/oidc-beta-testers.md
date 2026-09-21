@@ -52,19 +52,43 @@ their own schedule; sign-out or session cleanup ends them sooner.
 
 ## Later: making sign-in public
 
-Only when the beta is opened to people who are not individually invited:
+Only when the beta is opened to people who are not individually invited, work
+through this owner checklist:
 
 1. Decide the allow-list replacement first. Without Testing mode anyone with a
    Google account can sign in, so BlastRadius needs its own gate (invitation
    codes, an approved-domain list or operator approval) before publishing.
-2. Complete the consent-screen branding fields (app name, support e-mail,
-   authorized domain matching `BR_PUBLIC_URL`, privacy-policy and terms URLs that
-   point at the hosted `/privacy` and `/terms` pages).
-3. Change **Publishing status** to **In production**. With only the
-   `openid email profile` scopes Google does not require a security assessment;
-   brand verification may be requested before the app name and logo are shown.
-   Check Google's current policy at the time rather than relying on this note.
-4. Re-run the sign-in acceptance from [the checklist](private-beta-checklist.md)
+2. Complete the consent screen:
+   - [ ] App name.
+   - [ ] User support email.
+   - [ ] Developer contact information.
+3. Configure the authorized domain. Google requires an authorized domain that
+   the owner controls. `blastradius-hulf.onrender.com` cannot be added as an
+   authorized domain because the owner does not control `onrender.com`.
+   Therefore a custom domain that the owner controls is a prerequisite for
+   publishing. This is a public-beta owner action.
+4. Configure the redirect and public URLs:
+   - Authorized redirect URI:
+     `https://<BR_PUBLIC_URL host>/api/auth/callback`
+   - Homepage: the custom `BR_PUBLIC_URL`.
+   - Privacy policy: `https://<BR_PUBLIC_URL host>/privacy`.
+   - Terms of service: `https://<BR_PUBLIC_URL host>/terms`.
+5. Confirm that the OAuth scope is limited to `openid`, `email`, and `profile`.
+   Remove test users when the public gate is ready, then publish the consent
+   screen.
+6. Set the production variables:
+
+   ```text
+   BR_AUTH_MODE=oidc
+   BR_OIDC_ISSUER=https://accounts.google.com
+   BR_OIDC_CLIENT_ID=...
+   BR_OIDC_CLIENT_SECRET=...
+   BR_PUBLIC_URL=...
+   ```
+
+   `BR_PUBLIC_URL` must match the owner-controlled custom domain used for the
+   homepage and callback.
+7. Re-run the sign-in acceptance from [the checklist](private-beta-checklist.md)
    with an account that was never a test user.
 
 None of these steps is performed automatically by BlastRadius or its deployment
