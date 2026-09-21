@@ -52,8 +52,19 @@ function Header() {
   const { pathname } = useLocation();
   useEffect(() => { setOpen(false); }, [pathname]);
   useEffect(() => {
-    document.body.classList.toggle('nav-open', open);
-    return () => { document.body.classList.remove('nav-open'); };
+    if (!open) {
+      document.body.classList.remove('nav-open');
+      document.body.style.top = '';
+      return;
+    }
+    const y = window.scrollY;
+    document.body.classList.add('nav-open');
+    document.body.style.top = `-${y}px`;
+    return () => {
+      document.body.classList.remove('nav-open');
+      document.body.style.top = '';
+      window.scrollTo({ top: y, behavior: 'instant' });
+    };
   }, [open]);
   async function logout() {
     setBusy(true); setError(null);
@@ -63,7 +74,9 @@ function Header() {
   }
   return <header className="site-header"><div className="container header-inner"><Link to="/" className="brand" aria-label="BlastRadius home"><span className="brand-icon"><Radar size={23} strokeWidth={1.8} /></span>BlastRadius <span className="tag">Beta</span></Link>
     <button className="icon-button mobile-menu" aria-label={open ? 'Close navigation' : 'Open navigation'} aria-expanded={open} aria-controls="main-navigation" onClick={() => setOpen(!open)}>{open ? <X /> : <Menu />}</button>
-    <nav className={open ? 'main-nav is-open' : 'main-nav'} id="main-navigation" aria-label="Main navigation" onKeyDown={e => { if (e.key === 'Escape') setOpen(false); }}>
+    <nav className={open ? 'main-nav is-open' : 'main-nav'} id="main-navigation" aria-label="Main navigation"
+      onClick={e => { if ((e.target as HTMLElement).closest('a')) setOpen(false); }}
+      onKeyDown={e => { if (e.key === 'Escape') setOpen(false); }}>
       <NavLink to="/demo">Product demo</NavLink><NavLink to="/guide">Documentation</NavLink><NavLink to="/pricing">Pricing</NavLink><NavLink to="/security">Security</NavLink>
       {session?.authenticated && <NavLink to={`/history${search}`}>History</NavLink>}
       {session?.authenticated && session.capabilities?.platform_admin === true && <NavLink to="/operator">Operator</NavLink>}

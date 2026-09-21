@@ -399,7 +399,7 @@ progress::-webkit-progress-bar{background:#26374a;border-radius:5px}progress::-w
   .mobile-menu{display:flex}
   .main-nav{display:none;position:absolute;top:65px;left:0;width:100%;background:#101925;border-bottom:1px solid #3d4d60;padding:22px;box-shadow:0 20px 30px #0005;align-items:stretch;gap:4px}
   .main-nav.is-open{display:flex;flex-direction:column;max-height:calc(100dvh - 65px);overflow-y:auto}
-  body.nav-open{overflow:hidden}
+  body.nav-open{overflow:hidden;position:fixed;width:100%}
   .main-nav>a,.main-nav>button{padding:13px;font-size:.85rem}
   .hero{padding-top:48px}.hero h1{font-size:clamp(2rem,6vw,2.85rem)}
   .hero-copy>p{font-size:.87rem}.hero-kicker{font-size:.56rem;margin-bottom:20px}
