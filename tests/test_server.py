@@ -2003,6 +2003,9 @@ def test_retention_sweep_worker_logs_failures_and_continues(
     try:
         with TestClient(create_app(replace(settings, retention_sweep_seconds=60))):
             assert called.wait(2)
+            deadline = time.monotonic() + 2
+            while "retention.sweep_failed" not in caplog.text and time.monotonic() < deadline:
+                time.sleep(0.01)
             assert "retention.sweep_failed" in caplog.text
             assert any(
                 thread.name == "retention-sweep" and thread.is_alive()
