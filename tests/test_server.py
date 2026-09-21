@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import secrets
 import subprocess
 import threading
 import time
@@ -40,6 +41,7 @@ from blastradius.server.lease import ServiceLease
 from blastradius.server.models import (
     Analysis,
     AnalysisArtifact,
+    AnalysisFeedback,
     AttackPath,
     AttackPathHop,
     AuditEvent,
@@ -53,9 +55,11 @@ from blastradius.server.models import (
     Usage,
     User,
 )
+from blastradius.server.observability import JsonFormatter
 from blastradius.server.persistence import cleanup
 from blastradius.server.plans import PLANS
 from blastradius.server.quotas import lock_org, period, quota
+from blastradius.server.retention import run_retention_sweep
 from blastradius.server.schemas import AnalysisInput, EnterpriseLimits
 
 
@@ -77,9 +81,16 @@ def settings(tmp_path):
 
 
 @pytest.fixture
-def app(settings, demo_results, monkeypatch):
+def app(settings, demo_results, monkeypatch, caplog):
     monkeypatch.setattr("blastradius.server.app.build_demos", lambda _: demo_results)
-    return create_app(settings)
+    app = create_app(settings)
+    logger = logging.getLogger("blastradius")
+    caplog.handler.setLevel(logging.WARNING)
+    logger.addHandler(caplog.handler)
+    try:
+        yield app
+    finally:
+        logger.removeHandler(caplog.handler)
 
 
 @pytest.fixture
@@ -197,7 +208,7 @@ def test_environment_origin_defaults_and_explicit_https(monkeypatch, environment
             monkeypatch.delenv(name)
     for name, value in {
         "BR_ENV": environment,
-        "BR_SESSION_SECRET": "a" * 48,
+        "BR_SESSION_SECRET": secrets.token_urlsafe(48),
         "BR_AUTH_MODE": "oidc",
         "BR_OIDC_ISSUER": "https://issuer.example",
         "BR_OIDC_CLIENT_ID": "client",
@@ -214,6 +225,45 @@ def test_environment_origin_defaults_and_explicit_https(monkeypatch, environment
         configured = Settings.from_env()
         assert configured.public_url == (origin or "http://localhost:8000")
         assert configured.secure_cookies == (origin == "https://app.example")
+
+
+@pytest.mark.parametrize(
+    ("database_url", "expected"),
+    [
+        ("postgres://user:pass@example/db", "postgresql+psycopg://user:pass@example/db"),
+        ("postgresql://user:pass@example/db", "postgresql+psycopg://user:pass@example/db"),
+        ("postgresql+psycopg://user:pass@example/db", "postgresql+psycopg://user:pass@example/db"),
+        ("sqlite:///./server.db", "sqlite:///./server.db"),
+    ],
+)
+def test_database_url_normalization(monkeypatch, database_url, expected):
+    for name in list(os.environ):
+        if name.startswith("BR_"):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("BR_DATABASE_URL", database_url)
+    assert Settings.from_env().database_url == expected
+
+
+@pytest.mark.parametrize("value", ["DEBUG", "INFO", "WARNING", "ERROR"])
+def test_log_level_from_environment(monkeypatch, value):
+    for name in list(os.environ):
+        if name.startswith("BR_"):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("BR_LOG_LEVEL", value)
+    assert Settings.from_env().log_level == value
+
+
+def test_invalid_log_level_is_rejected(monkeypatch):
+    monkeypatch.setenv("BR_LOG_LEVEL", "verbose")
+    with pytest.raises(ValueError, match="BR_LOG_LEVEL"):
+        Settings.from_env()
+
+
+@pytest.mark.parametrize("value", ["601", "-1"])
+def test_lease_wait_seconds_must_be_bounded(monkeypatch, value):
+    monkeypatch.setenv("BR_LEASE_WAIT_SECONDS", value)
+    with pytest.raises(ValueError, match="BR_LEASE_WAIT_SECONDS"):
+        Settings.from_env()
 
 
 @pytest.mark.parametrize(
@@ -326,6 +376,19 @@ def test_real_demo_fixtures_are_safe_risky_and_remediated(client, demo_results):
     scenarios = client.get("/api/demo/scenarios").json()["scenarios"]
     assert {s["id"] for s in scenarios} == {"public_ssh", "broad_iam", "public_bucket"}
     for scenario in scenarios:
+        files_response = client.get(f"/api/demo/{scenario['id']}/files")
+        assert files_response.status_code == 200
+        files = files_response.json()
+        assert set(files) == {"scenario_id", "title", "before_files", "after_files"}
+        assert files["scenario_id"] == scenario["id"]
+        assert files["title"] == FIXTURES[scenario["id"]]["title"]
+        assert files["before_files"] == FIXTURES[scenario["id"]]["before_files"]
+        assert files["after_files"] == FIXTURES[scenario["id"]]["after_files"]
+        AnalysisInput(
+            project_id="demo",
+            before_files=files["before_files"],
+            after_files=files["after_files"],
+        )
         for stage in scenario["stages"]:
             response = client.get(f"/api/demo/{scenario['id']}?stage={stage}")
             assert response.status_code == 200
@@ -346,6 +409,7 @@ def test_real_demo_fixtures_are_safe_risky_and_remediated(client, demo_results):
             )
             assert "/job-" not in json.dumps(report)
             assert report == client.get(f"/api/demo/{scenario['id']}?stage={stage}").json()
+    assert client.get("/api/demo/nope/files").status_code == 404
     assert client.get("/api/demo/nope").status_code == 404
     assert client.get("/api/demo/public_ssh?stage=nope").status_code == 422
     assert (
@@ -463,13 +527,44 @@ def test_production_requires_explicit_environment_secret(monkeypatch):
     monkeypatch.delenv("BR_SESSION_SECRET", raising=False)
     with pytest.raises(ValueError):
         Settings.from_env()
-    monkeypatch.setenv("BR_SESSION_SECRET", "a" * 48)
+    monkeypatch.setenv("BR_SESSION_SECRET", secrets.token_urlsafe(48))
     settings = Settings.from_env()
     assert settings.production and not settings.auto_migrate
     with pytest.raises(ValueError):
         replace(settings, auto_migrate=True).validate()
     with pytest.raises(ValueError):
         replace(settings, auth_mode="demo").validate()
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"public_url": "https://localhost"},
+        {"public_url": "https://app.internal"},
+        {"session_secret": "a" * 48},
+        {"log_level": "DEBUG"},
+        {"github_app_id": 1},
+        {"github_webhook_secret": "x" * 40},
+        {"database_url": "postgresql+psycopg:///br"},
+    ],
+)
+def test_production_rejects_unsafe_configuration_variants(settings, updates):
+    production = replace(
+        settings,
+        environment="production",
+        database_url="postgresql+psycopg://db.example:5432/br",
+        public_url="https://app.example",
+        auth_mode="oidc",
+        oidc_issuer="https://issuer.example",
+        oidc_client_id="client",
+        oidc_client_secret="oidc-client-secret",
+        session_secret=secrets.token_urlsafe(48),
+        auto_migrate=False,
+    )
+    production.validate()
+    with pytest.raises(ValueError):
+        replace(production, **updates).validate()
+    replace(production, environment="development", **updates).validate()
 
 
 def test_oidc_redirect_uses_state_nonce_pkce_and_rejects_invalid_state(
@@ -820,6 +915,118 @@ def test_body_file_resource_limits_and_sanitized_errors(client, app, monkeypatch
     assert response.status_code == 500 and response.json() == {"detail": "internal_error"}
     assert response.headers["x-request-id"]
     assert "private-secret" not in caplog.text
+    records = [
+        json.loads(JsonFormatter().format(record))
+        for record in caplog.records
+        if record.name == "blastradius.http"
+    ]
+    assert any(
+        record.get("status") == 500 and record.get("error") == "internal_error"
+        for record in records
+    )
+    assert any(
+        record.get("event") == "unhandled_exception"
+        and record.get("exception") == "ValueError"
+        for record in records
+    )
+    assert "Traceback" not in caplog.text
+
+
+def test_request_log_is_structured_and_privacy_safe(client, settings, caplog):
+    caplog.set_level(logging.INFO, logger="blastradius.http")
+    response = client.get("/api/me?code=SECRET-QUERY&state=abc")
+    records = [
+        json.loads(JsonFormatter().format(record))
+        for record in caplog.records
+        if record.name == "blastradius.http"
+    ]
+    request = records[-1]
+    assert (
+        request["request_id"] == response.headers["x-request-id"]
+        and request["method"] == "GET"
+        and request["status"] == 200
+        and request["endpoint"] == "/api/me"
+        and request["duration_ms"] >= 0
+    )
+    assert "SECRET-QUERY" not in caplog.text
+
+    caplog.clear()
+    me = login(client)
+    client.headers.pop("X-CSRF-Token")
+    rejected = client.post(
+        "/api/projects",
+        json={"name": "Missing CSRF", "organization_id": me["organizations"][0]["id"]},
+        headers={"Origin": settings.public_url},
+    )
+    assert rejected.status_code == 403
+    request = json.loads(JsonFormatter().format(caplog.records[-1]))
+    assert request["status"] == 403 and request["error"] == "csrf_required"
+
+    caplog.clear()
+    analysis_id = str(uuid.uuid4())
+    missing = client.get(f"/api/analyses/{analysis_id}")
+    assert missing.status_code == 404
+    request = json.loads(JsonFormatter().format(caplog.records[-1]))
+    assert (
+        request["endpoint"] == "/api/analyses/{analysis_id}"
+        and request["analysis_id"] == analysis_id
+    )
+
+    caplog.clear()
+    unmatched = client.get("/api/nope/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    assert unmatched.status_code == 404
+    request = json.loads(JsonFormatter().format(caplog.records[-1]))
+    assert request["path"] == "/api/nope/*" and "analysis_id" not in request
+
+
+def test_lifespan_logs_start_ready_and_stop(app, caplog):
+    caplog.set_level(logging.INFO, logger="blastradius.server.app")
+    with TestClient(app):
+        events = [
+            json.loads(record.message).get("event")
+            for record in caplog.records
+            if record.name == "blastradius.server.app"
+        ]
+        assert events[:2] == ["service.starting", "service.ready"]
+    events = [
+        json.loads(record.message).get("event")
+        for record in caplog.records
+        if record.name == "blastradius.server.app"
+    ]
+    assert events[-1] == "service.stopping"
+
+
+def test_request_logging_redacts_credentials_and_payload(client, settings, caplog):
+    caplog.set_level(logging.INFO, logger="blastradius")
+    response = client.post(
+        "/api/projects",
+        headers={
+            "Authorization": "Bearer SECRET-BEARER",
+            "Cookie": "br_session=SECRET-COOKIE",
+        },
+        json={
+            "name": "x",
+            "note": "AKIASECRETKEYVALUE",
+            "organization_id": "org",
+        },
+    )
+    assert response.status_code == 422
+    records = [
+        json.loads(JsonFormatter().format(record))
+        for record in caplog.records
+        if record.name.startswith("blastradius")
+    ]
+    assert any(record.get("status") == 422 and record.get("error") == "invalid_request" for record in records)
+    assert all(
+        secret not in caplog.text
+        for secret in (
+            "SECRET-BEARER",
+            "SECRET-COOKIE",
+            "AKIASECRETKEYVALUE",
+            "postgresql+psycopg",
+            settings.session_secret,
+        )
+    )
 
 
 def test_rate_limits_separate_demo_auth_and_general(settings, demo_results, monkeypatch):
@@ -1621,15 +1828,21 @@ def test_migration_0001_populated_upgrade_preserves_evidence_and_roles(migration
 
 
 @pytest.fixture
-def backend_client(migration_database, settings, demo_results, monkeypatch):
+def backend_client(migration_database, settings, demo_results, monkeypatch, caplog):
     settings = replace(
         settings,
         database_url=migration_database.engine.url.render_as_string(hide_password=False),
     )
     monkeypatch.setattr("blastradius.server.app.build_demos", lambda _: demo_results)
     app = create_app(settings)
+    logger = logging.getLogger("blastradius")
+    caplog.handler.setLevel(logging.WARNING)
+    logger.addHandler(caplog.handler)
     with TestClient(app) as client:
-        yield client, app
+        try:
+            yield client, app
+        finally:
+            logger.removeHandler(caplog.handler)
 
 
 def test_atomic_project_slots_and_export_accounting(backend_client):
@@ -1693,3 +1906,110 @@ def test_bounded_cleanup_on_both_databases(migration_database):
     assert cleanup(database, 1) == 0
     with database.session() as session:
         assert session.scalar(select(func.count()).select_from(Analysis)) == 1
+
+
+@pytest.mark.parametrize("value, valid", [(-1, False), (30, False), (0, True), (3600, True)])
+def test_retention_sweep_setting_bounds(settings, value, valid):
+    configured = replace(settings, retention_sweep_seconds=value)
+    if valid:
+        configured.validate()
+    else:
+        with pytest.raises(ValueError, match="BR_RETENTION_SWEEP_SECONDS"):
+            configured.validate()
+
+
+def test_retention_sweep_removes_expired_analysis_and_children(client, app):
+    me = login(client)
+    proj = project(client, me)
+    old_job = terminal(client, submit(client, proj["id"]).json()["id"])
+    fresh_job = terminal(client, submit(client, proj["id"]).json()["id"])
+    with app.state.db.session(write=True) as session:
+        old = session.get(Analysis, old_job["id"])
+        old.created_at = time.time() - 8 * 86400
+        user_id = session.scalar(select(User.id))
+        session.add(
+            AnalysisFeedback(
+                analysis_id=old.id,
+                project_id=proj["id"],
+                organization_id=proj["organization_id"],
+                user_id=user_id,
+                useful=True,
+                message="feedback",
+            )
+        )
+    counts = run_retention_sweep(app.state.db)
+    assert counts["analyses"] == 1
+    with app.state.db.session() as session:
+        assert session.get(Analysis, old_job["id"]) is None
+        assert session.get(Analysis, fresh_job["id"]) is not None
+        for model in (Finding, AttackPath, AnalysisArtifact, AnalysisFeedback):
+            assert (
+                session.scalar(
+                    select(func.count())
+                    .select_from(model)
+                    .where(model.analysis_id == old_job["id"])
+                )
+                == 0
+            )
+        path_ids = select(AttackPath.id).where(AttackPath.analysis_id == old_job["id"])
+        assert (
+            session.scalar(
+                select(func.count()).select_from(AttackPathHop).where(
+                    AttackPathHop.path_id.in_(path_ids)
+                )
+            )
+            == 0
+        )
+
+
+def test_retention_sweep_worker_runs_immediately_and_stops(settings, demo_results, monkeypatch):
+    called = threading.Event()
+
+    def sweep(_db, _limit=100):
+        called.set()
+        return {
+            "analyses": 0,
+            "beta_interest": 0,
+            "analysis_feedback": 0,
+            "product_events": 0,
+            "passes": 2,
+        }
+
+    monkeypatch.setattr("blastradius.server.app.build_demos", lambda _: demo_results)
+    monkeypatch.setattr("blastradius.server.app.run_retention_sweep", sweep)
+    configured = replace(settings, retention_sweep_seconds=60)
+    with TestClient(create_app(configured)):
+        assert called.wait(2)
+    assert not any(
+        thread.name == "retention-sweep" and thread.is_alive()
+        for thread in threading.enumerate()
+    )
+
+
+def test_retention_sweep_worker_logs_failures_and_continues(
+    settings, demo_results, monkeypatch, caplog
+):
+    called = threading.Event()
+
+    def sweep(_db, _limit=100):
+        called.set()
+        raise RuntimeError("test failure")
+
+    monkeypatch.setattr("blastradius.server.app.build_demos", lambda _: demo_results)
+    monkeypatch.setattr("blastradius.server.app.run_retention_sweep", sweep)
+    caplog.set_level(logging.INFO, logger="blastradius.server.app")
+    logger = logging.getLogger("blastradius")
+    logger.addHandler(caplog.handler)
+    try:
+        with TestClient(create_app(replace(settings, retention_sweep_seconds=60))):
+            assert called.wait(2)
+            deadline = time.monotonic() + 2
+            while "retention.sweep_failed" not in caplog.text and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert "retention.sweep_failed" in caplog.text
+            assert any(
+                thread.name == "retention-sweep" and thread.is_alive()
+                for thread in threading.enumerate()
+            )
+    finally:
+        logger.removeHandler(caplog.handler)

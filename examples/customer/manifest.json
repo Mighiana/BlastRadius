@@ -1,0 +1,95 @@
+{
+  "analyzer_version": "0.1.0",
+  "engine_source_sha256": "60502c2e4dd2d4b6d401a2079a8e769294799c32974d903dc84d4cb5f85b63de",
+  "invocation": "python -I -m blastradius.cli",
+  "working_directory": "examples/customer",
+  "runs": [
+    {
+      "case": "baseline",
+      "cli_args": [
+        "--before",
+        "before",
+        "--policy",
+        "policy.yml",
+        "--after",
+        "before",
+        "--fail-on-review",
+        "--report-dir",
+        "output/baseline"
+      ],
+      "exit_code": 0
+    },
+    {
+      "case": "risky",
+      "cli_args": [
+        "--before",
+        "before",
+        "--policy",
+        "policy.yml",
+        "--after",
+        "after",
+        "--fail-on-review",
+        "--report-dir",
+        "output/risky"
+      ],
+      "exit_code": 1
+    },
+    {
+      "case": "remediated",
+      "cli_args": [
+        "--before",
+        "after",
+        "--policy",
+        "policy.yml",
+        "--after",
+        "remediated",
+        "--fail-on-review",
+        "--report-dir",
+        "output/remediated"
+      ],
+      "exit_code": 0
+    },
+    {
+      "case": "review-default",
+      "cli_args": [
+        "--before",
+        "before",
+        "--policy",
+        "policy.yml",
+        "--after",
+        "review",
+        "--report-dir",
+        "output/review-default"
+      ],
+      "exit_code": 0
+    },
+    {
+      "case": "review-strict",
+      "cli_args": [
+        "--before",
+        "before",
+        "--policy",
+        "policy.yml",
+        "--after",
+        "review",
+        "--fail-on-review",
+        "--report-dir",
+        "output/review-strict"
+      ],
+      "exit_code": 1
+    },
+    {
+      "case": "error",
+      "cli_args": [
+        "--before",
+        "before",
+        "--policy",
+        "policy.yml",
+        "--fail-on-review",
+        "--report-dir",
+        "output/error"
+      ],
+      "exit_code": 2
+    }
+  ]
+}

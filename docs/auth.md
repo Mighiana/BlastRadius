@@ -27,11 +27,21 @@ For production also set:
 ```text
 BR_ENV=production
 BR_PUBLIC_URL=https://your-application.example
-BR_DATABASE_URL=postgresql+psycopg://<service-account>:<secret>@<database>/<database-name>?sslmode=require
 BR_AUTO_MIGRATE=false
+BR_LEASE_WAIT_SECONDS=0
+BR_TRUST_PROXY_HEADERS=false
 ```
 
-Inject credentials through your secret manager. Run migrations before the service.
+`BR_LEASE_WAIT_SECONDS` opts into waiting for an existing service lease during a
+zero-downtime deployment; it accepts values from 0 through 600 seconds. Keep it
+at `0` for the default fail-fast startup behavior. Set
+`BR_TRUST_PROXY_HEADERS=true` only when a trusted reverse proxy is the sole
+network peer, such as the Render deployment described in
+[deployment-render.md](deployment-render.md).
+
+Inject `BR_DATABASE_URL` and other credentials through your secret manager; use
+PostgreSQL certificate verification (`sslmode=verify-full` and the trusted CA).
+Run migrations before the service.
 Use one ASGI process, same-origin frontend proxying, HTTPS, and `--no-access-log`.
 Configure reverse proxies/APM to omit authorization callback query strings,
 cookies and request bodies from logs. See [all configuration](api.md).
@@ -50,6 +60,39 @@ The transient `br_oidc` cookie holds Authlib authorization state/nonce/PKCE data
 using Starlette's signed session middleware with a ten-minute expiration. It is
 HttpOnly, SameSite Lax and Secure for HTTPS origins (including preview and production). It contains no provider access
 tokens. Authorization state is cleared after callback success/failure.
+
+### Provider registration worksheet
+
+Assign an identity owner and record these nonsecret decisions alongside the
+[domain worksheet](environment-production.md#domains-and-origins). Example domains
+must be replaced with the actual owned application origin.
+
+| Provider field | Value / application behavior |
+|---|---|
+| Application type | Confidential server web application; authorization code with S256 PKCE |
+| Issuer | Exact provider issuer in `BR_OIDC_ISSUER`, including any required trailing slash; HTTPS is required whenever OIDC is enabled |
+| Client ID | Provider-generated identifier in `BR_OIDC_CLIENT_ID`; never substitute the issuer or App ID |
+| Client secret | Secret-manager reference supplied as `BR_OIDC_CLIENT_SECRET`; rotate through the provider owner |
+| Redirect/callback URI | `https://app.example.com/api/auth/callback`, exactly matching `BR_PUBLIC_URL` |
+| Scopes | `openid email profile`; the application does not request `offline_access` |
+| Login entry | `https://app.example.com/api/auth/login`; navigate in the browser |
+| Application logout | Same-origin `POST /api/auth/logout` with `X-CSRF-Token`; deletes application session/cookie |
+| Provider logout URL | Not consumed by the application; no `BR_OIDC_LOGOUT_URL` setting or provider end-session redirect is implemented |
+| Provider post-logout redirect | Not needed by this flow; do not claim configuring one enables provider logout |
+| Beta access / verified email | Enforce eligibility at the provider. Missing/unverified email is discarded, not a standalone reason to deny a valid issuer/subject login |
+
+Do not register marketing/docs hosts or wildcard callbacks for the application
+client. Review discovery/JWKS connectivity and configure the provider's own access,
+MFA and recovery policies. App sessions are host-only; the HTTPS application and
+OIDC middleware cookies are Secure, HttpOnly and SameSite Lax.
+
+Acceptance requires real provider login, invalid-state/nonce/issuer denial,
+session rotation, CSRF/Origin rejection and logout through the actual TLS ingress.
+The local tests use controlled identity data and do not prove provider policy,
+SSO revocation or external acceptance. Keep callback queries and state out of logs.
+See the [OpenID Connect Core specification](https://openid.net/specs/openid-connect-core-1_0.html)
+for issuer/ID-token requirements; the implementation's settings and route contracts
+above are the supported integration surface.
 
 ## Application sessions and CSRF
 

@@ -1,0 +1,80 @@
+{
+  "decision": "REVIEW REQUIRED",
+  "analysis_complete": false,
+  "analysis": {
+    "before": {
+      "complete": true,
+      "paths_truncated": false,
+      "path_work": 0
+    },
+    "after": {
+      "complete": false,
+      "paths_truncated": false,
+      "path_work": 0
+    }
+  },
+  "coverage_diagnostics": [
+    {
+      "phase": "after",
+      "code": "UNEXPANDED_MODULE",
+      "message": "HCL modules are not downloaded or expanded.",
+      "severity": "warning",
+      "resource": "",
+      "attribute": "",
+      "source_file": "main.tf",
+      "blocks_analysis": true
+    }
+  ],
+  "edge_evidence": [],
+  "passed": true,
+  "policy_notes": [
+    "Analysis incomplete: resolve coverage diagnostics before treating this change as safe."
+  ],
+  "verdict": "INCOMPLETE ANALYSIS",
+  "score": {
+    "before": 100,
+    "after": 100,
+    "delta": 0
+  },
+  "risk_level": {
+    "before": "LOW",
+    "after": "LOW"
+  },
+  "new_critical_paths": [],
+  "removed_critical_paths": [],
+  "newly_exposed": [],
+  "newly_reachable_sensitive": [],
+  "reasons": [
+    {
+      "label": "New critical attack paths",
+      "detail": "No new internet-to-sensitive-data path",
+      "delta": 0,
+      "severity": "NONE"
+    },
+    {
+      "label": "Newly reachable sensitive resources",
+      "detail": "No sensitive resource became reachable",
+      "delta": 0,
+      "severity": "NONE"
+    },
+    {
+      "label": "Newly internet-reachable resources",
+      "detail": "No resource became internet-reachable",
+      "delta": 0,
+      "severity": "NONE"
+    },
+    {
+      "label": "Security score delta",
+      "detail": "Score unchanged",
+      "delta": 0,
+      "severity": "NONE"
+    }
+  ],
+  "security_score_before": 100,
+  "security_score_after": 100,
+  "critical_paths_added": 0,
+  "sensitive_resources_added": 0,
+  "exit_code": 0,
+  "diagnostics": [],
+  "unsupported_resource_types": []
+}

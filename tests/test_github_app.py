@@ -24,6 +24,7 @@ from sqlalchemy import func, select, update
 from blastradius.server.app import create_app
 from blastradius.server.admin import assign_plan
 from blastradius.server.config import Settings
+from blastradius.server.events import event_summary
 from blastradius.server.github_api import (
     GitHubAPI,
     GitHubError,
@@ -299,6 +300,27 @@ def drain(app):
 def run_record(app):
     with app.state.db.session() as session:
         return session.scalar(select(GitHubRun))
+
+
+def test_product_milestones_and_replay_are_exactly_once(harness):
+    app, client, _, project, _ = harness
+    with app.state.db.session() as session:
+        assert event_summary(session)["counts"]["github_connected"] == 1
+    assert client.put(
+        f"/api/projects/{project['id']}/github",
+        json={"installation_id": 10, "repository_id": 20},
+    ).status_code == 200
+    with app.state.db.session() as session:
+        assert event_summary(session)["counts"]["github_connected"] == 1
+    assert send(harness).status_code == 202
+    drain(app)
+    with app.state.db.session() as session:
+        before = event_summary(session)["counts"]
+    assert before["analysis_started"] == before["analysis_completed"] == before["block_result"] == 1
+    assert send(harness, delivery="commercial-replay").json()["status"] == "duplicate"
+    drain(app)
+    with app.state.db.session() as session:
+        assert event_summary(session)["counts"] == before
 
 
 @pytest.mark.parametrize("response", [{"result": {}}, [], None])

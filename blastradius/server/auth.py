@@ -4,16 +4,24 @@ import hashlib
 import secrets
 import time
 
-from authlib.integrations.starlette_client import OAuth
+from authlib.integrations.starlette_client import OAuth, StarletteOAuth2App
 from fastapi import HTTPException, Request, Response
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from blastradius.server.config import Settings
+from blastradius.server.events import record_event
 from blastradius.server.models import LoginSession, Membership, Organization, User
 from blastradius.server.schemas import email_identity
 
 COOKIE = "br_session"
+
+
+class OIDCClient(StarletteOAuth2App):
+    async def fetch_access_token(self, redirect_uri: str | None = None, **kwargs: object) -> dict:
+        token = await super().fetch_access_token(redirect_uri=redirect_uri, **kwargs)
+        token.pop("userinfo", None)
+        return token
 
 
 def oauth_client(settings: Settings) -> OAuth:
@@ -21,6 +29,7 @@ def oauth_client(settings: Settings) -> OAuth:
     if settings.auth_mode == "oidc":
         oauth.register(
             name="oidc",
+            client_cls=OIDCClient,
             client_id=settings.oidc_client_id,
             client_secret=settings.oidc_client_secret,
             server_metadata_url=settings.oidc_issuer.rstrip("/")
@@ -49,7 +58,12 @@ def current_session(request: Request, db: Session) -> LoginSession | None:
 
 
 def create_session(
-    response: Response, db: Session, settings: Settings, user_id: str | None = None
+    response: Response,
+    db: Session,
+    settings: Settings,
+    user_id: str | None = None,
+    *,
+    oidc_authenticated: bool = False,
 ) -> LoginSession:
     db.execute(delete(LoginSession).where(LoginSession.expires_at <= time.time()))
     token = secrets.token_urlsafe(32)
@@ -58,6 +72,7 @@ def create_session(
         user_id=user_id,
         csrf_token=secrets.token_urlsafe(32),
         expires_at=time.time() + settings.session_ttl_seconds,
+        oidc_authenticated=oidc_authenticated,
     )
     db.add(session)
     response.set_cookie(
@@ -136,4 +151,6 @@ def provision(
     db.add(org)
     db.flush()
     db.add(Membership(user_id=user.id, organization_id=org.id, role="owner"))
+    record_event(db, "account_created", user_id=user.id)
+    record_event(db, "workspace_created", user_id=user.id, organization_id=org.id)
     return user

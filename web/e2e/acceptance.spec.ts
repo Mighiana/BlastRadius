@@ -268,6 +268,31 @@ test('operator-granted Pro exports and Team policies/invitations use real worksp
   await expect(page.getByRole('button', { name: 'Accept invitation' })).toBeDisabled();
   await expect(page).not.toHaveURL(/#token=/);
 });
+test('long invitation addresses stay contained at authenticated mobile and desktop widths', async ({ page }) => {
+  await page.goto('/dashboard');
+  await page.getByRole('button', { name: 'Create local demo workspace' }).click();
+  await expect(page.getByLabel('Project name')).toBeVisible();
+  const identity = sessionSchema.parse(await (await page.request.get('/api/me')).json());
+  const org = identity.organizations[0];
+  if (!org) throw new Error('Demo onboarding did not return a workspace');
+  await assignPlan(org.id, 'team');
+  await page.goto(`/team?organization=${encodeURIComponent(org.id)}`);
+  await page.getByLabel('Invite email').fill('developer@acceptance.example.test');
+  await page.getByRole('button', { name: 'Create invitation' }).click();
+  await expect(page.getByLabel('One-time invitation link')).toBeVisible();
+  await expect(page.getByText('developer@acceptance.example.test', { exact: true })).toBeVisible();
+  for (const width of widths.filter(value => value <= 1440)) {
+    await page.setViewportSize({ width, height: 940 });
+    await contained(page);
+  }
+  await page.getByRole('button', { name: 'Dismiss link' }).click();
+  await page.getByRole('button', { name: 'Revoke invitation', exact: true }).click();
+  await expect(page.getByText(/developer · Revoked/)).toBeVisible();
+  for (const width of widths.filter(value => value <= 1440)) {
+    await page.setViewportSize({ width, height: 940 });
+    await contained(page);
+  }
+});
 test('invalid input is actionable and never looks like a SAFE result', async ({ page }) => {
   await page.goto('/dashboard');
   await page.getByRole('button', { name: 'Create local demo workspace' }).click();

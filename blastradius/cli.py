@@ -116,7 +116,7 @@ def _summary_lines(diff: GraphDiff, decision: DeploymentDecision) -> List[str]:
     return lines
 
 
-def _json_payload(diff: GraphDiff, decision: DeploymentDecision) -> dict:
+def json_payload(diff: GraphDiff, decision: DeploymentDecision) -> dict:
     return {
         "decision": decision.decision.value,
         "analysis_complete": diff.complete,
@@ -154,6 +154,9 @@ def _json_payload(diff: GraphDiff, decision: DeploymentDecision) -> dict:
             for r in decision.reasons
         ],
     }
+
+
+_json_payload = json_payload
 
 
 def run(argv: Optional[Sequence[str]] = None, stream: Optional[TextIO] = None) -> int:
@@ -290,7 +293,7 @@ def _report(
             print(f"# {message}", file=out)
 
     exit_code = (0 if decision.decision.value == "SAFE TO MERGE" else 1) if args.fail_on_review else decision.exit_code
-    payload = _json_payload(diff, decision)
+    payload = json_payload(diff, decision)
     payload.update(step_outputs(diff, decision, exit_code))
     payload["diagnostics"] = args.diagnostics
     payload["unsupported_resource_types"] = sorted(set(diff.before.graph.graph.get("unsupported", [])) | set(diff.after.graph.graph.get("unsupported", [])))

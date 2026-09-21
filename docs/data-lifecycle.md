@@ -15,6 +15,38 @@ hides older data immediately and makes it eligible for the next cleanup.
 Completed policy snapshots are immutable; legacy rows have a null snapshot and
 normalization version rather than invented historical evidence.
 
+## Commercial beta records
+
+Beta-interest requests, per-user analysis feedback and first-party product events
+have a separate **90-day** lifetime measured from creation. Feedback updates do
+not extend it. Review/summary routes hide expired records; feedback also requires
+an analysis visible under the workspace's current retention window.
+
+Intake stores name/email, optional bounded workflow details and the consent
+notice version after explicit agreement. Feedback stores useful/not-useful,
+optional review text and server-derived user/workspace/project/analysis IDs.
+These texts are private operator-review data and are not automatically scrubbed.
+Do not submit Terraform, credentials or private infrastructure in these forms.
+
+Product events contain only fixed milestone names, timestamps and optional UUID
+references. There is no source/email/name/IP/token payload or browser ingestion.
+Storage is capped at 10,000 beta requests, 50,000 feedback rows and 100,000 events;
+events evict oldest rows at capacity. These counts are not a durable accounting
+ledger. See [commercial API](beta-api.md) for exact schemas and semantics.
+
+Schedule the separate trusted command, with the same migrated database:
+
+```bash
+BR_ADMIN_ENABLED=true python -m blastradius.server.admin cleanup-commercial --limit 100
+```
+
+Each call removes up to `limit` expired rows from **each** of the three tables
+(1–1000, default 100), auditing counts only. Repeat bounded calls until all three
+returned counts are zero; monitor exit status and backlog. There is no automatic
+time-based purge. Analysis/user/tenant deletion cascades dependent feedback/event
+references; anonymous beta requests have no account relationship. Operators must
+include these records in backup expiry, rights requests and deletion replay.
+
 ## Physical cleanup
 
 In a trusted operator environment with the same database configuration:
@@ -29,7 +61,11 @@ It selects a bounded candidate batch using workspace retention settings, then
 locks only those workspaces and rechecks the current window before deletion.
 It is idempotent; repeating after exhaustion reports `{"removed":0}`. Schedule
 this command hourly with an operator-controlled timer, repeating bounded batches
-as needed. There is no in-process scheduler, external email or queue service.
+as needed. Operators may instead opt in to the bounded in-process sweep with
+`BR_RETENTION_SWEEP_SECONDS`; it runs only on the lease-holding instance,
+performs its first sweep at startup, and repeats at the configured interval.
+Manual cleanup commands remain the authoritative path. Sleeping free instances
+only sweep while awake. There is no external email or queue service.
 Audit events record counts and workspace identity without retaining evidence.
 Monitor command exit codes and backlog on the chosen deployment.
 

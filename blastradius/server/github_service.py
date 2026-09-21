@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 
 from blastradius import __version__
 from blastradius.server.config import Settings
+from blastradius.server.events import analysis_event
 from blastradius.server.db import Database
 from blastradius.server.github_api import GitHubAPI, GitHubError
 from blastradius.server.github_publish import active, publish
@@ -246,6 +247,7 @@ class GitHubService:
                         session.add(job)
                         session.flush()
                         run.analysis_id = job.id
+                        analysis_event(session, job, "analysis_started")
                         audit(session, org.id, "github", "github.analysis", job.id)
                 analysis_id, run_status = run.analysis_id, run.status
             if run_status == "pending" and analysis_id:

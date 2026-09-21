@@ -7,12 +7,35 @@ or code integration are requirements, not claims of installed monitoring.
 
 Use the [deployment procedure](deployment.md): migrate once, then start traffic.
 Separate liveness (process can respond) from readiness (required DB/schema and
-configuration are usable). Never mark failed analysis as a healthy zero-finding
-result. The supplied image uses `/health/ready` for schema/demo readiness.
+configuration are usable). `/health/live` means that the process is alive and
+performs no dependency checks. `/health/ready` returns `503` while starting or
+lease-waiting, when the lease is unhealthy, when the database schema is not
+ready, when bundled demos are incomplete, or when job persistence has failed.
+Render's `healthCheckPath` is `/health/live` because readiness is intentionally
+`503` during free-tier lease handover. Never mark failed analysis as a healthy
+zero-finding result.
 
 Readiness requires the schema expected by the installed release. Record the
 actual Alembic head with the release; do not hard-code `0001` in new operational
 checks.
+
+Lifecycle and operational JSON log events include:
+
+- `service.starting`
+- `service.ready`
+- `service.stopping`
+- `service.fatal`
+- `analysis.completed`
+- `analysis.persistence_failed`
+- `retention.sweep`
+- `retention.sweep_failed`
+- `unhandled_exception`
+
+### Future external error monitoring
+
+External error monitoring is not configured. If adopted, attach it at the
+`blastradius.*` loggers and reuse the existing JSON handler. The same redaction
+rules must be honored. These documents do not activate paid monitoring.
 
 ## Capacity and restart behavior
 
@@ -32,6 +55,8 @@ Observe actual input mix and memory/CPU saturation before increasing limits.
 
 Default `BR_WORKERS=2` is the analysis subprocess pool, not the ASGI process count.
 `BR_MAX_JOBS=8` bounds admitted/running jobs; `BR_JOB_TIMEOUT=30` bounds each worker.
+`BR_LOG_LEVEL` controls structured application log verbosity and accepts `DEBUG`,
+`INFO`, `WARNING` or `ERROR` (default `INFO`).
 The queue is in memory. The configured shutdown grace is 150 seconds; this is not
 a verified worst-case drain bound. GitHub jobs use a separate single-thread
 pipeline plus provider requests, so eight GitHub jobs can exceed that grace even
@@ -67,6 +92,50 @@ Migration failure must stop the rollout. Keep the last reviewed image and a
 restorable backup; application rollback requires compatible schema, and
 destructive automatic Alembic downgrades are not supported.
 
+### Release drain and rollback
+
+There is no application maintenance/drain endpoint. The release owner must:
+
+1. Record current image digest, migration head, backup/restore evidence and known
+   unfinished jobs. Close new analysis admission at the ingress, including GitHub
+   webhooks and browser mutations, while existing workers finish. Coordinate a
+   webhook delivery pause/redelivery window; GitHub does not automatically replay
+   missed work. Do not acknowledge blocked deliveries as accepted.
+2. Inspect aggregate DB counts through a separately approved read-only operator
+   profile. `queued` deliveries cover the GitHub pipeline, including publication;
+   do not judge draining by analysis rows alone:
+
+   ```sh
+   : "${inspection_service:?approved read-only libpq service profile required}"
+   psql --dbname="service=$inspection_service" --no-psqlrc --set=ON_ERROR_STOP=1 \
+     --command="SELECT status,count(*) FROM analyses WHERE status IN ('queued','running') GROUP BY status; SELECT status,count(*) FROM github_deliveries WHERE status='queued' GROUP BY status;"
+   ```
+
+3. Wait for both counts to reach zero and investigate retryable/uncertain GitHub
+   publication. If they cannot drain within the approved window, retain ingress
+   closure and choose an explicit interrupted-work recovery plan. Do not pretend
+   `BR_JOB_TIMEOUT` or 150 seconds covers the whole GitHub queue.
+4. Stop the old singleton with the platform's reviewed grace period. Verify it
+   exited before migration/new startup. Take/verify the pre-migration recovery
+   point while admission is closed, then execute the reviewed image's `migrate`
+   command under the migration role.
+5. If migration succeeds, reapply/check runtime grants, start `serve` under the
+   runtime role, and verify readiness/liveness, expected schema and authorized
+   tenant reads through the real ingress. Reopen admission only after acceptance.
+6. On failure keep admission closed. Prefer a reviewed forward fix. Reuse the
+   previous image only after proving it accepts the current schema; readiness
+   requires exact packaged heads, so even an additive migration can prevent that
+   old image starting. Otherwise restore the pre-change backup to **a new isolated
+   database**, replay deletions, validate and explicitly approve the connection
+   cutover/data-loss window. Preserve the failed database for investigation.
+
+Never use `alembic downgrade`, `pg_restore --clean` against an active database,
+delete volumes, or start two ASGI replicas as an improvised rollback. Recover
+interrupted work as failed; tell users to resubmit authorized inputs as needed.
+For GitHub, review current heads/authorization and use the documented signed
+redelivery procedure; redelivery does not automatically rerun an already failed
+analysis. Record lost-work and publication reconciliation decisions.
+
 ## Logging contract
 
 Use structured logs with timestamp, level, event name, request/job ID, route
@@ -101,11 +170,34 @@ These are proposed metrics, not current exported metric names.
 Do not use tenant IDs, resource addresses or filenames as high-cardinality metric
 labels. Choose alert thresholds after load tests; no SLA/SLO is asserted here.
 
+### Initial alert routing
+
+Install these in the chosen platform and test notification delivery. Thresholds
+below are proposed starting points, not measured service objectives:
+
+| Check | Initial trigger | Owner response |
+|---|---|---|
+| HTTPS readiness | Two consecutive failed one-minute probes outside an approved maintenance window | Service owner: check DB/schema/lease/persistence; keep admission closed if degraded |
+| Liveness/restarts | Process unavailable or repeated restarts | Service owner: inspect redacted logs/resource limits; do not add replicas |
+| Analysis failures/backlog | Oldest queued work exceeds measured drain budget, or sustained timeout/error increase | Service owner: pause admission, inspect capacity and safe error categories |
+| Database/WAL/scratch | Free space below 20%, fast growth, or provider capacity alarm | Database owner: investigate growth and retention; never delete live WAL/scratch blindly |
+| Backup | Any failed/empty job or latest verified off-host copy older than scheduled interval plus approved grace | Database owner: restore coverage immediately and record exposed recovery window |
+| PITR archive | Provider/WAL archive failure or archive age exceeds approved recovery point | Database owner: repair archiving and verify complete base-backup/WAL chain |
+| Cleanup | Nonzero command exit, missing scheduled run or repeated full batches | Data owner: investigate backlog/DB access, then run more bounded batches |
+| Certificate/secrets | Certificate within 14 days of expiry or provider-defined rotation warning | Domain/identity/GitHub owner: renew and test without exposing keys |
+| GitHub delivery | Failed deliveries, retry budget exhaustion or reconciliation-required code | GitHub owner: inspect safe IDs/current head, reconcile or redeliver with approval |
+
+Use opaque IDs and counts in alert payloads. The health endpoints and completion
+logs exist; a metrics exporter, dashboard, remote scheduler and paging service
+are not installed. Record the alarm destination, backup contact and rehearsal
+time in the owner checklist.
+
 ## Backup and recovery
 
-Use encrypted PostgreSQL backups with restricted operator access and independently
-tested restore. Record snapshot time, migration head, model/service version and
-retention. Keep backup credentials separate from application credentials.
+Use [the backup and restore runbook](backup-restore.md) for encrypted PostgreSQL
+backups with restricted operator access and independently tested restore. Record
+snapshot time, migration head, model/service version and retention. Keep backup
+credentials separate from application credentials.
 
 After restore: verify schema compatibility, confirm tenant-scoped reads/deletes,
 reapply recorded deletion requests, and ensure interrupted jobs are not replayed
@@ -115,36 +207,81 @@ remain owner decisions, not guarantees.
 
 ### Local PostgreSQL restore drill
 
-These commands were exercised against the non-root/read-only Compose database.
-They create a logical dump and a separate restore database, never overwrite the
-active database. Use a fresh restore name per drill; `createdb` fails if it exists.
-Run from the checkout with its trusted local `.env`:
+Use [the dedicated drill](../scripts/ops_restore_drill.py) from a checkout with
+Python 3.12, the `server,dev` extras, and a local Unix Docker daemon. It accepts
+only a new output directory, **no database URL, container or restore target**.
+It ignores application database settings and never attaches existing volumes.
+Pull the reviewed digest explicitly; the drill itself uses `--pull=never`:
 
 ```bash
-umask 077
-mkdir -p .local/backups
-backup=".local/backups/blastradius-$(date -u +%Y%m%dT%H%M%SZ).dump"
-docker compose exec -T db sh -c 'exec pg_dump --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --format=custom --no-owner --no-privileges' > "$backup"
-test -s "$backup"
-sha256sum "$backup"
-docker compose exec -T db sh -c 'createdb --username="$POSTGRES_USER" blastradius_restore_check'
-docker compose exec -T db sh -c 'exec pg_restore --username="$POSTGRES_USER" --dbname=blastradius_restore_check --no-owner --no-privileges --exit-on-error' < "$backup"
-POSTGRES_DB=blastradius_restore_check docker compose run --rm --no-deps migrate
-POSTGRES_DB=blastradius_restore_check docker compose run --rm --no-deps --entrypoint python migrate -I -c 'from blastradius.server.config import Settings; from blastradius.server.db import Database; db = Database(Settings.from_env()); assert db.ready(); db.engine.dispose(); print("restored schema ready")'
+docker pull postgres:16.15-alpine3.23@sha256:621a761097839bdb50207afd6b87a72f38e2d718dd46c3d744828d8917c4f1e0
+.venv/bin/python scripts/ops_restore_drill.py \
+  --output-dir ".local/ops-drill/$(date -u +%Y%m%dT%H%M%SZ)"
+.venv/bin/python -m pytest -o addopts='' -q scripts/test_release_ops_drill.py
 ```
 
-`--no-deps` is essential: the temporary `POSTGRES_DB` override must not recreate
-the active database service. This drill checks dump restore and schema readiness.
-Before a production cutover also verify real tenant counts, authorization/deletion
-checks and application behavior in isolation; never expose a restored database
-containing previously deleted customer data.
+The opt-in integration regression is
+`BR_RUN_OPS_DRILL=1 .venv/bin/python -m pytest -o addopts='' -q scripts/test_release_ops_drill.py`.
+Without the flag only the Docker integration case is skipped.
 
-For Bookworm → Trixie, dump from the running old image before changing it, retain
-that image and volume, then restore into a new Trixie database/volume using the
-same `pg_restore` procedure. Validate locale/collation-dependent indexes and
-queries before cutover; do not mount the old data directory into the new OS
-image. PostgreSQL major upgrades additionally require their reviewed upgrade
-procedure. The local drill is not certification of arbitrary existing data.
+The drill creates one randomly named/labeled, nonroot, read-only PostgreSQL
+container with tmpfs data and an ephemeral **loopback-only** port. Its random
+credentials stay in process/container environment memory, not arguments, output
+or artifact files. Docker daemon administrators can inspect container secrets;
+use a trusted local machine. No Docker logs are retained. Source and restore DBs
+are synthetic and live only in that new container. Cleanup verifies its ownership
+label before removal; a forced machine/process kill may leave that disposable
+container. Inspect its exact name and label before operator removal; do not bulk
+delete containers or volumes.
+
+The implementation performs these PostgreSQL operations only inside that owned
+container, without `--clean`, `--create` or restoring over existing tables:
+
+```text
+pg_dump --username br_migrator --dbname br_drill_source --no-owner --no-privileges --format=custom
+pg_restore --username br_migrator --dbname br_drill_restore --no-owner --no-privileges --exit-on-error --single-transaction
+```
+
+It applies the installed migrations twice, seeds a synthetic owner/project and
+two explicitly failed sentinel analyses, restores to the empty second DB, and
+compares every public table's row counts/data hash plus a schema catalog hash.
+At migration `0004`, the seed also includes fresh/expired synthetic beta
+requests, feedback and product events, so commercial records participate in
+the same restore comparison.
+The schema signature covers column order/types/length/precision/null/defaults,
+constraint names/types/keys/referenced tables/actions/validation, and indexes.
+It excludes CHECK expression text because PostgreSQL can rewrite equivalent
+casts during dump/restore; an invalid membership role is separately rejected.
+This is not exhaustive proof of every constraint's semantics.
+
+It verifies foreign-key, unique-identity and role-check enforcement, runtime role
+flags, migrator table ownership, and denied runtime DDL/migration-metadata writes.
+The actual FastAPI lifespan checks `/health/live` and `/health/ready` via in-process
+ASGI transport. The real operator cleanup command deletes one expired analysis
+and its artifact, preserves usage/current evidence, audits the deletion and
+removes zero on repetition. The source stays unchanged; a second nonempty restore
+is refused.
+Analysis deletion also proves feedback/event foreign-key cascades. The separate
+`cleanup-commercial --limit 1` command runs three times: each of the first two
+calls removes one expired row from each commercial table, and the third removes
+zero. One fresh row per table survives; audits and usage preservation are checked.
+
+Exit 0 writes `evidence.json` with exact invocation, pinned image, migration head,
+counts/hashes, privilege/integrity/readiness/retention outcomes and measured
+duration. Errors return nonzero with bounded diagnostics; do not print captured
+subprocess output containing connection details. The private output directory
+also holds a mode-0600 `synthetic.dump`. Share the **JSON**, not a real DB dump.
+The file format is not encryption. Drill time is not a production recovery-time
+objective: it excludes provision, download, decryption and real data volume.
+
+For a glibc-based PostgreSQL image → Alpine, dump from the running old image before
+changing it, retain that image and volume, then use a separately reviewed operator
+procedure to restore into a new Alpine database/volume. This synthetic-only script deliberately
+cannot accept that live backup. Validate locale/collation-dependent indexes and
+queries before cutover; do not mount the old data directory into the new OS image.
+Indexes are rebuilt by logical restore. PostgreSQL major upgrades additionally
+require their reviewed upgrade procedure. The local drill is not certification of
+arbitrary existing data.
 
 The dump is plaintext on disk despite custom format. Production needs encrypted
 backup storage, access controls, an independently stored key and restore tests;
@@ -152,6 +289,70 @@ do not upload raw database dumps to CI artifacts. Use the managed provider's
 approved backup/PITR mechanism where applicable. A logical database dump excludes
 roles, provider configuration and external encryption keys; keep their controlled
 recovery inventory separately. Never back up application secrets in this repo.
+
+### Production backup, encryption and PITR
+
+The database owner must configure an approved scheduler and encrypted off-host
+storage; none is installed by this repository. Use the provider's documented
+backup/restore mechanism, enable its completion/age alarms, and record the actual
+retention and recovery targets. Keep backup/key access independent of the runtime
+role. Test recovering when the application host and its secret store are unavailable.
+
+For PostgreSQL tooling, use a separately provisioned libpq service profile and
+protected credential injection. A profile must not be a password-bearing URI in
+shell history. The following is an **operator template, not executed production
+backup automation**; `backup_service`, `backup_dir` and `encryption_recipient`
+are approved nonsecret configuration. It requires PostgreSQL client tools and an
+operator-approved `age` installation:
+
+```bash
+set -euo pipefail
+set -o noclobber
+umask 077
+: "${backup_service:?approved libpq service profile required}"
+: "${backup_dir:?private backup directory required}"
+: "${encryption_recipient:?approved age public recipient required}"
+test -d "$backup_dir"
+backup="$backup_dir/blastradius-$(date -u +%Y%m%dT%H%M%SZ).dump.age"
+test ! -e "$backup"
+pg_dump --dbname="service=$backup_service" --format=custom --no-owner --no-privileges \
+  | age --encrypt --recipient "$encryption_recipient" > "$backup"
+test -s "$backup"
+sha256sum "$backup"
+```
+
+Pipe failure must fail the scheduler job and alert; a partial file is not a
+completed backup. Publish the success inventory/checksum only after the command,
+encrypted off-host transfer and storage verification all succeed. Protect any
+failure logs from connection details. Assign a backup identity able to read every
+required table and verify that row-level restrictions do not silently omit data.
+A daily scheduler should run this reviewed wrapper with a nonoverlap lock,
+bounded runtime and failure notification; pick the interval from the approved
+recovery point target, not from this example. Enforce storage lifecycle expiry
+only after reviewing holds and successful restore evidence.
+
+Logical dumps recover the dump's consistent snapshot; they **do not provide
+PITR**. PostgreSQL PITR requires a physical base backup plus continuous WAL
+archiving (or a provider facility that implements it). The owner must record the
+WAL retention window, archive health, key availability and chosen recovery time,
+then rehearse an isolated restore to that timestamp. Test logical and PITR
+restores separately. Never feed an untrusted dump to an unrestricted production
+server: restore can execute SQL supplied by the source.
+
+After provider restore, keep egress/webhooks/admission disabled until schema,
+tenant isolation, counts/evidence, role grants, deletion-ledger replay and health
+are verified. Restore secrets/roles/provider settings from their controlled
+inventory separately. Queued work is not replayable from a logical backup.
+Reconcile GitHub publication with current PR heads before authorizing delivery.
+No managed-backup, failover or disaster-recovery acceptance is claimed by the
+local drill.
+
+References: [pg_dump](https://www.postgresql.org/docs/16/app-pgdump.html),
+[pg_restore](https://www.postgresql.org/docs/16/app-pgrestore.html),
+[logical dumps](https://www.postgresql.org/docs/16/backup-dump.html),
+[continuous archiving / PITR](https://www.postgresql.org/docs/16/continuous-archiving.html),
+[connection service files](https://www.postgresql.org/docs/16/libpq-pgservice.html),
+[age encryption usage](https://github.com/FiloSottile/age#usage).
 
 ### SQLite local backup
 
@@ -170,14 +371,17 @@ workspace/configuration; do not overwrite the active SQLite file.
 ## Retention and operator schedule
 
 The following initial schedule requires an assigned operator and approved policy.
-No cron, hosted backup service, automatic physical report deletion or deletion ledger is
-installed by these docs. Absence of those controls remains a promotion blocker.
+No cron, hosted backup service, scheduled report cleanup or deletion ledger is
+installed by these docs. The bounded cleanup command exists, but absence of the
+approved schedule and recovery controls remains a promotion blocker.
 
 | Cadence | Owner/action | Evidence |
 |---|---|---|
 | Every release | Release operator: image/dependency/secret audits, migrate, readiness, restore drill | Source SHA, image IDs, full JSON/SARIF, migration head and restore result |
 | Daily | Database operator: encrypted backup; verify completion/size and a 30-day retention policy | Backup inventory and checksum; alert on missed/empty backup |
 | Daily | Service operator: inspect disk/WAL/scratch and failed/restarted jobs | Capacity trend, cleanup failures; do not delete active scratch |
+| Daily initially | Data owner: `BR_ADMIN_ENABLED=true blastradius-admin cleanup --limit 100` in the restricted operator environment | Exit status and JSON `removed` count; alert on failure or persistent backlog, audit `retention.cleanup` |
+| Daily initially | Data owner: `BR_ADMIN_ENABLED=true blastradius-admin cleanup-commercial --limit 100` | Up to 100 expired rows from **each** of beta requests, feedback and product events; counts only, audit `commercial.cleanup` |
 | Daily | Data owner: process approved deletion requests through tenant-authorized application paths | Access-controlled deletion log retained independently of backups |
 | Weekly and before risky migrations | Database operator: restore into isolation and verify data/deletion replay | Measured restore duration and recorded recovery point |
 | Daily | Logging owner: expire centralized logs after approved 14-day window | Retention job status; local size rotation alone is insufficient |
@@ -202,6 +406,22 @@ Install deletion only after reviewing that inventory and confirming a successful
 recent restore, incident holds, and the actual backup storage lifecycle policy.
 Scratch cleans automatically after each finished worker and at service recovery;
 alert on leftovers rather than racing a worker with a blanket `rm -rf`.
+Run cleanup with one scheduler instance and a nonoverlap lock. If a batch removes
+100, schedule further bounded batches within a fixed operator time budget; stop
+at zero rather than an unbounded tight loop. Free/Pro/Team retention defaults are
+7/90/365 days and Enterprise is configured through the plan policy. Review holds
+and plan changes before enabling the schedule. Keep `BR_ADMIN_ENABLED=true`
+confined to that job; never set it globally for the serving app.
+Commercial records expire after 90 days independently of plan history.
+For commercial cleanup, stop only when all three returned counts are zero;
+repeat bounded invocations if any table has a backlog. Review and alert on
+capacity (10,000 beta requests, 50,000 feedback records, 100,000 activity events).
+Event capacity evicts oldest activity and is not a durable accounting ledger.
+The optional `BR_RETENTION_SWEEP_SECONDS` timer runs both bounded cleanup passes
+only on the lease-holding instance, immediately at startup and then at the
+configured interval. Manual commands remain authoritative; user requests never
+trigger cleanup, and the operator may opt in to the timer via
+`BR_RETENTION_SWEEP_SECONDS`.
 
 ## Incident workflow
 
@@ -230,10 +450,14 @@ BR_ADMIN_ENABLED=true blastradius-admin inspect users --limit 100
 BR_ADMIN_ENABLED=true blastradius-admin inspect projects --limit 100
 BR_ADMIN_ENABLED=true blastradius-admin inspect failures --limit 100
 BR_ADMIN_ENABLED=true blastradius-admin inspect usage --limit 100
+BR_ADMIN_ENABLED=true blastradius-admin inspect beta-requests --limit 100
+BR_ADMIN_ENABLED=true blastradius-admin inspect feedback --limit 100
+BR_ADMIN_ENABLED=true blastradius-admin inspect events
 BR_ADMIN_ENABLED=true blastradius-admin assign-plan WORKSPACE_ID team
 BR_ADMIN_ENABLED=true blastradius-admin assign-plan WORKSPACE_ID enterprise \
   --limits '{"projects":50,"analyses_per_month":10000,"retention_days":180,"members":50}'
 BR_ADMIN_ENABLED=true blastradius-admin cleanup --limit 100
+BR_ADMIN_ENABLED=true blastradius-admin cleanup-commercial --limit 100
 ```
 
 Assign-plan locks the workspace, persists the central plan identifier and
@@ -245,7 +469,14 @@ Both read inspection and plan assignments are audited as `operator`.
 
 Cleanup removes bounded batches of expired analysis records and child evidence;
 see [retention and scheduling](data-lifecycle.md). Usage is not refunded.
-The API never invokes cleanup based on a user request or environment timer.
+User requests never trigger cleanup; the operator may opt in to the timer via
+`BR_RETENTION_SWEEP_SECONDS`.
+
+The separate read-only `/operator` UI requires verified OIDC and
+`BR_WEB_ADMIN_USER_IDS`; CLI enablement and workspace roles do not grant access.
+Follow [web operator setup](owner-setup.md#web-operator-and-commercial-data-setup)
+and the [commercial contract](beta-api.md). Beta requests and feedback contain
+private review text; do not copy them into monitoring, public issues or URLs.
 
 The worker emits JSON `event:"analysis.completed"` logs with `analysis_id`,
 `request_id`, `organization_id`, `project_id`, `outcome` and `duration_ms`.

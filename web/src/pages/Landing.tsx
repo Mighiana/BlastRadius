@@ -9,10 +9,11 @@ export default function Landing() {
   const preview = useResource('/api/demo/public_ssh?stage=risky', reportSchema);
   return <>
     <section className="hero container">
-      <div className="hero-copy"><div className="hero-kicker"><span className="dot" /> SECURITY IN THE PULL REQUEST</div>
+      <div className="hero-copy"><div className="hero-kicker"><span className="dot" /> PRIVATE BETA · SECURITY IN THE PULL REQUEST</div>
         <h1>Your Terraform diff shows what changed.<br /><span>BlastRadius shows what became reachable.</span></h1>
         <p>See the path from a one-line infrastructure change to your sensitive data. Catch new exposure before it reaches production.</p>
         <div className="button-row"><Link className="button primary large" to="/demo">Explore the live demo<ArrowRight size={18} aria-hidden="true" /></Link><Link className="button secondary large" to="/guide"><GitPullRequest size={18} aria-hidden="true" />Add to your workflow</Link></div>
+        <Link className="text-link" to="/beta">Request early access</Link>
         <div className="hero-assurances"><span>No AWS credentials</span><span>No infrastructure changes</span><span>Open source</span></div>
       </div>
       <div className="product-preview">
@@ -46,13 +47,14 @@ export default function Landing() {
     </section>
     <section className="container section faq-section"><div className="section-intro"><LockKeyhole size={24} aria-hidden="true" /><p className="eyebrow">CLEAR BOUNDARIES</p><h2>Security decisions deserve honest answers.</h2></div>
       <div className="faq">{[
-        ['Does SAFE mean my infrastructure is secure?', 'No. It means no new modeled critical attack paths were detected under the selected model and policy. Existing exposure may remain. Unsupported resources, policy conditions and Terraform constructs can limit coverage. Read diagnostics before relying on a result.'],
+        ['Does SAFE mean my infrastructure is secure?', 'No. No new modeled blocking findings detected describes a result under the selected model and policy. Existing exposure may remain. Unsupported resources, policy conditions and Terraform constructs can limit coverage. Read diagnostics before relying on a result.'],
         ['Do you need my AWS credentials?', 'No. BlastRadius analyzes Terraform text and plan JSON. It does not call AWS, execute Terraform providers, deploy resources or verify exploitability.'],
         ['What happens to uploaded data?', 'Public demos use fixed fixtures and persist no analysis. Workspace reports are stored by the backend and may contain source diffs or patches. Avoid uploading secrets. Deleting an analysis removes its stored report; backup retention is the operator’s responsibility. Use the CLI when data must stay local.'],
         ['Does BlastRadius deploy infrastructure?', 'No. It reads supported infrastructure inputs and returns evidence and suggested patches for human review. It never applies Terraform or changes your AWS infrastructure.'],
         ['Can I connect a GitHub repository here?', 'The GitHub App requires configured provider credentials and an operator-verified installation mapped to your workspace. Owners and admins can connect verified repositories. The integration page shows actual status; installation alone does not establish a connection. GitHub Actions is also available.'],
         ['What counts as an analysis?', 'Each job accepted for processing counts toward the monthly UTC quota, even if it later fails. Rejected requests and public demos do not count. Deleting a report does not refund usage.'],
         ['Can I pay for a subscription?', 'Payments are disabled during the commercial beta. Free is available through configured sign-in. Pro, Team and Enterprise have proposed pricing and require an operator grant. There is no self-service upgrade or checkout.'],
+        ['Can I run GitHub Actions without a SaaS account?', 'Yes. The documented CLI and Actions workflow run in your environment without a BlastRadius SaaS account. They do not automatically upload reports into workspace history.'],
       ].map(([question, answer]) => <details key={question}><summary>{question}</summary><p>{answer}</p></details>)}</div>
     </section>
     <section className="container section"><div className="final-cta"><p className="eyebrow">KNOW BEFORE YOU MERGE</p><h2>See what one line can open.</h2><p>Three real scenarios. Every connection explained.</p><Link className="button primary large" to="/demo">Explore the live demo<ArrowRight size={18} aria-hidden="true" /></Link></div></section>
