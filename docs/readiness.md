@@ -437,7 +437,7 @@ intended; the adopted Alpine image is covered by the current passing gate.
 | B1 — Critical | Current container images fail the unchanged promotion policy | Engineering/operator: remediate the HIGH/CRITICAL findings, rebuild and rescan exact deployment images; retain full scan evidence |
 | B2 — High | Real user identity and public TLS have not been accepted | Owner/operator: choose domain/hosting/IdP, provision the documented configuration, then authorize full hosted HTTPS/OIDC/invitation acceptance |
 | B3 — High if offering GitHub integration | Mocked provider tests do not prove hosted checks enforce merges | Owner: configure the selected-repository App and authorize disposable hosted acceptance; do not offer it as verified until passed |
-| B4 — High | A single-process beta still requires recoverable data, alerts and operational ownership | Operator: provision backup/PITR, run a restore drill, schedule retention, assign incident ownership, alert on failed readiness and validate admission/drain capacity |
+| B4 — High | A single-process beta still requires recoverable data, alerts and operational ownership; this is beta infrastructure, not production infrastructure | Operator: provision backup/PITR, run a restore drill, schedule retention, assign incident ownership, alert on failed readiness and validate admission/drain capacity |
 | B5 — High | Unreviewed terms/data promises and unapproved artifacts block commercial exposure | Owner/legal: approve beta limits, privacy/terms/support/security contacts and final release/deployment scope. Payments stay disabled |
 
 Former local blocker B6 is closed by the current-revision acceptance above.

@@ -93,13 +93,17 @@ instances require a separate architecture and review.
 
 ## Cost and known caveats
 
-The default Blueprint costs $0 on Render's free tiers. The free web service
-sleeps after 15 minutes of inactivity and has an approximately 50-second cold
-start, so it is suitable for a demo rather than latency-sensitive production
-traffic. The free PostgreSQL database is deleted 30 days after creation unless
-it is upgraded; the owner must upgrade it or move the data before that
-deadline using [the database move procedure](database-migration.md). Prices and plan behavior are provider-controlled; verify the current
-Render limits and lifecycle terms before provisioning.
+The default Blueprint costs $0 on Render's free tiers. The free web service is
+single-instance, sleeps after 15 minutes of inactivity, and has an
+approximately 50-second-or-more cold start. A browser request simply waits
+through the cold start; no retry is needed. The free PostgreSQL database for
+this instance expires on `2026-10-20`, has no PITR or backups, and must be
+upgraded or moved before that deadline using the
+[backup and restore runbook](backup-restore.md). Prices and plan behavior are
+provider-controlled; verify the current Render limits and lifecycle terms
+before provisioning.
+
+This is beta infrastructure, not production infrastructure.
 
 ## Upgrading later
 

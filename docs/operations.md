@@ -7,12 +7,35 @@ or code integration are requirements, not claims of installed monitoring.
 
 Use the [deployment procedure](deployment.md): migrate once, then start traffic.
 Separate liveness (process can respond) from readiness (required DB/schema and
-configuration are usable). Never mark failed analysis as a healthy zero-finding
-result. The supplied image uses `/health/ready` for schema/demo readiness.
+configuration are usable). `/health/live` means that the process is alive and
+performs no dependency checks. `/health/ready` returns `503` while starting or
+lease-waiting, when the lease is unhealthy, when the database schema is not
+ready, when bundled demos are incomplete, or when job persistence has failed.
+Render's `healthCheckPath` is `/health/live` because readiness is intentionally
+`503` during free-tier lease handover. Never mark failed analysis as a healthy
+zero-finding result.
 
 Readiness requires the schema expected by the installed release. Record the
 actual Alembic head with the release; do not hard-code `0001` in new operational
 checks.
+
+Lifecycle and operational JSON log events include:
+
+- `service.starting`
+- `service.ready`
+- `service.stopping`
+- `service.fatal`
+- `analysis.completed`
+- `analysis.persistence_failed`
+- `retention.sweep`
+- `retention.sweep_failed`
+- `unhandled_exception`
+
+### Future external error monitoring
+
+External error monitoring is not configured. If adopted, attach it at the
+`blastradius.*` loggers and reuse the existing JSON handler. The same redaction
+rules must be honored. These documents do not activate paid monitoring.
 
 ## Capacity and restart behavior
 
