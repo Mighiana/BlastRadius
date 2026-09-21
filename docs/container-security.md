@@ -186,6 +186,123 @@ The full ledger also itemizes all 80 MEDIUM, 104 LOW and 6 UNKNOWN remaining
 database rows, including zlib, SQLite, PAM, Kerberos, LDAP, compression, C library
 and terminal issues. UNKNOWN is retained as uncertainty, never treated as safe.
 
+## Private-beta rescan (2026-09-21)
+
+Both images were rebuilt from the branch head using the repository Dockerfile
+targets and rescanned with Trivy 0.74.0; the binary SHA-256 was verified using
+the release workflow's checksum. The totals are:
+
+| Image | CRITICAL | HIGH | MEDIUM | LOW | UNKNOWN |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `python 3.12.14-alpine3.24` (app) | 0 | 0 | 0 | 0 | 0 |
+| `postgres 16.15-trixie` (database) | 1 | 54 | 80 | 104 | 6 |
+
+Of the 55 CRITICAL/HIGH rows, 51 are `affected` and 4 are `fix_deferred`;
+none are `will_not_fix`, and none has a Debian fixed version. Nothing in the
+database image is therefore fixable by package upgrade today. Nothing was
+suppressed, and `make promotion-check` is unchanged.
+
+### Candidate base images scanned
+
+| Candidate | CRITICAL | HIGH | MEDIUM | LOW | UNKNOWN |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `postgres:16-trixie` | 2 | 82 | 110 | 121 | 7 |
+| `postgres:16-alpine` | 1 | 21 | 21 | 2 | 1 |
+| `postgres:16.15-alpine3.23` | 1 | 21 | 21 | 2 | 1 |
+| `python:3.12-alpine` | 0 | 0 | 5 | 1 | 0 |
+
+`postgres:16-trixie` is in the same pinned digest family and is worse.
+The Alpine candidates retain CRITICAL/HIGH findings, mostly Go stdlib
+findings in bundled `gosu`, plus libxml2. Trivy lists fixed versions upstream,
+but the official image has not been rebuilt with them; the gate would still
+fail. Alpine also changes libc/collation behaviour, so both candidates are
+rejected, consistent with the section above.
+
+### Complete CRITICAL/HIGH ledger
+
+Every row below is in the final runtime database image; none is build-only.
+The relevance column points to the matching package-group row in
+“Remaining database blockers” above.
+
+| CVE | Component | Installed version | Fixed version | Severity | Runtime vs build-only | Status | Relevance / remediation / residual risk |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| CVE-2026-6653 | `libxml2` | `2.12.7+dfsg+really2.9.14-2.1+deb13u3` | `none` | CRITICAL | runtime (final stage; OS package) | affected | see libxml2 row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2025-69720 | `libncursesw6` | `6.5+20250216-2` | `none` | HIGH | runtime (final stage; OS package) | affected | see ncurses row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2025-69720 | `libtinfo6` | `6.5+20250216-2` | `none` | HIGH | runtime (final stage; OS package) | affected | see ncurses row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2025-69720 | `ncurses-base` | `6.5+20250216-2` | `none` | HIGH | runtime (final stage; OS package) | affected | see ncurses row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2025-69720 | `ncurses-bin` | `6.5+20250216-2` | `none` | HIGH | runtime (final stage; OS package) | affected | see ncurses row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-16742 | `libsystemd0` | `257.13-1~deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see systemd row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-16742 | `libudev1` | `257.13-1~deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see systemd row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-54369 | `libacl1` | `2.3.2-2+b1` | `none` | HIGH | runtime (final stage; OS package) | affected | see libacl1 row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-74860 | `libxml2` | `2.12.7+dfsg+really2.9.14-2.1+deb13u3` | `none` | HIGH | runtime (final stage; OS package) | affected | see libxml2 row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-76642 | `bsdutils` | `1:2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-76642 | `libblkid1` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-76642 | `liblastlog2-2` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-76642 | `libmount1` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-76642 | `libsmartcols1` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-76642 | `libuuid1` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-76642 | `login` | `1:4.16.0-2+really2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-76642 | `mount` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-76642 | `util-linux` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78408 | `bsdutils` | `1:2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78408 | `libblkid1` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78408 | `liblastlog2-2` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78408 | `libmount1` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78408 | `libsmartcols1` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78408 | `libuuid1` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78408 | `login` | `1:4.16.0-2+really2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78408 | `mount` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78408 | `util-linux` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78409 | `bsdutils` | `1:2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78409 | `libblkid1` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78409 | `liblastlog2-2` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78409 | `libmount1` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78409 | `libsmartcols1` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78409 | `libuuid1` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78409 | `login` | `1:4.16.0-2+really2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78409 | `mount` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78409 | `util-linux` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78410 | `bsdutils` | `1:2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78410 | `libblkid1` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78410 | `liblastlog2-2` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78410 | `libmount1` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78410 | `libsmartcols1` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78410 | `libuuid1` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78410 | `login` | `1:4.16.0-2+really2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78410 | `mount` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-78410 | `util-linux` | `2.41.5-0+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | affected | see util-linux row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-86138 | `libxml2` | `2.12.7+dfsg+really2.9.14-2.1+deb13u3` | `none` | HIGH | runtime (final stage; OS package) | affected | see libxml2 row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-86139 | `libxml2` | `2.12.7+dfsg+really2.9.14-2.1+deb13u3` | `none` | HIGH | runtime (final stage; OS package) | affected | see libxml2 row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-86140 | `libxml2` | `2.12.7+dfsg+really2.9.14-2.1+deb13u3` | `none` | HIGH | runtime (final stage; OS package) | affected | see libxml2 row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-86142 | `libxml2` | `2.12.7+dfsg+really2.9.14-2.1+deb13u3` | `none` | HIGH | runtime (final stage; OS package) | affected | see libxml2 row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-86143 | `libxml2` | `2.12.7+dfsg+really2.9.14-2.1+deb13u3` | `none` | HIGH | runtime (final stage; OS package) | affected | see libxml2 row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-86144 | `libxml2` | `2.12.7+dfsg+really2.9.14-2.1+deb13u3` | `none` | HIGH | runtime (final stage; OS package) | affected | see libxml2 row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-9538 | `libperl5.40` | `5.40.1-6+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | fix_deferred | see perl row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-9538 | `perl` | `5.40.1-6+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | fix_deferred | see perl row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-9538 | `perl-base` | `5.40.1-6+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | fix_deferred | see perl row above; remediation: vendor fix or managed PostgreSQL |
+| CVE-2026-9538 | `perl-modules-5.40` | `5.40.1-6+deb13u1` | `none` | HIGH | runtime (final stage; OS package) | fix_deferred | see perl row above; remediation: vendor fix or managed PostgreSQL |
+
+### Classification
+
+- **Hosted deployment path:** The Render deployment uses Render-managed
+  PostgreSQL; the `database` image is used only by the self-hosted
+  docker-compose path. The hosted private beta therefore does not run this
+  image at all; the `app` image that does run has 0 findings.
+- **PRIVATE BETA:** not blocked (hosted, managed PostgreSQL, clean app image).
+- **PUBLIC BETA:** not blocked for the hosted service; blocks shipping the
+  `database` image to self-hosted users and blocks `promotion=true` container
+  promotion for that image.
+- **PRODUCTION V1:** blocked for any self-hosted/compose distribution until
+  Debian ships fixes for libxml2 `CVE-2026-6653` and the
+  util-linux/ncurses/systemd/libacl/perl HIGH rows, or the project moves to a
+  vendor-maintained minimal PostgreSQL base with a validated collation
+  migration. Recommended V1 path: managed PostgreSQL (documented in
+  [docs/database-migration.md](database-migration.md)), keeping the database
+  image out of the production path.
+- **Re-scan cadence for beta:** re-run `make image && make container-audit`
+  before each hosted deploy; a new CRITICAL/HIGH in the app image blocks the
+  deploy.
+
 ## Alternatives evaluated
 
 * **Debian Trixie update/purge:** supplied images already used current supported
