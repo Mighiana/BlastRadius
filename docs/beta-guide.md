@@ -2,6 +2,9 @@
 
 **Your Terraform diff shows what changed. BlastRadius shows what became reachable.**
 
+Invited testers: start with the short [beta welcome](beta-welcome.md); this
+page is the detailed reference behind it.
+
 BlastRadius is for Terraform reviewers who want to understand how a proposed
 AWS change alters modeled exposure and access to sensitive resources. Platform
 engineers, cloud security teams, small SaaS engineering teams and consultancies

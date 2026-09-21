@@ -13,6 +13,7 @@ separates verified implementation, external configuration and launch blockers.
 | GitHub | [GitHub App setup](github.md), [Actions onboarding](github-actions.md) |
 | CLI | [Inputs, output formats and exits](cli.md) |
 | API | [Routes, configuration and errors](api.md) |
+| Private beta | [Tester welcome](beta-welcome.md), [per-tester checklist](private-beta-checklist.md), [Google sign-in for testers](oidc-beta-testers.md), [eleven feedback questions](beta-feedback-form.md) |
 | Commercial beta | [Customer guide](beta-guide.md), [interest/feedback/operator API](beta-api.md) |
 | Customer validation | [Synthetic samples](customer-samples.md), [demo scripts](demo-sales.md), [interview](customer-interview.md), [buyer hypotheses](buyer-personas.md) |
 | Policies | [Trusted policy and inheritance](policy.md) |

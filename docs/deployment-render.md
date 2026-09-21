@@ -43,6 +43,11 @@ Use the exact issuer and callback for the hostname in `BR_PUBLIC_URL`. Provider
 setup screens and pricing can change; verify the current Google and Render
 instructions before production use.
 
+Keep the Google consent screen in **Testing** mode during the private beta and
+add each invited tester as an OAuth test user; see
+[Google sign-in for private-beta testers](oidc-beta-testers.md) for the exact
+owner steps and for what changes when sign-in is later made public.
+
 ## Deploy and verify
 
 Deploy the Blueprint after configuring the environment. The `migrate-serve`
