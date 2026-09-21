@@ -1,7 +1,7 @@
 import { useState, type ChangeEvent, type FormEvent } from 'react';
 import { FileUp, Play, X } from 'lucide-react';
 import { z } from 'zod';
-import { jobSchema, request, type AnalysisInput, type Job } from '../api';
+import { demoFilesSchema, jobSchema, request, type AnalysisInput, type Job } from '../api';
 import { ErrorNotice } from './UI';
 
 export function validateFiles(files: Record<string, string>) {
@@ -86,6 +86,18 @@ export function AnalysisForm({ projectId, onSubmitted }: { projectId: string; on
     } catch (err) { setError(err instanceof Error ? err : new Error('Could not read this plan.')); }
     finally { setReading(false); }
   }
+  async function loadExample() {
+    setError(null); setReading(true);
+    try {
+      const example = await request('/api/demo/public_ssh/files', demoFilesSchema);
+      setBefore(example.before_files);
+      setAfter(example.after_files);
+      setBaseLabel('example-baseline');
+      setCandidateLabel('example-public-ssh');
+      setMode('hcl');
+    } catch (err) { setError(err instanceof Error ? err : new Error('Could not load the example.')); }
+    finally { setReading(false); }
+  }
   async function submit(event: FormEvent) {
     event.preventDefault(); setError(null); setBusy(true);
     try {
@@ -107,7 +119,7 @@ export function AnalysisForm({ projectId, onSubmitted }: { projectId: string; on
         <button type="button" disabled={busy} aria-pressed={mode === 'plan'} onClick={() => { setMode('plan'); setError(null); }}>Plan JSON</button>
       </div></div>
     <p className="muted">Source text is analyzed as data. No repository code, Terraform providers or commands are executed. Do not upload secrets.</p>
-    <p className="muted">No AWS credentials or GitHub connection are required. Bring baseline and candidate .tf files, or one plan JSON generated in your trusted environment. <a className="text-link" href="/demo">Try an example first</a></p>
+    <p className="muted">New here? Load the example to see a real BLOCK result, or bring your own baseline and candidate .tf files. No AWS credentials or GitHub connection are required. <button className="text-button" type="button" disabled={busy || reading} onClick={() => { void loadExample(); }}>{reading ? 'Loading example…' : 'Load the example (public SSH change)'}</button></p>
     <p className="muted">Baseline is your current or reference configuration. Candidate is the proposed change. A baseline may already contain exposure.</p>
     <fieldset disabled={busy || reading} className="form-fields">
       <div className="form-grid"><label>Baseline label<input required maxLength={120} value={baseLabel} onChange={e => setBaseLabel(e.target.value)} /></label><label>Candidate label<input required maxLength={120} value={candidateLabel} onChange={e => setCandidateLabel(e.target.value)} /></label></div>

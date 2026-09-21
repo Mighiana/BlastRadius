@@ -373,6 +373,19 @@ def test_real_demo_fixtures_are_safe_risky_and_remediated(client, demo_results):
     scenarios = client.get("/api/demo/scenarios").json()["scenarios"]
     assert {s["id"] for s in scenarios} == {"public_ssh", "broad_iam", "public_bucket"}
     for scenario in scenarios:
+        files_response = client.get(f"/api/demo/{scenario['id']}/files")
+        assert files_response.status_code == 200
+        files = files_response.json()
+        assert set(files) == {"scenario_id", "title", "before_files", "after_files"}
+        assert files["scenario_id"] == scenario["id"]
+        assert files["title"] == FIXTURES[scenario["id"]]["title"]
+        assert files["before_files"] == FIXTURES[scenario["id"]]["before_files"]
+        assert files["after_files"] == FIXTURES[scenario["id"]]["after_files"]
+        AnalysisInput(
+            project_id="demo",
+            before_files=files["before_files"],
+            after_files=files["after_files"],
+        )
         for stage in scenario["stages"]:
             response = client.get(f"/api/demo/{scenario['id']}?stage={stage}")
             assert response.status_code == 200
@@ -393,6 +406,7 @@ def test_real_demo_fixtures_are_safe_risky_and_remediated(client, demo_results):
             )
             assert "/job-" not in json.dumps(report)
             assert report == client.get(f"/api/demo/{scenario['id']}?stage={stage}").json()
+    assert client.get("/api/demo/nope/files").status_code == 404
     assert client.get("/api/demo/nope").status_code == 404
     assert client.get("/api/demo/public_ssh?stage=nope").status_code == 422
     assert (

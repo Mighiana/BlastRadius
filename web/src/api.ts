@@ -112,6 +112,10 @@ export const scenariosSchema = z.object({
     id: z.string(), title: z.string(), root_cause: z.string(), change: z.string(), stages: z.array(z.string()),
   })),
 });
+export const demoFilesSchema = z.object({
+  scenario_id: z.string(), title: z.string(),
+  before_files: z.record(z.string(), z.string()), after_files: z.record(z.string(), z.string()),
+});
 export const plansSchema = z.object({
   payments_enabled: z.literal(false), mode: z.literal('commercial_beta'),
   plans: z.array(z.object({

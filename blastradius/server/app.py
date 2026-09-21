@@ -395,6 +395,18 @@ def create_app(
             ]
         }
 
+    @app.get("/api/demo/{scenario_id}/files")
+    def demo_files(scenario_id: str):
+        fixture = FIXTURES.get(scenario_id)
+        if fixture is None:
+            raise HTTPException(404, "not_found")
+        return {
+            "scenario_id": scenario_id,
+            "title": fixture["title"],
+            "before_files": fixture["before_files"],
+            "after_files": fixture["after_files"],
+        }
+
     @app.get("/api/demo/{scenario_id}")
     def demo(scenario_id: str, stage: Literal["safe", "risky", "remediated"] = "risky"):
         if (scenario_id, stage) not in demos:
