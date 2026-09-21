@@ -31,7 +31,7 @@ function RouteFocus() {
   useEffect(() => {
     const title = pathname === '/' ? 'Know before you merge' : pathname.slice(1).replace(/^\w/, c => c.toUpperCase());
     document.title = `BlastRadius Beta — ${title}`;
-    window.scrollTo({ top: 0 });
+    window.scrollTo({ top: 0, behavior: 'instant' });
     document.getElementById('main')?.focus({ preventScroll: true });
   }, [pathname]);
   return null;
@@ -51,6 +51,10 @@ function Header() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   useEffect(() => { setOpen(false); }, [pathname]);
+  useEffect(() => {
+    document.body.classList.toggle('nav-open', open);
+    return () => { document.body.classList.remove('nav-open'); };
+  }, [open]);
   async function logout() {
     setBusy(true); setError(null);
     try { await mutate('/api/auth/logout', 'POST'); await refresh(); navigate('/'); }
