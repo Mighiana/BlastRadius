@@ -10,7 +10,7 @@ separates verified implementation, external configuration and launch blockers.
 | Architecture and schema | [Architecture](architecture.md) |
 | Security model | [AWS model and decision semantics](security-model.md) |
 | Supported resources | [Coverage, diagnostics and budgets](coverage.md) |
-| GitHub | [GitHub App setup](github.md), [Actions onboarding](github-actions.md) |
+| GitHub | [GitHub App setup](github.md), [Hosted beta owner worksheet](github-app-owner-setup.md), [Actions onboarding](github-actions.md) |
 | CLI | [Inputs, output formats and exits](cli.md) |
 | API | [Routes, configuration and errors](api.md) |
 | Private beta | [Tester welcome](beta-welcome.md), [per-tester checklist](private-beta-checklist.md), [Google sign-in for testers](oidc-beta-testers.md), [eleven feedback questions](beta-feedback-form.md) |
@@ -30,7 +30,7 @@ separates verified implementation, external configuration and launch blockers.
 
 [Operations and administration](operations.md) · [Data lifecycle](data-lifecycle.md) ·
 [Backup and restore](backup-restore.md) ·
-[Owner setup checklist](owner-setup.md) · [Deployment choices](deployment-patterns.md) ·
+[Owner setup checklist](owner-setup.md) · [GitHub App owner worksheet](github-app-owner-setup.md) · [Deployment choices](deployment-patterns.md) ·
 [Container security evidence](container-security.md) ·
 [Frontend contract](frontend.md) · [Integration acceptance](release-integration.md) ·
 [Development environment](environment-development.md) ·

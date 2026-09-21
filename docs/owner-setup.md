@@ -101,6 +101,9 @@ gate. Never put credentials, customer dumps or private keys in the checklist.
 
 ## 4. GitHub App
 
+Use the [hosted beta GitHub App owner worksheet](github-app-owner-setup.md) for
+the exact Render URLs, permissions, secret-file path, and live acceptance steps.
+
 - [ ] Create an owner-managed GitHub.com App with the exact
   [registration fields and minimum permissions](github.md#operator-setup).
   Choose the owning account, unique App name/slug, homepage and selected repos.
