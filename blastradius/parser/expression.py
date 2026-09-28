@@ -38,10 +38,32 @@ class Unresolved:
             self.reason = self.reason[:MAX_REASON_LENGTH]
 
 
+REFERENCE_RE = re.compile(
+    r"(?<![\w.])(aws_[a-z0-9_]+)\.([A-Za-z_][A-Za-z0-9_-]*)(?![\w\[-])"
+)
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _TRAVERSAL_TAIL = re.compile(r"\.[A-Za-z_][A-Za-z0-9_]*|\[\d+\]")
 _AWS_TRAVERSAL = re.compile(r"aws_[A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*|\[\d+\])+")
 _SIMPLE_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\"}
+
+
+class PolicyString(str):
+    """A policy string that knows which Terraform resources it genuinely references.
+
+    ``addresses`` comes only from real traversals and ``${aws_*}`` template
+    sequences; reference-shaped literal text contributes nothing.
+    """
+
+    addresses: tuple[str, ...]
+
+    def __new__(cls, value: str, addresses: tuple[str, ...] = ()) -> "PolicyString":
+        instance = super().__new__(cls, value)
+        instance.addresses = addresses
+        return instance
+
+
+def traversal_addresses(traversal: str) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(f"{m[1]}.{m[2]}" for m in REFERENCE_RE.finditer(traversal)))
 
 
 @dataclass
@@ -98,7 +120,7 @@ class _Reader:
                 return None
             traversal = self._read_traversal(name)
             if traversal.startswith("aws_"):
-                return "${" + traversal + "}"
+                return PolicyString("${" + traversal + "}", traversal_addresses(traversal))
             self.problems.append(Unresolved(f"unresolved reference '{traversal}'"))
             return None
         raise ExpressionError(f"unexpected token {ch!r}")
@@ -121,6 +143,7 @@ class _Reader:
             if self._peek() == "}":
                 self.text = self.text[1:]
                 return result
+            key: str
             if self._peek() == '"':
                 key = self._read_string()
             else:
@@ -149,14 +172,15 @@ class _Reader:
             if self._peek() == ",":
                 self.text = self.text[1:]
 
-    def _read_string(self) -> str:
+    def _read_string(self) -> PolicyString:
         self._expect('"')
         out: list[str] = []
+        addresses: list[str] = []
         while self.text:
             ch = self.text[0]
             self.text = self.text[1:]
             if ch == '"':
-                return "".join(out)
+                return PolicyString("".join(out), tuple(dict.fromkeys(addresses)))
             if ch == "\\":
                 out.append(self._read_escape())
             elif ch in "$%" and self.text.startswith(ch + "{"):
@@ -164,7 +188,7 @@ class _Reader:
                 self.text = self.text[2:]
             elif ch in "$%" and self.text.startswith("{"):
                 self.text = self.text[1:]
-                out.append(self._read_template(ch))
+                out.append(self._read_template(ch, addresses))
             else:
                 out.append(ch)
         raise ExpressionError("unterminated string")
@@ -186,7 +210,7 @@ class _Reader:
             raise ExpressionError("invalid unicode code point")
         return chr(code)
 
-    def _read_template(self, marker: str) -> str:
+    def _read_template(self, marker: str, addresses: list[str]) -> str:
         """Read one ``${...}``/``%{...}`` sequence after its opening brace."""
         end = self.text.find("}")
         if end < 0:
@@ -194,6 +218,7 @@ class _Reader:
         body = self.text[:end].strip()
         self.text = self.text[end + 1:]
         if marker == "$" and _AWS_TRAVERSAL.fullmatch(body):
+            addresses.extend(traversal_addresses(body))
             return "${" + body + "}"
         label = "template directive" if marker == "%" else f"interpolation '{body[:60]}'"
         self.problems.append(Unresolved(f"unresolved {label}"))

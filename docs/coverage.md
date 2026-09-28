@@ -22,6 +22,7 @@ diagnosed when relevant rather than silently establishing safety.
 | `jsonencode` containing `var.`/`local.`/`data.`/`module.`/`each.`/`count.` references | review required — `IAM_POLICY_EXPRESSION_UNRESOLVED` |
 | `jsonencode` containing other function calls | review required — `IAM_POLICY_EXPRESSION_UNRESOLVED` |
 | `jsonencode` strings with non-`aws_*` `${...}` interpolation (in any field or key) or `%{...}` directives | review required — `IAM_POLICY_EXPRESSION_UNRESOLVED` |
+| Policy strings that only *look like* references (`"aws_s3_bucket.x.arn"`, `"\u0061ws_…"`, `"$${aws_…}"`, text containing an address) | literal text — never linked to a resource; only real traversals and `${aws_*}` templates create edges |
 | `jsonencode` strings with `\n \t \r \" \\ \uNNNN \UNNNNNNNN` escapes, `$${` / `%%{` | supported (decoded as Terraform does; invalid escapes are malformed) |
 | malformed or structureless policy | review required — `INVALID_POLICY` |
 

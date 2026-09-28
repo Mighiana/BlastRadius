@@ -20,6 +20,7 @@ from blastradius.parser.terraform_parser import (
     policy_statements,
     references,
 )
+from blastradius.parser.values import policy_references
 
 # CIDRs that mean "anyone on the internet".
 PUBLIC_CIDRS = {"0.0.0.0/0", "::/0"}
@@ -201,7 +202,7 @@ def bucket_resource_matches(patterns: list[str], bucket: TerraformResource, obje
     for pattern in patterns:
         if pattern == "*":
             return True
-        if bucket.address in references(pattern):
+        if bucket.address in policy_references(pattern):
             if not objects_only or ".arn}/" in pattern or ".arn/" in pattern:
                 return True
         for arn in (bucket.get("arn"), f"arn:aws:s3:::{bucket.get('bucket')}" if bucket.get("bucket") else None):
@@ -234,9 +235,9 @@ def s3_access_findings(policy_document: Any) -> List[S3AccessFinding]:
         if not s3_actions:
             continue
 
-        resources = [str(r) for r in as_list(statement.get("Resource"))]
+        resources = [r if isinstance(r, str) else str(r) for r in as_list(statement.get("Resource"))]
         bucket_addresses = [
-            ref for ref in references(resources) if ref.startswith("aws_s3_bucket.")
+            ref for ref in policy_references(resources) if ref.startswith("aws_s3_bucket.")
         ]
         targets_all = any(r.strip() in ("*", "arn:aws:s3:::*", "arn:aws:s3:::*/*") for r in resources)
         wildcard_action = any("*" in a or "?" in a for a in s3_actions)

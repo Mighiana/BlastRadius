@@ -315,3 +315,87 @@ def test_escaped_template_marker_is_literal():
     from blastradius.parser.expression import evaluate_expression
     value, problems = evaluate_expression('{Sid = "$${literal}"}')
     assert value == {"Sid": "${literal}"} and not problems
+
+
+ROLE = "aws_iam_role.app_role"
+CUSTOMER = "aws_s3_bucket.customer_data"
+OTHER = "aws_s3_bucket.other"
+
+
+def _edges_for_resource(tmp_path, resource_expr, effect="Allow"):
+    _write_config(
+        tmp_path, "0.0.0.0/0",
+        f'jsonencode({{Version = "2012-10-17", Statement = [{{Effect = "{effect}", '
+        f'Action = "s3:GetObject", Resource = {resource_expr}}}]}})',
+    )
+    with open(tmp_path / "main.tf", "a") as handle:
+        handle.write('\nresource "aws_s3_bucket" "other" {\n  bucket = "other"\n}\n')
+    config = parse_directory(tmp_path)
+    graph = build_graph(config)
+    codes = {d.code for d in config_diagnostics(config)}
+    return graph.has_edge(ROLE, CUSTOMER), graph.has_edge(ROLE, OTHER), codes
+
+
+@pytest.mark.parametrize("expr", [
+    "aws_s3_bucket.customer_data.arn",
+    '"${aws_s3_bucket.customer_data.arn}/*"',
+    '"${aws_s3_bucket.customer_data.arn}"',
+    '"\\u0024{aws_s3_bucket.customer_data.arn}/*"',
+], ids=["traversal", "interpolation", "bare-interpolation", "escaped-dollar-is-literal"])
+def test_genuine_references_create_only_the_referenced_edge(tmp_path, expr):
+    customer, other, codes = _edges_for_resource(tmp_path, expr)
+    if expr.startswith('"\\u0024'):
+        # `\u0024{` decodes to a literal "${" in Terraform, never a template.
+        assert not customer and not other
+        return
+    assert customer and not other
+    assert not codes & {"INVALID_POLICY", "IAM_POLICY_EXPRESSION_UNRESOLVED"}
+
+
+@pytest.mark.parametrize("expr", [
+    '"aws_s3_bucket.customer_data.arn"',
+    '"\\u0061ws_s3_bucket.customer_data.arn"',
+    '"prefix aws_s3_bucket.customer_data.arn suffix"',
+    '"$${aws_s3_bucket.customer_data.arn}/*"',
+    '["aws_s3_bucket.customer_data.arn", "\\u0061ws_s3_bucket.customer_data.arn/*"]',
+], ids=["plain-literal", "unicode-lookalike", "embedded-literal", "escaped-template", "literal-list"])
+def test_reference_shaped_literals_create_no_edge(tmp_path, expr):
+    customer, other, _codes = _edges_for_resource(tmp_path, expr)
+    assert not customer and not other
+
+
+def test_deny_with_genuine_reference_creates_no_access(tmp_path):
+    customer, other, _codes = _edges_for_resource(tmp_path, "aws_s3_bucket.customer_data.arn", effect="Deny")
+    assert not customer and not other
+
+
+def test_heredoc_lookalike_literal_creates_no_edge(tmp_path):
+    heredoc = (
+        '<<POLICY\n{"Version": "2012-10-17", "Statement": [{"Effect": "Allow", '
+        '"Action": "s3:GetObject", "Resource": "aws_s3_bucket.customer_data.arn/*"}]}\nPOLICY'
+    )
+    _write_config(tmp_path, "0.0.0.0/0", heredoc)
+    assert not build_graph(parse_directory(tmp_path)).has_edge(ROLE, CUSTOMER)
+
+
+def test_heredoc_interpolation_still_creates_edge(tmp_path):
+    heredoc = (
+        '<<POLICY\n{"Version": "2012-10-17", "Statement": [{"Effect": "Allow", '
+        '"Action": "s3:GetObject", "Resource": "${aws_s3_bucket.customer_data.arn}/*"}]}\nPOLICY'
+    )
+    _write_config(tmp_path, "0.0.0.0/0", heredoc)
+    assert build_graph(parse_directory(tmp_path)).has_edge(ROLE, CUSTOMER)
+
+
+def test_policy_string_provenance_survives_deepcopy():
+    import copy
+    from blastradius.parser.expression import evaluate_expression
+    from blastradius.parser.values import references
+    value, problems = evaluate_expression('{R = [aws_s3_bucket.a.arn, "aws_s3_bucket.b.arn"]}')
+    assert not problems
+    assert references(copy.deepcopy(value)) == ["aws_s3_bucket.a"]
+
+
+def test_policy_references_ignore_plain_strings():
+    from blastradius.parser.values import policy_references
+    assert policy_references(["aws_s3_bucket.customer_data.arn", "${aws_s3_bucket.customer_data.arn}"]) == []
