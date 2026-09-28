@@ -9,6 +9,7 @@ This is a deliberately simplified model of AWS reachability - see the README.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 from typing import Any, Dict, List, Optional, Tuple
@@ -198,13 +199,36 @@ def anonymous_principal(principal: object) -> bool:
     return isinstance(principal, dict) and "*" in as_list(principal.get("AWS"))
 
 
+_ARN_POSITION_BUCKET = re.compile(
+    r"^(?:\$\{(aws_s3_bucket\.[A-Za-z_][\w-]*)\.arn\}"
+    r"|arn:aws:s3:::\$\{(aws_s3_bucket\.[A-Za-z_][\w-]*)\.(?:id|bucket)\})(/.*)?$",
+    re.DOTALL,
+)
+
+
+def arn_bucket_reference(resource: object) -> Optional[Tuple[str, bool]]:
+    """``(bucket address, has object path)`` when a genuine reference supplies the ARN's bucket.
+
+    References elsewhere in the string (object keys, prefixes) name no grant target.
+    """
+    if not policy_references(resource) or not isinstance(resource, str):
+        return None
+    match = _ARN_POSITION_BUCKET.match(resource)
+    if not match:
+        return None
+    address = match[1] or match[2]
+    if address not in policy_references(resource):
+        return None
+    return address, bool(match[3] and len(match[3]) > 1)
+
+
 def bucket_resource_matches(patterns: list[str], bucket: TerraformResource, objects_only: bool = False) -> bool:
     for pattern in patterns:
         if pattern == "*":
             return True
-        if bucket.address in policy_references(pattern):
-            if not objects_only or ".arn}/" in pattern or ".arn/" in pattern:
-                return True
+        target = arn_bucket_reference(pattern)
+        if target and target[0] == bucket.address and (not objects_only or target[1]):
+            return True
         for arn in (bucket.get("arn"), f"arn:aws:s3:::{bucket.get('bucket')}" if bucket.get("bucket") else None):
             if not isinstance(arn, str):
                 continue
@@ -236,9 +260,9 @@ def s3_access_findings(policy_document: Any) -> List[S3AccessFinding]:
             continue
 
         resources = [r if isinstance(r, str) else str(r) for r in as_list(statement.get("Resource"))]
-        bucket_addresses = [
-            ref for ref in policy_references(resources) if ref.startswith("aws_s3_bucket.")
-        ]
+        bucket_addresses = list(dict.fromkeys(
+            target[0] for target in map(arn_bucket_reference, resources) if target
+        ))
         targets_all = any(r.strip() in ("*", "arn:aws:s3:::*", "arn:aws:s3:::*/*") for r in resources)
         wildcard_action = any("*" in a or "?" in a for a in s3_actions)
 

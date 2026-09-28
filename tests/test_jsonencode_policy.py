@@ -412,3 +412,22 @@ def test_oversized_expression_fails_closed_quickly():
     at_cap = '${jsonencode({Version = "' + "a" * (MAX_EXPR_CHARS - 64) + '", Statement = []})}'
     evaluate_policy_document(at_cap)
     assert time.monotonic() - start < 5
+
+
+@pytest.mark.parametrize("expr", [
+    '"arn:aws:s3:::other/${aws_s3_bucket.customer_data.bucket}/*"',
+    '"arn:aws:s3:::other/${aws_s3_bucket.customer_data.arn}"',
+    '"prefix-${aws_s3_bucket.customer_data.arn}"',
+], ids=["name-in-key", "arn-in-key", "arn-after-prefix"])
+def test_reference_outside_arn_bucket_position_creates_no_edge(tmp_path, expr):
+    customer, _other, _codes = _edges_for_resource(tmp_path, expr)
+    assert not customer
+
+
+@pytest.mark.parametrize("expr", [
+    '"arn:aws:s3:::${aws_s3_bucket.customer_data.id}/*"',
+    '"arn:aws:s3:::${aws_s3_bucket.customer_data.bucket}"',
+], ids=["id-arn", "bucket-arn"])
+def test_bucket_name_in_arn_position_creates_edge(tmp_path, expr):
+    customer, other, _codes = _edges_for_resource(tmp_path, expr)
+    assert customer and not other
