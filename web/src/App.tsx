@@ -36,17 +36,36 @@ function RouteFocus() {
   }, [pathname]);
   return null;
 }
+function savedTheme(): string | null {
+  try {
+    return localStorage.getItem('br-theme');
+  } catch {
+    return null;
+  }
+}
 function ThemeToggle() {
   const [dark, setDark] = useState(() => {
-    const saved = localStorage.getItem('br-theme');
+    const saved = savedTheme();
     return saved ? saved === 'dark' : window.matchMedia?.('(prefers-color-scheme: light)').matches !== true;
   });
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-    localStorage.setItem('br-theme', dark ? 'dark' : 'light');
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#0b1018' : '#e7ecf4');
   }, [dark]);
-  return <button type="button" className="icon-button" aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'} aria-pressed={!dark} title={dark ? 'Light theme' : 'Dark theme'} onClick={() => setDark(!dark)}>{dark ? <Sun size={16} aria-hidden="true" /> : <Moon size={16} aria-hidden="true" />}</button>;
+  useEffect(() => {
+    const mq = window.matchMedia?.('(prefers-color-scheme: light)');
+    if (!mq || savedTheme() || !mq.addEventListener) return;
+    const onChange = (e: MediaQueryListEvent) => setDark(!e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return <button type="button" className="icon-button" aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'} aria-pressed={!dark} title={dark ? 'Light theme' : 'Dark theme'} onClick={() => {
+    const next = !dark;
+    setDark(next);
+    try {
+      localStorage.setItem('br-theme', next ? 'dark' : 'light');
+    } catch { /* persistence is optional; the in-memory theme still applies */ }
+  }}>{dark ? <Sun size={16} aria-hidden="true" /> : <Moon size={16} aria-hidden="true" />}</button>;
 }
 function Header() {
   const { session, originMismatch, refresh } = useSession();
