@@ -6,7 +6,7 @@ from ipaddress import ip_network
 import re
 
 from blastradius.parser.models import Diagnostic, ParsedConfig, TerraformResource
-from blastradius.parser.values import as_list, parse_policy_document, references
+from blastradius.parser.values import as_list, evaluate_policy_document, parse_policy_document, references
 
 SECURITY_ATTRIBUTES = {
     "aws_security_group": ("ingress",),
@@ -71,8 +71,12 @@ def _string_list(value: object) -> bool:
 
 
 def policy_diagnostics(resource: TerraformResource, raw: object, attribute: str = "policy") -> list[Diagnostic]:
-    policy = parse_policy_document(raw)
+    policy, unresolved = evaluate_policy_document(raw)
     findings = []
+    if unresolved:
+        return [diagnostic(resource, "IAM_POLICY_EXPRESSION_UNRESOLVED",
+            f"IAM policy could not be fully evaluated: {unresolved}. "
+            "IAM resource relationships may be incomplete.", attribute)]
     if not policy or not isinstance(policy.get("Statement"), (dict, list)):
         return [diagnostic(resource, "INVALID_POLICY", "Policy is not a JSON object with statements.", attribute)]
     statements = as_list(policy["Statement"])

@@ -3,6 +3,7 @@
 import json
 import re
 
+from blastradius.parser.expression import ExpressionError, evaluate_expression, jsonencode_argument
 from blastradius.parser.limits import check_structure, check_text_depth, InputLimitError
 
 _REFERENCE_RE = re.compile(
@@ -40,18 +41,47 @@ def references(value: object) -> list[str]:
     return found
 
 
-def parse_policy_document(raw: object) -> dict:
+def evaluate_policy_document(raw: object) -> tuple[dict | None, str | None]:
+    """Normalize an IAM policy source into a canonical JSON-shaped document.
+
+    Returns ``(document, unresolved_reason)``:
+
+    - ``(dict, None)`` — fully normalized (heredoc/literal JSON, a dict value,
+      or a supported ``jsonencode({...})`` literal).
+    - ``(None, reason)`` — a ``jsonencode`` expression we could not completely
+      evaluate (unsupported function, unresolved reference, malformed syntax).
+      The reason is a short, bounded description safe for diagnostics.
+    - ``(None, None)`` — not a policy document at all.
+    """
     if isinstance(raw, dict):
-        return raw
+        return raw, None
     if not isinstance(raw, str):
-        return {}
+        return None, None
     try:
         check_text_depth(raw)
         document = json.loads(raw, object_pairs_hook=unique_object)
         check_structure(document)
-        return document if isinstance(document, dict) else {}
+        return (document if isinstance(document, dict) else None), None
     except (json.JSONDecodeError, InputLimitError, RecursionError, DuplicateKeyError):
-        return {}
+        pass
+    argument = jsonencode_argument(raw)
+    if argument is None:
+        return None, None
+    try:
+        value, problems = evaluate_expression(argument)
+        check_structure(value)
+    except (ExpressionError, InputLimitError, RecursionError) as error:
+        return None, f"expression could not be evaluated ({error})"
+    if problems:
+        return None, problems[0].reason
+    if not isinstance(value, dict):
+        return None, "jsonencode() did not produce an object"
+    return value, None
+
+
+def parse_policy_document(raw: object) -> dict:
+    document, _unresolved = evaluate_policy_document(raw)
+    return document or {}
 
 
 def policy_statements(policy: dict) -> list[dict]:

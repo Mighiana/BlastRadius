@@ -29,7 +29,8 @@ ADMIN_PORTS: Dict[int, str] = {22: "SSH", 3389: "RDP"}
 
 # Tag keys/values that mark a resource as holding sensitive data.
 SENSITIVE_TAG_KEYS = ("sensitive", "blastradius_sensitive")
-SENSITIVE_DATA_CLASSES = ("pii", "phi", "secret", "confidential", "restricted")
+SENSITIVE_DATA_CLASSES = ("pii", "phi", "secret", "confidential", "restricted", "sensitive")
+SENSITIVE_LEVELS = ("high", "critical")
 
 
 
@@ -393,8 +394,9 @@ def public_bucket_findings(
 def is_sensitive_bucket(bucket: TerraformResource) -> bool:
     """A bucket is sensitive if its tags say so.
 
-    Supported markers: `Sensitive = "true"` or a `DataClass`/`DataClassification`
-    tag set to a known sensitive class (pii, phi, secret, ...).
+    Supported markers: `Sensitive = "true"`, `Sensitivity = "high"`/`"critical"`,
+    or a `DataClass`/`DataClassification` tag set to a known sensitive class
+    (pii, phi, secret, confidential, restricted, sensitive).
     """
     return sensitive_tag(bucket) is not None
 
@@ -405,6 +407,8 @@ def sensitive_tag(bucket: TerraformResource) -> Optional[str]:
         normalized_key = key.strip().lower()
         normalized_value = str(value).strip().lower()
         if normalized_key in SENSITIVE_TAG_KEYS and normalized_value in ("true", "yes", "1"):
+            return f'{key} = "{value}"'
+        if normalized_key == "sensitivity" and normalized_value in SENSITIVE_LEVELS:
             return f'{key} = "{value}"'
         if "dataclass" in normalized_key and normalized_value in SENSITIVE_DATA_CLASSES:
             return f'{key} = "{value}"'
