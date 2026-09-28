@@ -55,10 +55,11 @@ Secret File at:
 ```
 
 The mounted key must be a regular file. Render Secret Files can expose a
-symlink, and the symlink caveat described in [GitHub App integration](github.md)
-must be checked for this deployment. The owner must verify that the mounted
-path is a regular file with mode `0600`. Production configuration fails closed
-if the configured key path is not a regular file.
+symlink or group-readable permissions, which fail this implementation's
+key-file check (`/api/github/config` reports `"available": false`). The
+container entrypoint materializes the mounted path into a private regular
+file (mode `0600`) before startup, so the rendered mount does not need
+adjustment.
 
 ## Hosted environment variables
 

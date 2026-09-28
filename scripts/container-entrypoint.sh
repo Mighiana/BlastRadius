@@ -1,6 +1,23 @@
 #!/bin/sh
 set -eu
 
+materialize_github_key() {
+  # Secret mounts can expose the App key as a symlink or with group/other
+  # permissions; the verifier requires a regular file mode 0600 or stricter.
+  # Copy the mounted contents (dereferencing links) into a private tmpfs file.
+  src=${BR_GITHUB_PRIVATE_KEY_FILE:-}
+  if [ -z "$src" ]; then
+    return 0
+  fi
+  dst=${TMPDIR:-/tmp}/br-secrets
+  mkdir -p "$dst"
+  chmod 0700 "$dst"
+  cp -L "$src" "$dst/github-app.pem"
+  chmod 0600 "$dst/github-app.pem"
+  BR_GITHUB_PRIVATE_KEY_FILE="$dst/github-app.pem"
+  export BR_GITHUB_PRIVATE_KEY_FILE
+}
+
 serve_app() {
   if [ "${BR_TRUST_PROXY_HEADERS:-false}" = "true" ]; then
     exec python -I -m uvicorn blastradius.server.app:app \
@@ -18,6 +35,8 @@ run_migrations() {
   fi
   python -I -m alembic -c "$BLASTRADIUS_ALEMBIC_CONFIG" upgrade head
 }
+
+materialize_github_key
 
 case "${1:-serve}" in
   serve)
