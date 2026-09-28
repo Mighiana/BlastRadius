@@ -399,3 +399,16 @@ def test_policy_string_provenance_survives_deepcopy():
 def test_policy_references_ignore_plain_strings():
     from blastradius.parser.values import policy_references
     assert policy_references(["aws_s3_bucket.customer_data.arn", "${aws_s3_bucket.customer_data.arn}"]) == []
+
+
+def test_oversized_expression_fails_closed_quickly():
+    import time
+    from blastradius.parser.expression import MAX_EXPR_CHARS
+    from blastradius.parser.values import evaluate_policy_document
+    big = '${jsonencode({Version = "' + "a" * (MAX_EXPR_CHARS + 1) + '", Statement = []})}'
+    start = time.monotonic()
+    document, reason = evaluate_policy_document(big)
+    assert document is None and reason
+    at_cap = '${jsonencode({Version = "' + "a" * (MAX_EXPR_CHARS - 64) + '", Statement = []})}'
+    evaluate_policy_document(at_cap)
+    assert time.monotonic() - start < 5

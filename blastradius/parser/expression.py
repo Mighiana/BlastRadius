@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 MAX_EXPR_NODES = 2_000
 MAX_EXPR_DEPTH = 64
 MAX_REASON_LENGTH = 120
+MAX_EXPR_CHARS = 131_072
 
 
 class ExpressionError(ValueError):
@@ -259,7 +260,7 @@ def evaluate_expression(text: str) -> tuple[object, list[Unresolved]]:
     callers must fail closed. Raises ExpressionError on malformed input or
     budget exhaustion.
     """
-    if len(text) > 1_000_000:
+    if len(text) > MAX_EXPR_CHARS:
         raise ExpressionError("expression exceeds size budget")
     reader = _Reader(text)
     value = reader.read_value()
