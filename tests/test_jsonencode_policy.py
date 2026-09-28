@@ -427,7 +427,9 @@ def test_reference_outside_arn_bucket_position_creates_no_edge(tmp_path, expr):
 @pytest.mark.parametrize("expr", [
     '"arn:aws:s3:::${aws_s3_bucket.customer_data.id}/*"',
     '"arn:aws:s3:::${aws_s3_bucket.customer_data.bucket}"',
-], ids=["id-arn", "bucket-arn"])
+    '"arn:aws-cn:s3:::${aws_s3_bucket.customer_data.id}/*"',
+    '"arn:aws-us-gov:s3:::${aws_s3_bucket.customer_data.bucket}/*"',
+], ids=["id-arn", "bucket-arn", "china-partition", "govcloud-partition"])
 def test_bucket_name_in_arn_position_creates_edge(tmp_path, expr):
     customer, other, _codes = _edges_for_resource(tmp_path, expr)
     assert customer and not other

@@ -201,7 +201,7 @@ def anonymous_principal(principal: object) -> bool:
 
 _ARN_POSITION_BUCKET = re.compile(
     r"^(?:\$\{(aws_s3_bucket\.[A-Za-z_][\w-]*)\.arn\}"
-    r"|arn:aws:s3:::\$\{(aws_s3_bucket\.[A-Za-z_][\w-]*)\.(?:id|bucket)\})(/.*)?$",
+    r"|arn:aws(?:-cn|-us-gov|-iso|-iso-b)?:s3:::\$\{(aws_s3_bucket\.[A-Za-z_][\w-]*)\.(?:id|bucket)\})(/.*)?$",
     re.DOTALL,
 )
 
