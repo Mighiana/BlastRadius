@@ -8,6 +8,13 @@ import { WorkspaceNav } from '../components/WorkspaceNav';
 import { Empty, ErrorNotice, Loading, PageHeading } from '../components/UI';
 import { UsageSummary } from './Workspace';
 
+const values: Record<string, string> = {
+  free: 'Evaluate a first Terraform workflow with stored evidence.',
+  pro: 'Review changes across several repositories with longer history.',
+  team: 'Share review workflows, organization policy and audit visibility.',
+  enterprise: 'Discuss deployment, scale and configurable limits with the operator.',
+};
+
 export function PlanCards() {
   const catalog = useResource('/api/plans', plansSchema);
   const { session, originMismatch } = useSession();
@@ -18,6 +25,7 @@ export function PlanCards() {
       <span className="eyebrow">{plan.code}</span>
       <h2>{plan.monthly_price_usd === null ? 'Custom' : `$${plan.monthly_price_usd}`}<small>{plan.code === 'free' ? 'Free plan' : plan.monthly_price_usd === null ? 'Contact the operator' : 'Proposed / month · USD'}</small></h2>
       <p>{plan.configurable ? 'Configurable limits. Shown defaults apply until an operator configures your workspace.' : plan.assignment === 'signup' ? 'Start with your next infrastructure change.' : 'Commercial beta · assigned manually by an operator.'}</p>
+      <p>{values[plan.code]}</p>
       <ul>{[
         `${plan.limits.analyses_per_month.toLocaleString()} analyses / month`,
         `${plan.limits.projects} projects`, `${plan.limits.members} workspace ${plan.limits.members === 1 ? 'member' : 'members'}`,
@@ -29,7 +37,7 @@ export function PlanCards() {
         ...(plan.features.audit ? ['Audit visibility'] : []),
       ].map(text => <li key={text}><Check size={17} aria-hidden="true" />{text}</li>)}</ul>
       {plan.assignment === 'signup' ? originMismatch && session ? <a className="button primary" href={`${new URL(session.auth.public_url).origin}/dashboard`}>Get started at configured origin</a> : <Link className="button primary" to="/dashboard">Get started</Link>
-        : <><button className="button secondary" disabled>Coming soon</button><p className="footnote">Self-service upgrades and payments are unavailable. Ask your deployment operator about beta access.</p></>}
+        : <><Link className="button primary" to="/beta">Request early access</Link><div className="checkout-status"><span>Self-service checkout</span><button className="button secondary" disabled>Coming soon</button></div><p className="footnote">Self-service upgrades and payments are unavailable. A beta request is stored for operator review; it does not guarantee access.</p></>}
     </article>)}</div>
   </>;
 }
@@ -51,6 +59,14 @@ function Usage() {
 export function Pricing() {
   return <div className="container page"><PageHeading eyebrow="COMMERCIAL BETA" title="A plan for every review.">Proposed pricing. No payment processing. Start on Free; paid plans require operator-granted beta access.</PageHeading><PlanCards />
     <section className="panel pricing-note"><h2>What counts as an analysis?</h2><p>A job accepted for processing counts toward the monthly UTC quota, including a job that later fails. Rejected submissions do not count. Public demos do not use workspace quota.</p><p>All plans provide static evidence, not proof of security. AWS credentials are not required; BlastRadius does not deploy infrastructure.</p><Link className="text-link" to="/guide">Read the guide</Link></section>
+    <section className="panel"><h2>Before you start</h2><div className="faq">{[
+      ['Do I need AWS credentials?', 'No. Bring baseline and candidate Terraform files, or a Terraform plan JSON generated in your trusted environment. Static analysis does not require AWS access.'],
+      ['Does BlastRadius deploy or execute anything?', 'It does not deploy infrastructure, run Terraform or providers, or execute candidate repository scripts. Suggested patches require human review.'],
+      ['What does SAFE mean?', 'No new modeled blocking findings detected. This is a bounded result under the selected model and policy, not proof that infrastructure is secure. Existing exposure and coverage gaps may remain.'],
+      ['Can I use GitHub Actions without the SaaS?', 'Yes. Use the documented CLI and Actions workflow in your own environment. A SaaS account and GitHub App installation are not required; CI results do not automatically enter workspace history.'],
+      ['How long are results retained?', 'The server catalog above is authoritative. Reports become unavailable after the current plan’s retention window. Operators manage physical cleanup and backups; deleting a report does not erase copies already exported.'],
+      ['What does private beta mean?', 'The product is still being evaluated with Terraform teams. Proposed paid prices are subject to validation, payments are disabled, and beta interest does not create an account, promise an invitation or send email.'],
+    ].map(([question, answer]) => <details key={question}><summary>{question}</summary><p>{answer}</p></details>)}</div></section>
   </div>;
 }
 export default function Billing() {

@@ -15,6 +15,7 @@ from blastradius.server.auth import (
     token_hash,
 )
 from blastradius.server.config import Settings
+from blastradius.server.events import record_event
 from blastradius.server.db import Database
 from blastradius.server.models import (
     AnalysisArtifact,
@@ -553,6 +554,14 @@ def lifecycle_router(db: Database, settings: Settings) -> APIRouter:
             if row.format == "sarif":
                 require_feature(org, "sarif")
             usage_row(session, org).exports += 1
+            record_event(
+                session,
+                "report_exported",
+                user_id=user.id,
+                organization_id=org.id,
+                project_id=job.project_id,
+                analysis_id=job.id,
+            )
             if row.format == "json":
                 return JSONResponse(public_result(json.loads(row.content), entitlements(org).sarif))
             return Response(row.content, media_type=row.media_type)

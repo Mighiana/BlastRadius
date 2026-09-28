@@ -1,0 +1,7 @@
+version: 1
+gate:
+  block_new_critical_paths: true
+  block_new_sensitive_exposure: true
+  block_public_admin_ports: true
+allowed:
+  public_https: true

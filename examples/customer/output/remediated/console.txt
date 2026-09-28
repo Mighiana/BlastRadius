@@ -1,0 +1,19 @@
+BlastRadius change-impact analysis
+========================================
+Decision : SAFE TO MERGE
+Verdict  : SECURITY IMPROVED
+Score    : 20 -> 100 (+80)
+Risk     : CRITICAL -> LOW
+
+1 critical attack path removed and no new exposure introduced.
+
+Reasons:
+  - New critical attack paths: No new internet-to-sensitive-data path
+  - Newly reachable sensitive resources: No sensitive resource became reachable
+  - Newly internet-reachable resources: No resource became internet-reachable
+  - Security score delta: Score improved by 80 points
+
+Eliminated attack path(s):
+  Internet -> Sample Web -> Web Server -> Sample App -> Blastradius Synthetic Customer Data -> Sensitive Data
+
+Analysis coverage: complete within documented model

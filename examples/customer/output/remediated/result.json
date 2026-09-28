@@ -1,0 +1,76 @@
+{
+  "decision": "SAFE TO MERGE",
+  "analysis_complete": true,
+  "analysis": {
+    "before": {
+      "complete": true,
+      "paths_truncated": false,
+      "path_work": 10
+    },
+    "after": {
+      "complete": true,
+      "paths_truncated": false,
+      "path_work": 0
+    }
+  },
+  "coverage_diagnostics": [],
+  "edge_evidence": [],
+  "passed": true,
+  "policy_notes": [],
+  "verdict": "SECURITY IMPROVED",
+  "score": {
+    "before": 20,
+    "after": 100,
+    "delta": 80
+  },
+  "risk_level": {
+    "before": "CRITICAL",
+    "after": "LOW"
+  },
+  "new_critical_paths": [],
+  "removed_critical_paths": [
+    [
+      "Internet",
+      "Sample Web",
+      "Web Server",
+      "Sample App",
+      "Blastradius Synthetic Customer Data",
+      "Sensitive Data"
+    ]
+  ],
+  "newly_exposed": [],
+  "newly_reachable_sensitive": [],
+  "reasons": [
+    {
+      "label": "New critical attack paths",
+      "detail": "No new internet-to-sensitive-data path",
+      "delta": 0,
+      "severity": "NONE"
+    },
+    {
+      "label": "Newly reachable sensitive resources",
+      "detail": "No sensitive resource became reachable",
+      "delta": 0,
+      "severity": "NONE"
+    },
+    {
+      "label": "Newly internet-reachable resources",
+      "detail": "No resource became internet-reachable",
+      "delta": 0,
+      "severity": "NONE"
+    },
+    {
+      "label": "Security score delta",
+      "detail": "Score improved by 80 points",
+      "delta": 0,
+      "severity": "NONE"
+    }
+  ],
+  "security_score_before": 20,
+  "security_score_after": 100,
+  "critical_paths_added": 0,
+  "sensitive_resources_added": 0,
+  "exit_code": 0,
+  "diagnostics": [],
+  "unsupported_resource_types": []
+}

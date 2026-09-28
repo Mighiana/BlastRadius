@@ -22,6 +22,8 @@ class FrontendFiles(StaticFiles):
             "history",
             "pricing",
             "billing",
+            "beta",
+            "operator",
             "guide",
             "account",
             "settings",

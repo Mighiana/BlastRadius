@@ -22,6 +22,22 @@ uploaded Terraform/plan inputs, resource topology, analysis results, timestamps
 and usage. Plans can contain credentials or other sensitive values; users should
 minimize submitted data and avoid private inputs in public demonstrations.
 
+Commercial-beta intake additionally stores name/email, optional bounded workflow
+details and the agreed notice version. Analysis feedback links a usefulness
+response and optional text to the authenticated user/workspace/project/analysis.
+Authorized platform operators can review these records across tenants; ordinary
+workspace roles cannot access that review surface. Free text is not automatically
+scrubbed, and submission does not send email or grant access.
+
+First-party activity contains fixed event names, timestamps and optional UUID
+references, without source, tokens, email/name, IP or browser fingerprints.
+There is no browser ingestion endpoint or third-party analytics integration.
+Commercial records expire from views after 90 days; physical deletion requires
+operator cleanup. Event capacity also removes oldest rows at 100,000.
+The [commercial data inventory](data-lifecycle.md#commercial-beta-records)
+and [API contract](beta-api.md) define the implemented boundaries; approve the
+lawful basis and exact notice before accepting real submissions.
+
 Specify what raw input is stored, what is only processed temporarily, whether
 reports include source evidence, who can access each category, and whether
 automated analysis uses any third-party AI service. Do not imply inputs are never

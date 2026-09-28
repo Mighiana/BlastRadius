@@ -7,7 +7,7 @@ export function ErrorNotice({ error, retry }: { error: Error | null; retry?: () 
   return <div role="alert" className="notice error"><AlertCircle size={18} aria-hidden="true" /><div>
     <p>{error.message}</p>
     {error instanceof ApiError && error.requestId && <small>Reference: {error.requestId}</small>}
-    {retry && <button className="text-button" onClick={retry}>Try again</button>}
+    {retry && <button type="button" className="text-button" onClick={retry}>Try again</button>}
   </div></div>;
 }
 export function Loading({ children = 'Loading analysis…' }: { children?: ReactNode }) {

@@ -12,6 +12,8 @@ import Team from './pages/Team';
 import Invitation from './pages/Invitation';
 import Integrations from './pages/Integrations';
 import Trust from './pages/Trust';
+import BetaInterest from './pages/BetaInterest';
+import Operator from './pages/Operator';
 import { mutate } from './api';
 import { useOrganization, useSession } from './session';
 import { ErrorNotice } from './components/UI';
@@ -28,8 +30,8 @@ function RouteFocus() {
   const { pathname } = useLocation();
   useEffect(() => {
     const title = pathname === '/' ? 'Know before you merge' : pathname.slice(1).replace(/^\w/, c => c.toUpperCase());
-    document.title = `BlastRadius — ${title}`;
-    window.scrollTo({ top: 0 });
+    document.title = `BlastRadius Beta — ${title}`;
+    window.scrollTo({ top: 0, behavior: 'instant' });
     document.getElementById('main')?.focus({ preventScroll: true });
   }, [pathname]);
   return null;
@@ -49,17 +51,35 @@ function Header() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   useEffect(() => { setOpen(false); }, [pathname]);
+  useEffect(() => {
+    if (!open) {
+      document.body.classList.remove('nav-open');
+      document.body.style.top = '';
+      return;
+    }
+    const y = window.scrollY;
+    document.body.classList.add('nav-open');
+    document.body.style.top = `-${y}px`;
+    return () => {
+      document.body.classList.remove('nav-open');
+      document.body.style.top = '';
+      window.scrollTo({ top: y, behavior: 'instant' });
+    };
+  }, [open]);
   async function logout() {
     setBusy(true); setError(null);
     try { await mutate('/api/auth/logout', 'POST'); await refresh(); navigate('/'); }
     catch (err) { setError(err instanceof Error ? err : new Error('Sign-out failed.')); }
     finally { setBusy(false); }
   }
-  return <header className="site-header"><div className="container header-inner"><Link to="/" className="brand" aria-label="BlastRadius home"><span className="brand-icon"><Radar size={23} strokeWidth={1.8} /></span>BlastRadius</Link>
+  return <header className="site-header"><div className="container header-inner"><Link to="/" className="brand" aria-label="BlastRadius home"><span className="brand-icon"><Radar size={23} strokeWidth={1.8} /></span>BlastRadius <span className="tag">Beta</span></Link>
     <button className="icon-button mobile-menu" aria-label={open ? 'Close navigation' : 'Open navigation'} aria-expanded={open} aria-controls="main-navigation" onClick={() => setOpen(!open)}>{open ? <X /> : <Menu />}</button>
-    <nav className={open ? 'main-nav is-open' : 'main-nav'} id="main-navigation" aria-label="Main navigation" onKeyDown={e => { if (e.key === 'Escape') setOpen(false); }}>
+    <nav className={open ? 'main-nav is-open' : 'main-nav'} id="main-navigation" aria-label="Main navigation"
+      onClick={e => { if ((e.target as HTMLElement).closest('a')) setOpen(false); }}
+      onKeyDown={e => { if (e.key === 'Escape') setOpen(false); }}>
       <NavLink to="/demo">Product demo</NavLink><NavLink to="/guide">Documentation</NavLink><NavLink to="/pricing">Pricing</NavLink><NavLink to="/security">Security</NavLink>
       {session?.authenticated && <NavLink to={`/history${search}`}>History</NavLink>}
+      {session?.authenticated && session.capabilities?.platform_admin === true && <NavLink to="/operator">Operator</NavLink>}
       {!session?.authenticated && <NavLink to="/account">Sign in</NavLink>}
       <NavLink className="nav-cta" to={`/dashboard${search}`}>{session?.authenticated ? 'Workspace' : 'Get started'}<ArrowUpRight size={15} aria-hidden="true" /></NavLink>
       {session?.authenticated && <button className="text-button" disabled={busy || originMismatch} title={originMismatch ? 'Sign-out requires the configured application origin.' : undefined} onClick={() => { void logout(); }}>{busy ? 'Signing out…' : 'Sign out'}</button>}
@@ -71,6 +91,8 @@ export default function App() {
     <ErrorBoundary><Routes><Route path="/" element={<Landing />} /><Route path="/demo" element={<Demo />} />
       <Route path="/dashboard" element={<Workspace />} /><Route path="/history" element={<Workspace />} />
       <Route path="/pricing" element={<Pricing />} /><Route path="/billing" element={<Billing />} /><Route path="/guide" element={<Guide />} />
+      <Route path="/beta" element={<BetaInterest />} />
+      <Route path="/operator" element={<Operator />} />
       <Route path="/account" element={<Account />} /><Route path="/settings" element={<Settings />} /><Route path="/team" element={<Team />} />
       <Route path="/invitations/accept" element={<Invitation />} /><Route path="/integrations" element={<Integrations />} />
       <Route path="/security" element={<Trust kind="security" />} /><Route path="/privacy" element={<Trust kind="privacy" />} /><Route path="/terms" element={<Trust kind="terms" />} />

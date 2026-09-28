@@ -58,7 +58,7 @@ def test_app_runs_without_exceptions():
     assert not at.exception
     rendered = _text(at)
     assert "BlastRadius" in rendered
-    assert "Know the blast radius before you merge." in rendered
+    assert "Attack-path change analysis for Terraform pull requests." in rendered
 
 
 def test_app_opens_on_a_blocking_decision():
@@ -122,7 +122,7 @@ def test_scenario_buttons_switch_configurations():
 def test_product_tabs_and_demo_mode_transition():
     at = _app()
     assert [tab.label for tab in at.tabs] == [
-        'Overview', 'Attack Path', 'Infrastructure Diff', 'PR Security Report', 'Remediation'
+        'Overview', 'Attack Path', 'Infrastructure Diff', 'Report & exports', 'Remediation'
     ]
     at.toggle(key='demo_mode').set_value(True).run()
     assert not at.exception

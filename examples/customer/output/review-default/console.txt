@@ -1,0 +1,18 @@
+BlastRadius change-impact analysis
+========================================
+Decision : REVIEW REQUIRED
+Verdict  : INCOMPLETE ANALYSIS
+Score    : 100 -> 100 (+0)
+Risk     : LOW -> LOW
+
+Security-critical inputs or paths are incomplete; manual review is required.
+
+Reasons:
+  - New critical attack paths: No new internet-to-sensitive-data path
+  - Newly reachable sensitive resources: No sensitive resource became reachable
+  - Newly internet-reachable resources: No resource became internet-reachable
+  - Security score delta: Score unchanged
+Policy: Analysis incomplete: resolve coverage diagnostics before treating this change as safe.
+
+Analysis coverage: INCOMPLETE
+- after [UNEXPANDED_MODULE] main.tf: HCL modules are not downloaded or expanded.

@@ -1,13 +1,12 @@
 import argparse
 import json
 
-from sqlalchemy import select
-
+from blastradius.server.beta import cleanup_commercial
 from blastradius.server.config import Settings
 from blastradius.server.db import Database
 from blastradius.server.github_api import GitHubError
 from blastradius.server.github_routes import register_installation
-from blastradius.server.models import Analysis, Organization, Project, User
+from blastradius.server.operator import RESOURCES, inspect_resource
 from blastradius.server.persistence import audit, cleanup
 from blastradius.server.plans import PLANS
 from blastradius.server.quotas import lock_org, usage_payload
@@ -54,13 +53,13 @@ def main(argv: list[str] | None = None) -> int:
         "--limits", help="Enterprise limits as a JSON object; all four fields required"
     )
     inspect = commands.add_parser("inspect")
-    inspect.add_argument(
-        "resource", choices=["users", "organizations", "projects", "failures", "usage"]
-    )
+    inspect.add_argument("resource", choices=RESOURCES)
     inspect.add_argument("--limit", type=int, default=100)
     inspect.add_argument("--offset", type=int, default=0)
     clean = commands.add_parser("cleanup")
     clean.add_argument("--limit", type=int, default=100)
+    commercial = commands.add_parser("cleanup-commercial")
+    commercial.add_argument("--limit", type=int, default=100)
     github = commands.add_parser(
         "github-register", help="Operator-verified workspace/account mapping"
     )
@@ -81,6 +80,10 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(assign_plan(db, args.organization_id, args.plan, limits)))
         elif args.command == "cleanup":
             print(json.dumps({"removed": cleanup(db, args.limit)}))
+        elif args.command == "cleanup-commercial":
+            if not 1 <= args.limit <= 1000:
+                parser.error("limit must be 1..1000")
+            print(json.dumps({"removed": cleanup_commercial(db, args.limit)}))
         elif args.command == "github-register":
             try:
                 print(
@@ -100,8 +103,8 @@ def main(argv: list[str] | None = None) -> int:
                     "registration rejected; verify operator mapping, App setup and permissions"
                 )
         else:
-            if not 1 <= args.limit <= 1000 or args.offset < 0:
-                parser.error("limit must be 1..1000 and offset nonnegative")
+            if not 1 <= args.limit <= 1000 or not 0 <= args.offset <= 1_000_000:
+                parser.error("limit must be 1..1000 and offset 0..1000000")
             with db.session(write=True) as session:
                 audit(
                     session,
@@ -114,59 +117,13 @@ def main(argv: list[str] | None = None) -> int:
                         "offset": args.offset,
                     },
                 )
-                if args.resource == "users":
-                    output = [
-                        {
-                            "id": row.id,
-                            "name": row.name,
-                            "email": row.email,
-                            "email_verified": row.email_verified,
-                        }
-                        for row in session.scalars(
-                            select(User).order_by(User.id).limit(args.limit).offset(args.offset)
-                        )
-                    ]
-                elif args.resource in ("organizations", "usage"):
-                    output = [
-                        {"id": row.id, "name": row.name, **usage_payload(session, row)}
-                        for row in session.scalars(
-                            select(Organization)
-                            .order_by(Organization.id)
-                            .limit(args.limit)
-                            .offset(args.offset)
-                        )
-                    ]
-                elif args.resource == "projects":
-                    output = [
-                        {
-                            "id": row.id,
-                            "organization_id": row.organization_id,
-                            "name": row.name,
-                            "archived_at": row.archived_at,
-                        }
-                        for row in session.scalars(
-                            select(Project)
-                            .order_by(Project.id)
-                            .limit(args.limit)
-                            .offset(args.offset)
-                        )
-                    ]
-                else:
-                    output = [
-                        {
-                            "id": row.id,
-                            "organization_id": row.organization_id,
-                            "project_id": row.project_id,
-                            "error": row.error,
-                        }
-                        for row in session.scalars(
-                            select(Analysis)
-                            .where(Analysis.status == "failed")
-                            .order_by(Analysis.created_at.desc())
-                            .limit(args.limit)
-                            .offset(args.offset)
-                        )
-                    ]
+                output = inspect_resource(
+                    session,
+                    args.resource,
+                    args.limit,
+                    args.offset,
+                    trusted_cli=True,
+                )
                 print(json.dumps(output))
     finally:
         db.engine.dispose()

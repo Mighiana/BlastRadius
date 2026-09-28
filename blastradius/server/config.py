@@ -5,6 +5,7 @@ import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
+from uuid import UUID
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class Settings:
     oidc_client_id: str = ""
     oidc_client_secret: str = ""
     admin_enabled: bool = False
+    web_admin_user_ids: tuple[str, ...] = ()
     github_app_id: int = 0
     github_app_slug: str = ""
     github_private_key_file: Path | None = field(default=None, repr=False)
@@ -35,6 +37,9 @@ class Settings:
     auth_rate_limit: int = 15
     demo_rate_limit: int = 60
     auto_migrate: bool = True
+    lease_wait_seconds: int = 0
+    retention_sweep_seconds: int = 0
+    log_level: str = "INFO"
 
     @property
     def production(self) -> bool:
@@ -58,6 +63,10 @@ class Settings:
         )
 
     def validate(self) -> None:
+        if len(self.web_admin_user_ids) > 50 or any(
+            str(UUID(value)) != value for value in self.web_admin_user_ids
+        ):
+            raise ValueError("BR_WEB_ADMIN_USER_IDS requires at most 50 canonical user UUIDs")
         if self.github_app_id < 0:
             raise ValueError("BR_GITHUB_APP_ID must be nonnegative (0 disables integration)")
         if self.github_webhook_secret and len(self.github_webhook_secret) < 32:
@@ -102,6 +111,36 @@ class Settings:
             raise ValueError(
                 "Production requires OIDC, PostgreSQL, HTTPS, a session secret and explicit migrations"
             )
+        if self.production:
+            hostname = url.hostname or ""
+            if hostname in {"localhost", "127.0.0.1", "::1", "0.0.0.0"} or hostname.endswith(
+                (".localhost", ".local", ".internal")
+            ):
+                raise ValueError("Production BR_PUBLIC_URL must not use a local hostname")
+            if len(set(self.session_secret)) < 10 or self.session_secret in {
+                self.oidc_client_secret,
+                self.github_webhook_secret,
+            }:
+                raise ValueError("Production session secret must not be a low-entropy or placeholder value")
+            if self.log_level == "DEBUG":
+                raise ValueError("Production BR_LOG_LEVEL must not be DEBUG")
+            github_configured = (
+                bool(self.github_app_id),
+                bool(self.github_app_slug),
+                self.github_private_key_file is not None,
+                bool(self.github_webhook_secret),
+            )
+            if any(github_configured) and not all(github_configured):
+                raise ValueError(
+                    "GitHub App requires BR_GITHUB_APP_ID, BR_GITHUB_APP_SLUG, "
+                    "BR_GITHUB_PRIVATE_KEY_FILE and BR_GITHUB_WEBHOOK_SECRET together"
+                )
+            if all(github_configured) and (
+                self.github_private_key_file is None or not self.github_private_key_file.is_file()
+            ):
+                raise ValueError("BR_GITHUB_PRIVATE_KEY_FILE must be an existing regular file")
+            if not urlsplit(self.database_url).hostname:
+                raise ValueError("Production PostgreSQL URL must include a hostname")
         if self.auth_mode == "oidc":
             issuer = urlsplit(self.oidc_issuer)
             if (
@@ -131,6 +170,12 @@ class Settings:
             < 1
         ):
             raise ValueError("Limits must be positive")
+        if not 0 <= self.lease_wait_seconds <= 600:
+            raise ValueError("BR_LEASE_WAIT_SECONDS must be between 0 and 600")
+        if self.retention_sweep_seconds != 0 and not 60 <= self.retention_sweep_seconds <= 86400:
+            raise ValueError("BR_RETENTION_SWEEP_SECONDS must be 0 or between 60 and 86400")
+        if self.log_level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
+            raise ValueError("BR_LOG_LEVEL must be DEBUG, INFO, WARNING or ERROR")
         if self.workers > self.max_jobs:
             raise ValueError("Workers cannot exceed job capacity")
 
@@ -138,9 +183,14 @@ class Settings:
     def from_env(cls) -> Settings:
         env = os.environ
         production = env.get("BR_ENV") == "production"
+        database_url = env.get("BR_DATABASE_URL", "sqlite:///./.blastradius/server.db")
+        for prefix in ("postgres://", "postgresql://"):
+            if database_url.startswith(prefix):
+                database_url = "postgresql+psycopg://" + database_url[len(prefix) :]
+                break
         settings = cls(
             environment=env.get("BR_ENV", "development"),
-            database_url=env.get("BR_DATABASE_URL", "sqlite:///./.blastradius/server.db"),
+            database_url=database_url,
             data_dir=Path(env.get("BR_DATA_DIR", ".blastradius")),
             static_dir=Path(env.get("BR_STATIC_DIR", "web/dist")),
             public_url=env.get(
@@ -155,6 +205,11 @@ class Settings:
             oidc_client_id=env.get("BR_OIDC_CLIENT_ID", ""),
             oidc_client_secret=env.get("BR_OIDC_CLIENT_SECRET", ""),
             admin_enabled=env.get("BR_ADMIN_ENABLED") == "true",
+            web_admin_user_ids=tuple(
+                value.strip()
+                for value in env.get("BR_WEB_ADMIN_USER_IDS", "").split(",")
+                if value.strip()
+            ),
             github_app_id=int(env.get("BR_GITHUB_APP_ID", "0")),
             github_app_slug=env.get("BR_GITHUB_APP_SLUG", ""),
             github_private_key_file=(
@@ -174,6 +229,9 @@ class Settings:
             auth_rate_limit=int(env.get("BR_AUTH_RATE_LIMIT", "15")),
             demo_rate_limit=int(env.get("BR_DEMO_RATE_LIMIT", "60")),
             auto_migrate=env.get("BR_AUTO_MIGRATE", "false" if production else "true") == "true",
+            lease_wait_seconds=int(env.get("BR_LEASE_WAIT_SECONDS", "0")),
+            retention_sweep_seconds=int(env.get("BR_RETENTION_SWEEP_SECONDS", "0")),
+            log_level=env.get("BR_LOG_LEVEL", "INFO"),
         )
         settings.validate()
         return settings

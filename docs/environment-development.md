@@ -55,10 +55,10 @@ SQLite is for local development, not production deployment.
 
 For local PostgreSQL use `make compose-up`, then `make compose-down` when finished.
 Volumes survive shutdown. The app and database use non-root users and read-only
-root filesystems. A first Trixie startup creates `postgres-trixie-data`; it does
-not migrate an older Bookworm volume. Follow the
-[deployment instructions](deployment.md#postgresql-compose) before changing an
-existing database installation.
+root filesystems. A first Alpine startup creates `postgres-alpine-data`; it does
+not migrate an older glibc volume. Follow the PostgreSQL compose [migration
+procedure](deployment.md#postgresql-compose) before changing an existing
+database installation.
 
 ## Parallel Desktop demo
 

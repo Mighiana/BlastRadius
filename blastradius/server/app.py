@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+import json
+import logging
+import os
 import secrets
+import signal
+import threading
+import time
 from contextlib import asynccontextmanager
-from typing import Literal
+from typing import Callable, Literal
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -24,25 +31,38 @@ from blastradius.server.auth import (
     require_user,
 )
 from blastradius.server.config import Settings
+from blastradius.server.beta import beta_router
 from blastradius.server.db import Database, LeaseLost
 from blastradius.server.demos import build_demos
 from blastradius.server.fixtures import FIXTURES
+from blastradius.server.events import record_event
 from blastradius.server.github_routes import github_router
 from blastradius.server.github_service import GitHubService
 from blastradius.server.jobs import JobManager
 from blastradius.server.lease import ServiceLease
 from blastradius.server.middleware import GuardMiddleware
 from blastradius.server.models import Analysis, Membership, Organization, Project, User
+from blastradius.server.observability import configure_logging
+from blastradius.server.operator import is_platform_admin, operator_router
 from blastradius.server.plans import catalog, entitlements, require_feature
 from blastradius.server.quotas import lock_org, quota, usage_payload, usage_row
 from blastradius.server.lifecycle import authorized_org, lifecycle_router
-from blastradius.server.persistence import effective_policy, visible_analysis, cutoff, public_result
+from blastradius.server.persistence import cutoff, effective_policy, public_result, visible_analysis
+from blastradius.server.retention import run_retention_sweep
 from blastradius.server.schemas import (
     AnalysisInput,
     OrganizationInput,
     ProjectInput,
 )
 from blastradius.server.static import FrontendFiles, FrontendMount
+
+
+LOGGER = logging.getLogger(__name__)
+
+
+def _fatal_startup(reason: str) -> None:
+    LOGGER.error(json.dumps({"event": "service.fatal", "reason": reason}))
+    os.kill(os.getpid(), signal.SIGTERM)
 
 
 def project_payload(project: Project) -> dict:
@@ -100,34 +120,133 @@ def analysis_payload(
     return data
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None, *, fatal: Callable[[str], None] | None = None
+) -> FastAPI:
     settings = settings or Settings.from_env()
     settings.validate()
+    configure_logging(settings)
+    fatal = fatal or _fatal_startup
     db = Database(settings)
     oauth = oauth_client(settings)
     jobs = JobManager(db, settings)
     github = GitHubService(db, settings, jobs)
     lease = ServiceLease(db, settings.data_dir)
     demos: dict[tuple[str, str], dict] = {}
+    starting = threading.Event()
+
+    def start_components() -> None:
+        if settings.auto_migrate:
+            db.migrate()
+        if not db.ready():
+            raise RuntimeError("Database schema is not ready; run python -m blastradius.server.migrate")
+        jobs.recover()
+        github.recover()
+        demos.update(build_demos(settings))
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        lease.acquire()
+        LOGGER.info(
+            json.dumps(
+                {
+                    "event": "service.starting",
+                    "environment": settings.environment,
+                    "auth_mode": settings.auth_mode,
+                }
+            )
+        )
+        starting.clear()
+        stop_wait = threading.Event()
+        _app.state.starting = starting
+        wait_thread: threading.Thread | None = None
+        retention_thread: threading.Thread | None = None
+
+        def start_retention_worker() -> None:
+            nonlocal retention_thread
+            if settings.retention_sweep_seconds <= 0 or retention_thread is not None:
+                return
+
+            def sweep() -> None:
+                while True:
+                    if lease.healthy():
+                        try:
+                            counts = run_retention_sweep(db)
+                            LOGGER.info(json.dumps({"event": "retention.sweep", **counts}))
+                        except Exception as error:
+                            LOGGER.error(
+                                json.dumps(
+                                    {
+                                        "event": "retention.sweep_failed",
+                                        "exception": type(error).__name__,
+                                    }
+                                )
+                            )
+                    if stop_wait.wait(settings.retention_sweep_seconds):
+                        return
+
+            retention_thread = threading.Thread(
+                target=sweep, name="retention-sweep", daemon=True
+            )
+            retention_thread.start()
+
         try:
-            if settings.auto_migrate:
-                db.migrate()
-            if not db.ready():
-                raise RuntimeError(
-                    "Database schema is not ready; run python -m blastradius.server.migrate"
-                )
-            jobs.recover()
-            github.recover()
-            demos.update(await run_in_threadpool(build_demos, settings))
+            lease.acquire()
+        except RuntimeError:
+            if settings.lease_wait_seconds <= 0:
+                raise
+            starting.set()
+
+            def reject_while_starting(_session: Session) -> None:
+                raise LeaseLost("service_starting")
+
+            db.fence = reject_while_starting
+            db.lease_healthy = lambda: False
+            deadline = time.monotonic() + settings.lease_wait_seconds
+
+            def wait_for_lease() -> None:
+                while not stop_wait.wait(1):
+                    if time.monotonic() >= deadline:
+                        fatal("lease_wait_timeout")
+                        return
+                    try:
+                        lease.acquire()
+                    except RuntimeError:
+                        continue
+                    try:
+                        start_components()
+                    except RuntimeError as error:
+                        fatal("database_not_ready" if "schema" in str(error) else "startup_failed")
+                        return
+                    except Exception:
+                        fatal("startup_failed")
+                        return
+                    starting.clear()
+                    LOGGER.info(json.dumps({"event": "service.ready"}))
+                    start_retention_worker()
+                    return
+
+            wait_thread = threading.Thread(
+                target=wait_for_lease, name="service-lease-wait", daemon=True
+            )
+            wait_thread.start()
+        try:
+            if not starting.is_set():
+                await run_in_threadpool(start_components)
+                LOGGER.info(json.dumps({"event": "service.ready"}))
+                start_retention_worker()
             yield
         finally:
+            LOGGER.info(json.dumps({"event": "service.stopping"}))
+            stop_wait.set()
+            if retention_thread is not None:
+                retention_thread.join(timeout=5)
             await run_in_threadpool(github.shutdown)
             await run_in_threadpool(jobs.shutdown)
-            lease.release()
+            if starting.is_set():
+                if wait_thread is not None:
+                    wait_thread.join(timeout=2)
+            else:
+                lease.release()
             db.engine.dispose()
 
     app = FastAPI(
@@ -162,6 +281,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(GuardMiddleware, settings=settings)
     app.include_router(lifecycle_router(db, settings))
     app.include_router(github_router(db, settings, github))
+    app.include_router(beta_router(db, settings))
+    app.include_router(operator_router(db, settings))
 
     @app.get("/api/plans")
     def plans():
@@ -186,7 +307,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/health/ready")
     def ready():
         if (
-            not lease.healthy() or not db.ready() or len(demos) != 9
+            starting.is_set()
+            or not lease.healthy()
+            or not db.ready()
+            or len(demos) != 9
             or jobs.persistence_failed.is_set()
         ):
             raise HTTPException(503, "not_ready")
@@ -233,6 +357,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "login_url": "/api/auth/login" if settings.auth_mode == "oidc" else None,
                 },
                 "billing": {"enabled": False, "mode": "commercial_beta"},
+                "capabilities": {"platform_admin": is_platform_admin(user, login, settings)},
             }
 
     @app.post("/api/auth/demo")
@@ -287,7 +412,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 old = current_session(request, session)
                 if old:
                     session.delete(old)
-                create_session(response, session, settings, user.id)
+                create_session(response, session, settings, user.id, oidc_authenticated=True)
             return response
         except Exception:
             raise HTTPException(400, "authentication_failed") from None
@@ -318,6 +443,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ]
         }
 
+    @app.get("/api/demo/{scenario_id}/files")
+    def demo_files(scenario_id: str):
+        fixture = FIXTURES.get(scenario_id)
+        if fixture is None:
+            raise HTTPException(404, "not_found")
+        return {
+            "scenario_id": scenario_id,
+            "title": fixture["title"],
+            "before_files": fixture["before_files"],
+            "after_files": fixture["after_files"],
+        }
+
     @app.get("/api/demo/{scenario_id}")
     def demo(scenario_id: str, stage: Literal["safe", "risky", "remediated"] = "risky"):
         if (scenario_id, stage) not in demos:
@@ -343,6 +480,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             session.add(org)
             session.flush()
             session.add(Membership(user_id=user.id, organization_id=org.id, role="owner"))
+            record_event(session, "workspace_created", user_id=user.id, organization_id=org.id)
             return {"id": org.id, "name": org.name, "role": "owner", "plan": org.plan}
 
     @app.get("/api/projects")
@@ -382,6 +520,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             project = Project(**body.model_dump())
             session.add(project)
             session.flush()
+            record_event(
+                session,
+                "project_created",
+                user_id=user.id,
+                organization_id=org.id,
+                project_id=project.id,
+            )
             return project_payload(project)
 
     @app.get("/api/projects/{project_id}")
@@ -539,6 +684,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 require_feature(org, "sarif")
             if format != "web":
                 usage_row(session, org).exports += 1
+                record_event(
+                    session,
+                    "report_exported",
+                    user_id=user.id,
+                    organization_id=org.id,
+                    project_id=job.project_id,
+                    analysis_id=job.id,
+                )
             result = public_result(job.result, entitlements(org).sarif)
             assert result is not None
             if format == "markdown":

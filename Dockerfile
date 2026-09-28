@@ -1,5 +1,7 @@
-FROM postgres:16.15-trixie@sha256:a3b7f434b2dc57ce85a67e171163eb8ab1a1ebcb39d27484661f26b1dfbe30d6 AS database
-RUN rm /usr/local/bin/gosu /etc/ssl/private/ssl-cert-snakeoil.key /etc/ssl/certs/ssl-cert-snakeoil.pem
+FROM postgres:16.15-alpine3.23@sha256:621a761097839bdb50207afd6b87a72f38e2d718dd46c3d744828d8917c4f1e0 AS database
+RUN apk upgrade --no-cache \
+    && rm /usr/local/bin/gosu \
+    && rm -rf /var/cache/apk/*
 USER postgres
 
 FROM node:24.19.0-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df AS frontend
@@ -9,8 +11,8 @@ RUN npm ci
 COPY web/ ./
 RUN npm run lint && npm run typecheck && npm run build
 
-FROM python:3.12.14-slim-trixie@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9 AS python-build
-ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+FROM python:3.12.14-alpine3.24@sha256:c4634f578a412db396771b61b064c6e546c9d6414c7fb5b1b05d5871f1885f7b AS python-build
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1
 WORKDIR /build
 COPY pyproject.toml README.md ./
 COPY blastradius/ ./blastradius/
@@ -20,7 +22,7 @@ RUN python -m venv /opt/venv \
     && /opt/venv/bin/python -m pip check \
     && /opt/venv/bin/python -m pip uninstall --yes pip
 
-FROM python:3.12.14-slim-trixie@sha256:2f17fc044b579bab302c2e8054d3a686e2cb9a83de48e70534b94cd8ebbe06a9 AS runtime
+FROM python:3.12.14-alpine3.24@sha256:c4634f578a412db396771b61b064c6e546c9d6414c7fb5b1b05d5871f1885f7b AS runtime
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -31,9 +33,10 @@ ENV PATH="/opt/venv/bin:$PATH" \
     BR_STATIC_DIR=/app/web/dist \
     BLASTRADIUS_ALEMBIC_CONFIG=/app/alembic.ini
 RUN /usr/local/bin/python -m pip uninstall --yes pip \
-    && rm -rf /usr/local/lib/python3.12/ensurepip \
-    && groupadd --gid 10001 blastradius \
-    && useradd --uid 10001 --gid blastradius --create-home blastradius \
+    && rm -rf /usr/local/lib/python3.12/ensurepip /root/.cache \
+        /usr/local/include/python3.12 /usr/local/lib/python3.12/config-* \
+    && addgroup -g 10001 blastradius \
+    && adduser -D -u 10001 -G blastradius blastradius \
     && mkdir -p /app/.local \
     && chown blastradius:blastradius /app/.local
 WORKDIR /app

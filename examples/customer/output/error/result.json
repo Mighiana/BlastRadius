@@ -1,0 +1,9 @@
+{
+  "decision": "ERROR",
+  "security_score_before": "",
+  "security_score_after": "",
+  "critical_paths_added": "",
+  "sensitive_resources_added": "",
+  "exit_code": 2,
+  "passed": false
+}

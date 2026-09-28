@@ -6,7 +6,10 @@ Run with:  streamlit run app.py
 from __future__ import annotations
 
 import difflib
+import hashlib
 import html
+import json
+import os
 import re
 from dataclasses import replace
 from pathlib import Path
@@ -15,19 +18,40 @@ from typing import Dict, List, Tuple, cast
 import networkx as nx
 import streamlit as st
 import streamlit.components.v1 as components
-from lark.exceptions import LarkError
 
 from blastradius.graph import analyze, build_graph, compare
 from blastradius.graph.attack_paths import AnalysisResult
 from blastradius.graph.diff_engine import GraphDiff, Verdict, highlight_edges, highlight_nodes
 from blastradius.parser import parse_directory
-from blastradius.report import build_report
+from blastradius.report import build_report, responsible_change
 from blastradius.policy import PolicyError, discover_policy
 from blastradius.parser.models import AttackPath, GraphEdge, NodeType, ResourceNode, Risk
 from blastradius import gitsource, scenarios, simulation
 from blastradius.security import remediation
 from blastradius.security.decision import DeploymentDecision, decide
 from blastradius.security.risk_score import PENALTIES
+from blastradius.sarif import build_sarif
+from blastradius.cli import json_payload
+from blastradius.showcase import (
+    BETA_CONTACT_FALLBACK,
+    BETA_LOOKING_FOR,
+    BetaContact,
+    BUILT_FOR,
+    DEMO_NOTICE,
+    DOC_LINKS,
+    HERO_BODY,
+    HERO_SUBTITLE,
+    HERO_TITLE,
+    LIMITATIONS,
+    PRICING,
+    PRICING_DISCLAIMER,
+    REPO_URL,
+    TRUST_FAQ,
+    TYPICAL_USERS,
+    VALIDATION_QUESTION,
+    beta_contact,
+    doc_url,
+)
 from blastradius.session_storage import (
     SessionWorkspace,
     StorageError,
@@ -62,7 +86,7 @@ HOP_REASON_TITLES = {
 
 CSS = """
 <style>
-  .block-container { padding-top: 1.6rem; max-width: 1560px; }
+  .block-container { padding-top: 4.5rem; max-width: 1560px; }
 
   /* ---------- Product identity ---------- */
   .br-title { font-size: 5rem; font-weight: 900; letter-spacing: -3px; margin: 0; line-height: 1;
@@ -118,9 +142,12 @@ CSS = """
   .br-dot { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: .4rem; }
 
   /* ---------- Attack paths ---------- */
-  .br-path { font-family: 'Cascadia Code', Consolas, monospace; font-size: 1.12rem; font-weight: 700;
+  .br-path { display:flex; flex-wrap:wrap; align-items:center; gap:.35rem;
+             font-family: 'Cascadia Code', Consolas, monospace; font-size: 1.12rem; font-weight: 700;
              background: #1a1013; border: 1px solid #7f1d1d; border-left: 6px solid #ef4444;
              border-radius: 10px; padding: .85rem 1.1rem; margin: .5rem 0 1rem 0; color: #fecdd3; }
+  .a-v { display:none; }
+  .a-h { display:inline; }
   .br-path-good { background: #0c1a16; border-color: #065f46; border-left-color: #10b981;
                   color: #a7f3d0; }
   .br-hop { border-left: 2px solid #3b4b63; margin-left: .4rem; padding: .2rem 0 .75rem 1rem; }
@@ -132,7 +159,7 @@ CSS = """
   .br-h { font-size: 1.45rem; font-weight: 800; color: #f1f5fb; margin: .4rem 0 .2rem 0;
           letter-spacing: -.3px; }
   hr { border-color: #253248; }
-  .br-title { font-size: clamp(2.5rem, 9vw, 5rem); letter-spacing: -.04em; }
+  .br-title { font-size: clamp(1.6rem, 5vw, 3rem); letter-spacing: -.04em; }
   .br-cards, .br-reasons { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .br-card, .br-reason, .br-decision > div { min-width: 0; overflow-wrap: anywhere; }
   .br-decision { flex-wrap: wrap; }
@@ -141,11 +168,24 @@ CSS = """
   .br-side { flex-wrap: wrap; overflow-wrap: anywhere; }
   .br-path, .br-hop, .br-kicker { overflow-wrap: anywhere; }
   iframe { max-width: 100%; }
+  .br-graph-card { border: 1px solid #253248; border-radius: 0 0 10px 10px; overflow: hidden; min-width: 0; }
+  .br-pricing { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%, 200px),1fr)); gap:.9rem; }
+  .br-pricing .br-card { display:flex; flex-direction:column; min-height:100%; overflow-wrap:normal; }
+  .br-pricing .br-card .val { font-size:clamp(1.6rem, 2vw, 2.3rem); white-space:nowrap; }
+  .br-pricing .br-card ul { flex:1; padding-left:1.2rem; color:#cbd7e6; }
+  .br-pricing .br-card li { margin:.35rem 0; }
+  .br-public-block { background:#0f172a; border:1px solid #253248; border-radius:12px; padding:1rem 1.1rem; }
   @media (max-width: 800px) {
     .br-cards, .br-reasons { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .br-card .val { font-size: clamp(1.35rem, 7vw, 2.3rem); }
     .br-decision { padding: 1rem; gap: .75rem; }
     .br-dec-right { margin-left: 0; text-align: left; width: 100%; }
     .br-path { font-size: .95rem; padding: .7rem; }
+  }
+  @media (max-width: 640px) {
+    .br-path { flex-direction:column; align-items:flex-start; }
+    .br-path .a-h { display:none; }
+    .br-path .a-v { display:inline; }
   }
   @media (max-width: 400px) {
     .block-container { padding-left: 1rem; padding-right: 1rem; }
@@ -163,11 +203,12 @@ GRAPH_FIT_HTML = """
 </style>
 <script>
   (() => {
+    const target = document.getElementById('mynetwork');
     const fit = () => {
-      if (container.clientWidth > 0) network.fit({animation: false});
+      if (target.clientWidth > 0) network.fit({animation: false});
     };
     const observer = new ResizeObserver(() => requestAnimationFrame(fit));
-    observer.observe(container);
+    observer.observe(target);
     requestAnimationFrame(fit);
     if (document.fonts) document.fonts.ready.then(fit);
   })();
@@ -187,7 +228,18 @@ def validated_directory(directory: Path) -> Path:
 
 
 def analyze_dir(directory: Path, label: str) -> AnalysisResult:
-    return analyze(build_graph(parse_directory(validated_directory(directory))), label)
+    directory = validated_directory(directory)
+    fingerprint = hashlib.sha256()
+    for path in sorted(directory.glob("*.tf")):
+        fingerprint.update(path.name.encode("utf-8"))
+        fingerprint.update(path.read_bytes())
+    cache = st.session_state.setdefault("analysis_cache", {})
+    key = (str(directory), fingerprint.hexdigest())
+    if key not in cache:
+        if len(cache) >= 16:
+            cache.clear()
+        cache[key] = analyze(build_graph(parse_directory(directory)), label)
+    return cache[key]
 
 
 def new_job(purpose: str) -> Path:
@@ -217,6 +269,17 @@ def _apply_pending_scenario() -> None:
     pending = st.session_state.pop("pending_scenario", None)
     if pending:
         st.session_state.before_dir, st.session_state.after_dir = pending
+
+
+def _apply_pending_page() -> None:
+    pending = st.session_state.pop("pending_page", None)
+    if pending in {"Demo", "Pricing", "Security & limitations", "Beta access"}:
+        st.session_state.page = pending
+
+
+def queue_page(page: str) -> None:
+    st.session_state.pending_page = page
+    st.rerun()
 
 
 def terraform_text(directory: Path) -> str:
@@ -327,6 +390,7 @@ _VERDICT_COLOR = {
     Verdict.REGRESSION: "#f87171",
     Verdict.IMPROVED: "#34d399",
     Verdict.UNCHANGED: "#9fb0c6",
+    Verdict.INCOMPLETE: "#fbbf24",
 }
 
 
@@ -335,12 +399,19 @@ def decision_banner(decision: DeploymentDecision, diff: GraphDiff) -> str:
     verdict_color = _VERDICT_COLOR[diff.verdict]
     delta = diff.score_delta
     sign = "+" if delta > 0 else ""
+    incomplete = not diff.complete
+    label = "ANALYSIS INCOMPLETE" if incomplete else decision.decision.value
+    headline = (
+        "Manual review required — coverage diagnostics prevent a complete result."
+        if incomplete
+        else decision.headline
+    )
     return (
-        f'<div class="br-decision {_DECISION_CSS_CLASS[decision.decision.value]}">'
+        f'<div class="br-decision {_DECISION_CSS_CLASS["REVIEW REQUIRED" if incomplete else decision.decision.value]}">'
         f'<div class="ic">{decision.icon}</div>'
         f'<div><div class="br-dec-label">DEPLOYMENT DECISION</div>'
-        f'<h1 style="color:{decision.color}">{esc(decision.decision.value)}</h1>'
-        f"<p>{esc(decision.headline)}</p></div>"
+        f'<h1 style="color:{decision.color}">{esc(label)}</h1>'
+        f"<p>{esc(headline)}</p></div>"
         f'<div class="br-dec-right">'
         f'<div class="br-badge" style="color:{verdict_color};border-color:{verdict_color};'
         f'background:rgba(0,0,0,.25)">{esc(diff.verdict.value)}</div>'
@@ -349,6 +420,37 @@ def decision_banner(decision: DeploymentDecision, diff: GraphDiff) -> str:
         f'<div style="color:{verdict_color};font-weight:800">{sign}{delta} points</div>'
         f"</div></div>"
     )
+
+
+def coverage_diagnostics(diff: GraphDiff) -> list[str]:
+    lines = []
+    for phase, result in (("before", diff.before), ("after", diff.after)):
+        for item in result.diagnostics[:100]:
+            location = ": ".join(
+                part for part in (item.source_file, item.resource, item.attribute) if part
+            )
+            lines.append(f"{phase}: {item.code} — {location or 'unknown location'} — {item.message}")
+    return lines[:100]
+
+
+def incomplete_banner() -> str:
+    return (
+        '<div class="br-decision br-dec-review"><div class="ic">⚠</div>'
+        '<div><div class="br-dec-label">MANUAL REVIEW REQUIRED</div>'
+        '<h1>ANALYSIS INCOMPLETE</h1>'
+        "<p>The selected input could not be analyzed. No SAFE result is produced "
+        "for incomplete analysis. Choose a bundled scenario to continue.</p></div></div>"
+    )
+
+
+def render_coverage_diagnostics(diff: GraphDiff) -> None:
+    heading("Coverage diagnostics")
+    if diff.complete:
+        st.success("Analysis coverage: complete within documented model")
+        return
+    st.warning("Analysis coverage: INCOMPLETE")
+    for item in coverage_diagnostics(diff):
+        st.markdown(f'<div class="br-reason"><div class="d">{esc(item)}</div></div>', unsafe_allow_html=True)
 
 
 def decision_reasons(decision: DeploymentDecision) -> str:
@@ -414,14 +516,19 @@ def legend_html() -> str:
     return (
         f'<div class="br-legend">{items}'
         "<span><b style=\"color:#f87171\">&#9473;&#9473;</b> &nbsp;new attack path</span>"
-        "<span style=\"color:#8fa3bd\">faded = unchanged infrastructure</span></div>"
+        "<span style=\"color:#8fa3bd\">faded = unchanged infrastructure</span>"
+        "<span style=\"color:#fbbf24\">highlighted = newly introduced route</span></div>"
     )
 
 
 def path_chip(labels: List[str], dangerous: bool = True) -> str:
-    arrow = " &nbsp;&rarr;&nbsp; "
     css = "br-path" if dangerous else "br-path br-path-good"
-    return f'<div class="{css}">{arrow.join(esc(label) for label in labels)}</div>'
+    chunks = []
+    for index, label in enumerate(labels):
+        if index:
+            chunks.append('<span class="a"><span class="a-h">&rarr;</span><span class="a-v">&darr;</span></span>')
+        chunks.append(f'<span class="n">{esc(label)}</span>')
+    return f'<div class="{css}">{"".join(chunks)}</div>'
 
 
 def section_graphs(diff: GraphDiff) -> None:
@@ -557,12 +664,15 @@ def section_change(diff: GraphDiff, before_dir: Path, after_dir: Path) -> None:
             )
         if not (diff.new_edges or diff.removed_edges):
             st.markdown('<span class="br-note">No graph edges changed.</span>', unsafe_allow_html=True)
+    render_coverage_diagnostics(diff)
 
 
 def section_pr_report(diff: GraphDiff, decision: DeploymentDecision, before_dir: Path, after_dir: Path) -> None:
     """Priority 5: the comment BlastRadius would post on the pull request."""
-    heading("Pull request security report")
+    heading("Report & exports")
     text = build_report(diff, decision, before_dir, after_dir)
+    markdown_download = report_markdown(text)
+    payload = export_payload(diff, decision, before_dir, after_dir)
     status_color = "#34d399" if decision.passed else "#f87171"
     st.markdown(
         f'<span class="br-note">This is the check BlastRadius would post on the PR. '
@@ -574,11 +684,49 @@ def section_pr_report(diff: GraphDiff, decision: DeploymentDecision, before_dir:
     st.code(text, language="markdown")
     st.download_button(
         "Download PR report",
-        data=text,
+        data=markdown_download,
         file_name="blastradius-pr-report.md",
         mime="text/markdown",
         icon=":material/download:",
         key="download_report",
+    )
+    st.download_button(
+        "Download JSON",
+        data=json.dumps(payload, indent=2),
+        file_name="blastradius-result.json",
+        mime="application/json",
+        key="download_json",
+    )
+    st.download_button(
+        "Download SARIF",
+        data=json.dumps(build_sarif(diff, decision), indent=2),
+        file_name="blastradius-result.sarif",
+        mime="application/json",
+        key="download_sarif",
+    )
+    st.caption(
+        "Exports match the displayed result: decision, score, paths, responsible change, "
+        "evidence, recommendations, coverage diagnostics and limitations."
+    )
+
+
+def export_payload(
+    diff: GraphDiff, decision: DeploymentDecision, before_dir: Path, after_dir: Path
+) -> dict:
+    return {
+        **json_payload(diff, decision),
+        "responsible_change": responsible_change(before_dir, after_dir),
+        "recommendations": [
+            {"title": rec.title, "detail": rec.detail, "severity": rec.severity.value}
+            for rec in remediation.generate_safer_config(after_dir).recommendations
+        ],
+        "limitations": list(LIMITATIONS),
+    }
+
+
+def report_markdown(text: str) -> str:
+    return text + "\n\n## Model limitations\n" + "\n".join(
+        f"- {item}" for item in LIMITATIONS
     )
 
 
@@ -665,6 +813,12 @@ BlastRadius uses a **simplified, intentionally incomplete** model of AWS reachab
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
+def learn_more_links() -> None:
+    st.markdown("### Learn more")
+    for label, path in DOC_LINKS:
+        st.markdown(f"[{esc(label)}]({doc_url(path)})")
+
+
 def sidebar() -> Tuple[Path, Path]:
     with st.sidebar:
         st.markdown("## Demo scenarios")
@@ -690,31 +844,34 @@ def sidebar() -> Tuple[Path, Path]:
             for key in ("before_dir", "after_dir"):
                 st.session_state[key] = st.session_state[key]
             if not trusted_local_enabled():
-                st.caption("Hosted demo: bundled scenarios only. Analyze private infrastructure locally or in CI.")
-            return Path(st.session_state.before_dir), Path(st.session_state.after_dir)
+                st.caption(
+                    "Public demo: bundled scenarios only. Analyze your own Terraform with "
+                    "the CLI, GitHub Actions or the private-beta platform."
+                )
+        else:
+            with st.expander("Advanced: Analyze Git change"):
+                st.caption("Compare two refs of a local repository. Your working tree is untouched.")
+                repo = st.text_input("Repository directory", key="git_repo")
+                base = st.text_input("Base ref", key="git_base")
+                head = st.text_input("Candidate ref", key="git_head")
+                tf_dir = st.text_input("Terraform directory (optional)", key="git_dir")
+                if st.button("Analyze Git change", use_container_width=True, key="analyze_git"):
+                    _run_git_comparison(repo, base, head, tf_dir)
 
-        with st.expander("Advanced: Analyze Git change"):
-            st.caption("Compare two refs of a local repository. Your working tree is untouched.")
-            repo = st.text_input("Repository directory", key="git_repo")
-            base = st.text_input("Base ref", key="git_base")
-            head = st.text_input("Candidate ref", key="git_head")
-            tf_dir = st.text_input("Terraform directory (optional)", key="git_dir")
-            if st.button("Analyze Git change", use_container_width=True, key="analyze_git"):
-                _run_git_comparison(repo, base, head, tf_dir)
+            with st.expander("Advanced: Compare local directories"):
+                before_dir = st.text_input("BEFORE directory", key="before_dir")
+                after_dir = st.text_input("AFTER directory", key="after_dir")
+                if st.button("Re-analyze", use_container_width=True, key="reanalyze"):
+                    st.rerun()
 
-        with st.expander("Advanced: Compare local directories"):
-            before_dir = st.text_input("BEFORE directory", key="before_dir")
-            after_dir = st.text_input("AFTER directory", key="after_dir")
-            if st.button("Re-analyze", use_container_width=True, key="reanalyze"):
-                st.rerun()
+            st.divider()
+            st.caption(
+                "Static analysis only. No AWS credentials are read and nothing is deployed. "
+                "Simplified attack-path model - see Details."
+            )
+        learn_more_links()
 
-        st.divider()
-        st.caption(
-            "Static analysis only. No AWS credentials are read and nothing is deployed. "
-            "Simplified attack-path model - see Details."
-        )
-
-    return Path(before_dir), Path(after_dir)
+    return Path(st.session_state.before_dir), Path(st.session_state.after_dir)
 
 
 def _run_git_comparison(repo: str, base: str, head: str, tf_dir: str) -> None:
@@ -747,13 +904,105 @@ def _run_git_comparison(repo: str, base: str, head: str, tf_dir: str) -> None:
 
 def product_header() -> None:
     st.markdown(
-        '<p class="br-title">BlastRadius</p>'
-        '<p class="br-sub">Know the blast radius before you merge.</p>'
-        '<p class="br-kicker">Attack-path change analysis for Terraform pull requests. '
-        "Your Terraform diff shows what changed - BlastRadius shows what became "
-        "<b>reachable</b>.</p>",
+        f'<p class="br-title">{esc(HERO_TITLE)}</p>'
+        f'<p class="br-sub">{esc(HERO_SUBTITLE)}</p>'
+        f'<p class="br-kicker">{esc(HERO_BODY)}</p>',
         unsafe_allow_html=True,
     )
+    first, second, third = st.columns(3)
+    if first.button("Try the demo", key="cta_demo", type="primary", use_container_width=True):
+        st.session_state.pending_scenario = (str(SAFE_DIR), str(SAFE_DIR))
+        queue_page("Demo")
+    second.link_button("View GitHub", REPO_URL, use_container_width=True)
+    if third.button("Request beta access", key="cta_beta", use_container_width=True):
+        queue_page("Beta access")
+    st.markdown(
+        f'<div class="br-public-block" style="padding:.5rem .8rem;margin:.55rem 0 1rem 0;'
+        f'color:#cbd7e6;font-size:.86rem">{DEMO_NOTICE}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_validation_block() -> None:
+    with st.container(border=True):
+        st.markdown(
+            "<b>Built for</b> · " + " · ".join(esc(item) for item in BUILT_FOR),
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            "<b>Typical users</b> · " + " · ".join(esc(item) for item in TYPICAL_USERS),
+            unsafe_allow_html=True,
+        )
+        st.markdown(f"**{esc(VALIDATION_QUESTION)}**")
+        if st.button("Request beta access", key="cta_beta_validation"):
+            queue_page("Beta access")
+
+
+def _contact() -> BetaContact:
+    try:
+        secrets = st.secrets
+    except Exception:
+        secrets = None
+    return beta_contact(os.environ, secrets)
+
+
+def render_pricing() -> None:
+    heading("Pricing")
+    st.warning(PRICING_DISCLAIMER)
+    cards = []
+    for tier in PRICING:
+        features = "".join(f"<li>{esc(feature)}</li>" for feature in tier.features)
+        cards.append(
+            f'<div class="br-card"><div class="lbl">{esc(tier.name)}</div>'
+            f'<div class="val">{esc(tier.price_label)}</div>'
+            f'<div class="br-note">{esc(tier.note)}</div><ul>{features}</ul></div>'
+        )
+    st.markdown(f'<div class="br-pricing">{"".join(cards)}</div>', unsafe_allow_html=True)
+    cols = st.columns(4)
+    for col, tier in zip(cols, PRICING):
+        key = f"pricing_{tier.code}"
+        if col.button(tier.cta_label, key=key, use_container_width=True):
+            if tier.cta_kind == "demo":
+                st.session_state.pending_scenario = (str(SAFE_DIR), str(SAFE_DIR))
+                queue_page("Demo")
+            else:
+                queue_page("Beta access")
+
+
+def render_security() -> None:
+    heading("Security & limitations")
+    for question, answer in TRUST_FAQ:
+        st.markdown(f"**{esc(question)}**")
+        st.markdown(esc(answer))
+    heading("Limitations")
+    st.markdown("\n".join(f"- {esc(item)}" for item in LIMITATIONS))
+    heading("Public demo vs BlastRadius platform")
+    st.markdown(
+        "The public demo runs bundled scenarios only and does not provide accounts or uploads. "
+        "The platform, including workspaces, history, RBAC and the GitHub App, is in private beta."
+    )
+    if st.button("Request beta access", key="security_beta"):
+        queue_page("Beta access")
+
+
+def render_beta_access() -> None:
+    heading("Beta access")
+    st.markdown("We're looking for:")
+    st.markdown("\n".join(f"- {esc(item)}" for item in BETA_LOOKING_FOR))
+    contact = _contact()
+    if contact.form_url:
+        st.link_button("Open beta request form", contact.form_url)
+    if contact.email:
+        st.link_button(
+            "Email us to join the beta",
+            f"mailto:{contact.email}?subject=BlastRadius%20beta%20access",
+        )
+        st.caption(contact.email)
+    if not contact.configured:
+        st.markdown(f"**{esc(BETA_CONTACT_FALLBACK[0])}**")
+        st.caption(BETA_CONTACT_FALLBACK[1])
+    st.markdown(f"[Beta information]({doc_url('docs/beta-guide.md')})")
+    st.caption("Submission does not create an account or guarantee access.")
 
 
 def scenario_chip(before_dir: Path, after_dir: Path) -> None:
@@ -812,6 +1061,12 @@ def primary_action(after_dir: Path, key: str) -> None:
 
 def render_overview(diff: GraphDiff, decision: DeploymentDecision, after_dir: Path) -> None:
     st.markdown(decision_banner(decision, diff), unsafe_allow_html=True)
+    if not diff.complete:
+        for item in coverage_diagnostics(diff):
+            st.markdown(
+                f'<div class="br-reason"><div class="d">{esc(item)}</div></div>',
+                unsafe_allow_html=True,
+            )
     st.markdown(decision_reasons(decision), unsafe_allow_html=True)
     st.markdown(summary_cards(diff.before, diff.after), unsafe_allow_html=True)
     heading("What became reachable")
@@ -823,7 +1078,7 @@ def render_tabs(
     diff: GraphDiff, decision: DeploymentDecision, before_dir: Path, after_dir: Path
 ) -> None:
     overview, attack_path, infra_diff, pr_report, remediate = st.tabs(
-        ["Overview", "Attack Path", "Infrastructure Diff", "PR Security Report", "Remediation"]
+        ["Overview", "Attack Path", "Infrastructure Diff", "Report & exports", "Remediation"]
     )
     with overview:
         render_overview(diff, decision, after_dir)
@@ -844,6 +1099,12 @@ def render_demo_mode(
 ) -> None:
     """Phase 7: a single uncluttered screen for a live presentation."""
     st.markdown(decision_banner(decision, diff), unsafe_allow_html=True)
+    if not diff.complete:
+        for item in coverage_diagnostics(diff):
+            st.markdown(
+                f'<div class="br-reason"><div class="d">{esc(item)}</div></div>',
+                unsafe_allow_html=True,
+            )
     st.markdown(summary_cards(diff.before, diff.after), unsafe_allow_html=True)
     section_graphs(diff)
     section_paths(diff)
@@ -874,9 +1135,27 @@ def render_app() -> None:
     st.session_state.setdefault("git_head", "")
     st.session_state.setdefault("git_dir", "")
     _apply_pending_scenario()
+    _apply_pending_page()
 
-    before_dir, after_dir = sidebar()
     product_header()
+    page = st.radio(
+        "Section",
+        ["Demo", "Pricing", "Security & limitations", "Beta access"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="page",
+    )
+    before_dir, after_dir = sidebar()
+
+    if page == "Pricing":
+        render_pricing()
+        return
+    if page == "Security & limitations":
+        render_security()
+        return
+    if page == "Beta access":
+        render_beta_access()
+        return
 
     before_dir, after_dir = validated_directory(before_dir), validated_directory(after_dir)
     workspace().prune((before_dir, after_dir))
@@ -884,8 +1163,9 @@ def render_app() -> None:
     scenario_chip(before_dir, after_dir)
     section_simulator(before_dir)
 
-    before = analyze_dir(before_dir, str(before_dir))
-    after = analyze_dir(after_dir, str(after_dir))
+    with st.spinner("Analyzing Terraform…"):
+        before = analyze_dir(before_dir, str(before_dir))
+        after = analyze_dir(after_dir, str(after_dir))
     diff = compare(before, after)
     try:
         binding = st.session_state.get("git_policy")
@@ -904,6 +1184,7 @@ def render_app() -> None:
         render_demo_mode(diff, decision, before_dir, after_dir)
     else:
         render_tabs(diff, decision, before_dir, after_dir)
+    render_validation_block()
 
 
 def main() -> None:
@@ -913,11 +1194,11 @@ def main() -> None:
         render_app()
     except StorageError as error:
         st.error(markdown_text(error))
-    except (OSError, ValueError, LarkError) as error:
+    except Exception as error:
         if trusted_local_enabled():
             st.error(markdown_text(error))
         else:
-            st.error("The selected demo input is unavailable or invalid. Choose a bundled scenario to continue.")
+            st.markdown(incomplete_banner(), unsafe_allow_html=True)
 
 
 if __name__ == "__main__":

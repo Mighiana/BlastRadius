@@ -6,6 +6,7 @@ import { canAnalyze, canManage, historySchema, jobError, jobSchema, mutate, proj
 import { useResource } from '../hooks';
 import { useOrganization, useSession } from '../session';
 import { AnalysisForm } from '../components/AnalysisForm';
+import { AnalysisFeedback } from '../components/AnalysisFeedback';
 import { AuthGate } from '../components/AuthGate';
 import { Decision, Empty, ErrorNotice, Loading, PageHeading } from '../components/UI';
 import { ReportView } from '../components/ReportView';
@@ -55,6 +56,7 @@ function JobView({ id, onComplete }: { id: string; onComplete: () => void }) {
       {(job.status === 'queued' || job.status === 'running') && <Loading>{job.status === 'queued' ? 'Queued — waiting for an available worker…' : 'Analyzing Terraform in an isolated worker…'}</Loading>}
       {job.status === 'failed' && <ErrorNotice error={new Error(jobError(job.error))} />}
       {job.status === 'succeeded' && job.result && <ReportView report={job.result} jobId={id} />}
+      {(job.status === 'succeeded' || job.status === 'failed') && <AnalysisFeedback key={job.id} analysisId={job.id} />}
       <div className="analysis-heading"><h3>{job.base_label} <ArrowRight size={20} aria-hidden="true" /> {job.candidate_label}</h3></div>
       <details className="panel"><summary>Analysis provenance & trusted policy</summary><dl className="facts"><div><dt>Input</dt><dd>{job.input_type ?? 'Not recorded'}</dd></div><div><dt>Base ref / SHA</dt><dd><code>{job.base_ref ?? 'Not recorded'} / {job.base_sha ?? 'Not recorded'}</code></dd></div><div><dt>Candidate ref / SHA</dt><dd><code>{job.candidate_ref ?? 'Not recorded'} / {job.candidate_sha ?? 'Not recorded'}</code></dd></div></dl>{job.policy_snapshot ? <pre><code>{JSON.stringify(job.policy_snapshot, null, 2)}</code></pre> : <p>No policy snapshot was recorded for this analysis.</p>}</details>
     </>}
@@ -146,7 +148,7 @@ function WorkspaceContent() {
       {org && <p className="footnote">Up to {org.usage.limits.projects} projects · {org.usage.limits.members} members</p>}
     </aside>
       <div className="workspace-main">
-        {!project && !projects.loading && <Empty title="Your first comparison starts here"><p>Create a project, then upload baseline and candidate Terraform or a plan JSON.</p><Link className="text-link" to="/demo">See an example in the public demo<ArrowRight size={16} aria-hidden="true" /></Link></Empty>}
+        {!project && !projects.loading && <Empty title="Your first comparison starts here"><p>Create a project, then upload baseline and candidate Terraform or a plan JSON generated in your trusted environment. No AWS credentials or GitHub connection are required. We read static data; we do not run Terraform, providers or repository code.</p><Link className="text-link" to="/demo">Try an example in the public demo<ArrowRight size={16} aria-hidden="true" /></Link></Empty>}
         {project && <>
           {project.archived_at && <p className="notice">This project is archived. Retained history remains available. An owner or admin can restore it in settings.</p>}
           {!historyOnly && canWrite && !project.archived_at && <AnalysisForm key={`${org?.id}-${project.id}`} projectId={project.id} onSubmitted={submitted} />}

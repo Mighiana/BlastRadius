@@ -1,0 +1,53 @@
+services:
+  - type: web
+    name: blastradius
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health/live
+    dockerCommand: sh /app/scripts/container-entrypoint.sh migrate-serve
+    numInstances: 1
+    autoDeploy: true
+    envVars:
+      - key: BR_ENV
+        value: production
+      - key: BR_AUTH_MODE
+        value: oidc
+      - key: BR_AUTO_MIGRATE
+        value: "false"
+      - key: BR_DATA_DIR
+        value: /app/.local
+      - key: BR_STATIC_DIR
+        value: /app/web/dist
+      - key: BLASTRADIUS_ALEMBIC_CONFIG
+        value: /app/alembic.ini
+      - key: BR_ADMIN_ENABLED
+        value: "false"
+      - key: BR_LEASE_WAIT_SECONDS
+        value: "120"
+      - key: BR_RETENTION_SWEEP_SECONDS
+        value: "3600"
+      - key: BR_TRUST_PROXY_HEADERS
+        value: "true"
+      - key: BR_SESSION_SECRET
+        generateValue: true
+      - key: BR_DATABASE_URL
+        fromDatabase:
+          name: blastradius-db
+          property: connectionString
+      - key: BR_PUBLIC_URL
+        sync: false
+      - key: BR_OIDC_ISSUER
+        sync: false
+      - key: BR_OIDC_CLIENT_ID
+        sync: false
+      - key: BR_OIDC_CLIENT_SECRET
+        sync: false
+databases:
+  - name: blastradius-db
+    plan: free
+    region: frankfurt
+    databaseName: blastradius
+    user: blastradius

@@ -1,9 +1,23 @@
-# Legacy Streamlit demo
+# Public Streamlit demo
 
-The Streamlit app remains a scenario-driven demonstration of the Python
-analyzer. Its generated files are now isolated by Streamlit session, and its
-default configuration cannot select arbitrary host directories or Git
-repositories. This is not an authenticated multi-tenant analysis service.
+The Streamlit app is the public interactive demo of the Python analyzer. It
+uses bundled scenarios to show how a Terraform change can alter modeled
+attack paths. The multi-user workspace platform, including accounts and
+history, is currently in private beta.
+
+## Streamlit Community Cloud deployment
+
+The Community Cloud app should use `app.py` as its main file and
+`requirements.txt` for dependencies. Select Python 3.12 in the app settings.
+The public demo has no PostgreSQL, FastAPI, or localhost dependency. Optional
+deployment secrets or environment variables are:
+
+- `BLASTRADIUS_BETA_FORM_URL`
+- `BLASTRADIUS_BETA_CONTACT`
+- `BLASTRADIUS_DOCS_REF`
+
+Leave `BLASTRADIUS_TRUSTED_LOCAL` unset. The app must be configured for public
+viewer access and deployed from the intended branch.
 
 ## Default hosted behavior
 
@@ -23,7 +37,7 @@ Simulation, remediation, and Git extraction each get a new directory. Before
 and after snapshots remain separate; generating a fix never overwrites the
 configuration it fixes. The current pair is protected from job pruning.
 Scenario changes still go through the staged Streamlit state transition.
-Analysis is recomputed instead of using a process-wide data cache.
+Analysis results are memoized per Streamlit session by directory content.
 
 Policy discovery for directory comparisons is limited to the selected before
 directory. It does not fall back to policy in the application checkout.
@@ -127,12 +141,13 @@ node identities, deterministic positions, and disabled physics.
 
 Cards wrap on narrow screens. Graph iframes fit their width and re-fit their
 network when the container size or fonts change. These are incremental fixes to
-the legacy interface; the new frontend owns the commercial redesign.
+the public demo; the private-beta platform owns the commercial workspace
+experience.
 
 This app does not execute Terraform, apply remediation to AWS, or inspect a live
 cloud account. A zero-path result means **“No new modeled critical attack paths
 detected.”** It does not prove infrastructure is safe or provide complete AWS
-coverage. Legacy decision labels remain compatible with the original demo;
+coverage. Decision labels remain compatible with the analyzer;
 they must be interpreted within the analyzer's modeled coverage.
 
 ## Residual limitations

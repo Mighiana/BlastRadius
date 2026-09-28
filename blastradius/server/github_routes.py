@@ -14,6 +14,7 @@ from starlette.concurrency import run_in_threadpool
 
 from blastradius.server.auth import membership, require_user
 from blastradius.server.config import Settings
+from blastradius.server.events import record_event
 from blastradius.server.db import Database
 from blastradius.server.github_api import GitHubAPI, GitHubError
 from blastradius.server.github_service import GitHubService
@@ -240,6 +241,21 @@ def github_router(db: Database, settings: Settings, service: GitHubService) -> A
                         created_by=user.id,
                     )
                     session.add(connection)
+                    record_event(
+                        session,
+                        "github_connected",
+                        user_id=user.id,
+                        organization_id=project.organization_id,
+                        project_id=project.id,
+                    )
+                elif connection.status != "active":
+                    record_event(
+                        session,
+                        "github_connected",
+                        user_id=user.id,
+                        organization_id=project.organization_id,
+                        project_id=project.id,
+                    )
                 connection.full_name, connection.status = repo.full_name, "active"
                 project.repository, project.repository_provider = repo.full_name, "github"
                 project.default_branch, project.updated_at = repo.default_branch, time.time()

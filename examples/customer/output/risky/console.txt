@@ -1,0 +1,27 @@
+BlastRadius change-impact analysis
+========================================
+Decision : BLOCK CHANGE
+Verdict  : SECURITY REGRESSION
+Score    : 100 -> 20 (-80)
+Risk     : LOW -> CRITICAL
+
+This change opens a new path from the public internet to data marked sensitive.
+
+Reasons:
+  ! New critical attack paths: 1 new path from the internet to data marked sensitive
+  ! Newly reachable sensitive resources: aws_s3_bucket.customer_data
+  ! Newly internet-reachable resources: aws_iam_role.app, aws_instance.web_server, aws_s3_bucket.customer_data
+  - Security score delta: Score dropped by 80 points
+
+New critical attack path(s):
+  Internet -> Sample Web -> Web Server -> Sample App -> Blastradius Synthetic Customer Data -> Sensitive Data
+      INTERNET -> aws_security_group.web: Security group allows 0.0.0.0/0 on port 22 (SSH)
+      aws_security_group.web -> aws_instance.web_server: Security group is attached to Web Server
+      aws_instance.web_server -> aws_iam_role.app: IAM role attached through instance profile (aws_iam_instance_profile.app.name); compromised compute may obtain metadata credentials
+      aws_iam_role.app -> aws_s3_bucket.customer_data: Role allows s3:GetObject, s3:ListBucket on the bucket
+      aws_s3_bucket.customer_data -> sensitive_data.customer_data: Bucket is tagged as holding sensitive data
+Policy: New critical attack paths are prohibited
+Policy: New sensitive resource exposure is prohibited
+Policy: New public administrative ingress (SSH/RDP/all ports) is prohibited
+
+Analysis coverage: complete within documented model

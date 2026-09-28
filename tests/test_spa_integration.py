@@ -69,3 +69,13 @@ def test_static_fallback_is_allowlisted(static_client):
     assert static_client.post("/dashboard").status_code == 405
     assert static_client.get("/api/known").json() == {"ok": True}
     assert static_client.post("/api/known").status_code == 405
+
+
+@pytest.mark.parametrize("path", ["/beta", "/operator"])
+def test_commercial_routes_support_cold_navigation_without_api_fallback(static_client, path):
+    response = static_client.get(path)
+    assert response.status_code == 200
+    assert response.text == "<html>Application</html>"
+    assert static_client.head(path).status_code == 200
+    assert static_client.post(path).status_code == 405
+    assert static_client.get("/api" + path).status_code == 404
