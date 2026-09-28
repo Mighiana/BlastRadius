@@ -36,8 +36,10 @@ change.
 * `python-hcl2` v8 keeps surrounding quotes on strings, returns heredocs as
   `<<MARKER\n...\nMARKER`, and wraps references as `${aws_x.y.z}`. All of this is
   normalized in `blastradius/parser/terraform_parser.py`; don't bypass it.
-* IAM and bucket policies in example Terraform must be **heredoc JSON** -
-  `jsonencode(...)` is not parseable and is deliberately skipped.
+* IAM policies may be heredoc JSON, literal JSON, or `jsonencode({...})` with
+  literals and AWS resource references. `blastradius/parser/expression.py` is a
+  bounded allowlist reader (no eval, no Terraform); anything else (vars, locals,
+  functions, operators) must surface `IAM_POLICY_EXPRESSION_UNRESOLVED` / REVIEW.
 * The package is `blastradius/` rather than top-level `parser/` to avoid shadowing
   stdlib module names.
 * Streamlit forbids writing to a widget's `session_state` key after that widget is
