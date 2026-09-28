@@ -44,6 +44,7 @@ function savedTheme(): string | null {
   }
 }
 function ThemeToggle() {
+  const [explicit, setExplicit] = useState(() => savedTheme() !== null);
   const [dark, setDark] = useState(() => {
     const saved = savedTheme();
     return saved ? saved === 'dark' : window.matchMedia?.('(prefers-color-scheme: light)').matches !== true;
@@ -53,14 +54,16 @@ function ThemeToggle() {
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#0b1018' : '#e7ecf4');
   }, [dark]);
   useEffect(() => {
+    if (explicit) return;
     const mq = window.matchMedia?.('(prefers-color-scheme: light)');
-    if (!mq || savedTheme() || !mq.addEventListener) return;
+    if (!mq || !mq.addEventListener) return;
     const onChange = (e: MediaQueryListEvent) => setDark(!e.matches);
     mq.addEventListener('change', onChange);
     return () => mq.removeEventListener('change', onChange);
-  }, []);
+  }, [explicit]);
   return <button type="button" className="icon-button" aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'} aria-pressed={!dark} title={dark ? 'Light theme' : 'Dark theme'} onClick={() => {
     const next = !dark;
+    setExplicit(true);
     setDark(next);
     try {
       localStorage.setItem('br-theme', next ? 'dark' : 'light');
