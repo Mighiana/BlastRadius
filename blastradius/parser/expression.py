@@ -40,12 +40,8 @@ class Unresolved:
 
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _TRAVERSAL_TAIL = re.compile(r"\.[A-Za-z_][A-Za-z0-9_]*|\[\d+\]")
-_STRING_ESCAPE = re.compile(r"\\(.)")
-
-
-def _unescape(match: re.Match) -> str:
-    ch = match.group(1)
-    return {"n": "\n", "t": "\t", "r": "\r"}.get(ch, ch)
+_AWS_TRAVERSAL = re.compile(r"aws_[A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*|\[\d+\])+")
+_SIMPLE_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\"}
 
 
 @dataclass
@@ -162,14 +158,46 @@ class _Reader:
             if ch == '"':
                 return "".join(out)
             if ch == "\\":
-                if not self.text:
-                    break
-                esc = self.text[0]
+                out.append(self._read_escape())
+            elif ch in "$%" and self.text.startswith(ch + "{"):
+                out.append(ch + "{")
+                self.text = self.text[2:]
+            elif ch in "$%" and self.text.startswith("{"):
                 self.text = self.text[1:]
-                out.append({"n": "\n", "t": "\t", "r": "\r"}.get(esc, esc))
+                out.append(self._read_template(ch))
             else:
                 out.append(ch)
         raise ExpressionError("unterminated string")
+
+    def _read_escape(self) -> str:
+        esc = self.text[:1]
+        self.text = self.text[1:]
+        if esc in _SIMPLE_ESCAPES:
+            return _SIMPLE_ESCAPES[esc]
+        width = {"u": 4, "U": 8}.get(esc)
+        if width is None:
+            raise ExpressionError("invalid string escape")
+        digits = self.text[:width]
+        if len(digits) != width or not all(c in "0123456789abcdefABCDEF" for c in digits):
+            raise ExpressionError("invalid unicode escape")
+        self.text = self.text[width:]
+        code = int(digits, 16)
+        if code > 0x10FFFF or 0xD800 <= code <= 0xDFFF:
+            raise ExpressionError("invalid unicode code point")
+        return chr(code)
+
+    def _read_template(self, marker: str) -> str:
+        """Read one ``${...}``/``%{...}`` sequence after its opening brace."""
+        end = self.text.find("}")
+        if end < 0:
+            raise ExpressionError("unterminated template sequence")
+        body = self.text[:end].strip()
+        self.text = self.text[end + 1:]
+        if marker == "$" and _AWS_TRAVERSAL.fullmatch(body):
+            return "${" + body + "}"
+        label = "template directive" if marker == "%" else f"interpolation '{body[:60]}'"
+        self.problems.append(Unresolved(f"unresolved {label}"))
+        return ""
 
     def _read_number(self) -> object:
         match = re.match(r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?", self.text)

@@ -213,7 +213,7 @@ def test_interpolated_variable_inside_resource_string_stays_review(tmp_path):
         tmp_path,
         'jsonencode({Version = "2012-10-17", Statement = [{Effect = "Allow", Action = "s3:GetObject", Resource = "${var.bucket_arn}/*"}]})',
     )
-    assert "UNRESOLVED_EXPRESSION" in {d.code for d in after.diagnostics}
+    assert "IAM_POLICY_EXPRESSION_UNRESOLVED" in {d.code for d in after.diagnostics}
     assert decide(diff).decision is Decision.REVIEW
 
 
@@ -277,3 +277,41 @@ def test_plan_json_resolved_policy_still_modeled():
     from tests.conftest import EXAMPLES
     config = parse_plan_file(EXAMPLES / "plans" / "ssh_open_plan.json")
     assert "INVALID_POLICY" not in {d.code for d in config_diagnostics(config)}
+
+
+def test_unicode_escapes_normalize_like_literals(tmp_path):
+    escaped = (
+        'jsonencode({Version = "2012-10-17", Statement = [{Effect = "Allow", '
+        'Action = ["s3\\u003aGetObject", "s3\\U0000003aListBucket"], '
+        'Resource = [aws_s3_bucket.customer_data.arn, "${aws_s3_bucket.customer_data.arn}\\u002f*"]}]})'
+    )
+    before, after, diff = _diff(tmp_path, escaped)
+    assert not {d.code for d in after.diagnostics} & {"INVALID_POLICY", "IAM_POLICY_EXPRESSION_UNRESOLVED"}
+    assert decide(diff).decision is Decision.BLOCK
+
+
+@pytest.mark.parametrize("text", [
+    '{A = "\\uZZZZ"}', '{A = "\\u12"}', '{A = "\\uD800"}', '{A = "\\U00110000"}', '{A = "\\q"}',
+], ids=["non-hex", "short", "surrogate", "out-of-range", "unknown"])
+def test_invalid_string_escapes_are_rejected(text):
+    from blastradius.parser.expression import ExpressionError, evaluate_expression
+    with pytest.raises(ExpressionError):
+        evaluate_expression(text)
+
+
+@pytest.mark.parametrize("policy", [
+    'jsonencode({Version = "${var.policy_version}", Statement = [{Effect = "Allow", Action = "s3:GetObject", Resource = "*"}]})',
+    'jsonencode({Version = "2012-10-17", Statement = [{Sid = "${local.sid}", Effect = "Allow", Action = "s3:GetObject", Resource = "*"}]})',
+    'jsonencode({Version = "2012-10-17", Statement = [{"${var.key}" = "x", Effect = "Allow", Action = "s3:GetObject", Resource = "*"}]})',
+    'jsonencode({Version = "2012-10-17", Statement = [{Sid = "%{if var.x}a%{endif}", Effect = "Allow", Action = "s3:GetObject", Resource = "*"}]})',
+], ids=["version", "sid", "object-key", "directive"])
+def test_interpolation_in_any_field_requires_review(tmp_path, policy):
+    before, after, diff = _diff(tmp_path, policy)
+    assert "IAM_POLICY_EXPRESSION_UNRESOLVED" in {d.code for d in after.diagnostics}
+    assert decide(diff).decision is not Decision.SAFE
+
+
+def test_escaped_template_marker_is_literal():
+    from blastradius.parser.expression import evaluate_expression
+    value, problems = evaluate_expression('{Sid = "$${literal}"}')
+    assert value == {"Sid": "${literal}"} and not problems
