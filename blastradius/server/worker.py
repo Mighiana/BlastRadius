@@ -9,6 +9,7 @@ from lark.exceptions import UnexpectedInput
 from pydantic import ValidationError
 
 from blastradius.server.analysis import ResourceLimitError, analyze_input
+from blastradius.server.failures import FailureCode
 from blastradius.server.schemas import WorkerInput
 
 
@@ -23,7 +24,7 @@ def main() -> None:
         result = analyze_input(payload.analysis, workdir, int(sys.argv[2]), payload.policy_snapshot)
         response: dict = {"result": result}
     except ResourceLimitError:
-        response = {"error": "resource_limit_exceeded"}
+        response = {"error": FailureCode.RESOURCE_LIMIT_EXCEEDED}
     except (
         ValueError,
         ValidationError,
@@ -33,11 +34,11 @@ def main() -> None:
         AttributeError,
         RecursionError,
     ):
-        response = {"error": "invalid_analysis_input"}
+        response = {"error": FailureCode.INVALID_ANALYSIS_INPUT}
     except MemoryError:
-        response = {"error": "resource_limit_exceeded"}
+        response = {"error": FailureCode.RESOURCE_LIMIT_EXCEEDED}
     except Exception:
-        response = {"error": "analysis_failed"}
+        response = {"error": FailureCode.ANALYSIS_FAILED}
     (workdir / "output.json").write_text(json.dumps(response), encoding="utf-8")
 
 

@@ -19,6 +19,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from blastradius.server.config import Settings
 from blastradius.server.db import Database, LeaseLost
 from blastradius.server.events import analysis_event, terminal_events
+from blastradius.server.failures import FailureCode
 from blastradius.server.models import Analysis, GitHubRun
 from blastradius.server.persistence import persist_result
 from blastradius.server.results import worker_response
@@ -68,7 +69,7 @@ def execute(
                 returncode = completed.returncode
             else:
                 if not lease_healthy():
-                    return {"error": "service_lease_lost"}
+                    return {"error": FailureCode.SERVICE_LEASE_LOST}
                 with subprocess.Popen(
                     command,
                     cwd=workdir,
@@ -80,11 +81,11 @@ def execute(
                     deadline = time.monotonic() + settings.job_timeout_seconds
                     while process.poll() is None:
                         error = (
-                            "server_restarted"
+                            FailureCode.SERVER_RESTARTED
                             if stopping is not None and stopping.is_set()
-                            else "service_lease_lost"
+                            else FailureCode.SERVICE_LEASE_LOST
                             if not lease_healthy()
-                            else "analysis_timeout"
+                            else FailureCode.ANALYSIS_TIMEOUT
                             if time.monotonic() >= deadline
                             else None
                         )
@@ -98,12 +99,12 @@ def execute(
                             pass
                     returncode = process.returncode
         except subprocess.TimeoutExpired:
-            return {"error": "analysis_timeout"}
+            return {"error": FailureCode.ANALYSIS_TIMEOUT}
         output = workdir / "output.json"
         if returncode != 0 or not output.exists():
-            return {"error": "worker_failed"}
+            return {"error": FailureCode.WORKER_FAILED}
         if output.stat().st_size > 8 * 1024 * 1024:
-            return {"error": "result_too_large"}
+            return {"error": FailureCode.RESULT_TOO_LARGE}
         return json.loads(output.read_text(encoding="utf-8"))
 
 
@@ -136,7 +137,7 @@ class JobManager:
                 for job in rows:
                     job.status, job.error, job.completed_at = (
                         "failed",
-                        "server_restarted",
+                        FailureCode.SERVER_RESTARTED,
                         time.time(),
                     )
                     job.result, job.decision = None, None
@@ -161,7 +162,7 @@ class JobManager:
         try:
             self.track(self.executor.submit(self._run, analysis_id, payload))
         except Exception:
-            self.finish(analysis_id, {"error": "dispatch_failed"})
+            self.finish(analysis_id, {"error": FailureCode.DISPATCH_FAILED})
             raise
 
     def finish(self, analysis_id: str, response: object, run_id: str | None = None) -> str:
@@ -194,13 +195,13 @@ class JobManager:
             except SQLAlchemyError as error:
                 cause = type(error).__name__
                 self._log_persistence_error(analysis_id, attempt, error)
-                validated = {"error": "worker_failed"}
+                validated = {"error": FailureCode.WORKER_FAILED}
                 if attempt < 2:
                     time.sleep(0.05 * (attempt + 1))
             except Exception as error:
                 cause = type(error).__name__
                 self._log_persistence_error(analysis_id, attempt, error)
-                validated = {"error": "worker_failed"}
+                validated = {"error": FailureCode.WORKER_FAILED}
         self.persistence_failed.set()
         logger.error(
             json.dumps(
@@ -245,7 +246,7 @@ class JobManager:
                     }
                 )
             response = (
-                {"error": "server_restarted"}
+                {"error": FailureCode.SERVER_RESTARTED}
                 if self.stopping.is_set()
                 else execute(
                     payload, self.settings, policy_snapshot, self.db.lease_healthy, self.stopping
@@ -257,7 +258,7 @@ class JobManager:
         except Exception:
             context["outcome"] = "failed"
             if not self.persistence_failed.is_set():
-                self.finish(analysis_id, {"error": "worker_failed"})
+                self.finish(analysis_id, {"error": FailureCode.WORKER_FAILED})
         finally:
             context["duration_ms"] = round((time.monotonic() - started) * 1000)
             logger.info(json.dumps({"event": "analysis.completed", **context}))

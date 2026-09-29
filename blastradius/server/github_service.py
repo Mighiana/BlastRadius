@@ -19,6 +19,7 @@ from blastradius import __version__
 from blastradius.server.config import Settings
 from blastradius.server.events import analysis_event
 from blastradius.server.db import Database
+from blastradius.server.failures import FailureCode
 from blastradius.server.github_api import GitHubAPI, GitHubError
 from blastradius.server.github_publish import active, publish
 from blastradius.server.github_types import LifecycleEvent, PullEvent
@@ -132,7 +133,7 @@ class GitHubService:
                 if (
                     analysis is None
                     or analysis.status in ("queued", "running")
-                    or (analysis.status == "failed" and analysis.error == "server_restarted")
+                    or (analysis.status == "failed" and analysis.error == FailureCode.SERVER_RESTARTED)
                 ):
                     run.analysis_id = None
                     analysis_period = (
@@ -141,12 +142,12 @@ class GitHubService:
                         else period()
                     )
                     run.error = (
-                        "server_restarted"
+                        FailureCode.SERVER_RESTARTED
                         if analysis_period == period()
                         else "server_restarted_rebill"
                     )
                 else:
-                    run.status, run.error = "ready", "server_restarted"
+                    run.status, run.error = "ready", FailureCode.SERVER_RESTARTED
 
     def start(self, stop: threading.Event) -> None:
         """Dispatch persisted deliveries while this process holds the service lease."""
@@ -628,7 +629,7 @@ class GitHubService:
                     session.add(run)
                 if run.status == "pending" and run.analysis_id is None:
                     org = lock_org(session, project.organization_id)
-                    if run.error != "server_restarted":
+                    if run.error != FailureCode.SERVER_RESTARTED:
                         try:
                             quota(session, org, "analyses_per_month")
                         except HTTPException:
@@ -680,10 +681,10 @@ class GitHubService:
                         raise _Stopping
                     response = {"error": exc.code}
                 except Exception:
-                    response = {"error": "github_analysis_failed"}
+                    response = {"error": FailureCode.GITHUB_ANALYSIS_FAILED}
                 if (
                     isinstance(response, dict)
-                    and response.get("error") == "server_restarted"
+                    and response.get("error") == FailureCode.SERVER_RESTARTED
                     and self.jobs.stopping.is_set()
                 ):
                     raise _Stopping
