@@ -328,3 +328,11 @@ def test_reports_show_incomplete_baseline_and_no_host_paths():
     for output in (build_report(diff), build_pr_comment(diff), json.dumps(build_sarif(diff))):
         assert "UNRESOLVED_EXPRESSION" in output
         assert "/private/snapshot" not in output
+
+
+def test_reports_list_resources_outside_model_coverage(tmp_path):
+    (tmp_path / "main.tf").write_text('resource "aws_lambda_function" "external" {}')
+    result = analyze(build_graph(parse_directory(tmp_path)))
+    diff = compare(analyze(build_graph(ParsedConfig())), result)
+    assert "Outside current model coverage: aws\\_lambda\\_function" in build_report(diff).splitlines()
+    assert "**Outside current model coverage:** aws\\_lambda\\_function" in build_pr_comment(diff).splitlines()

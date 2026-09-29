@@ -73,6 +73,12 @@ def coverage_lines(diff: "GraphDiff") -> list[str]:
     return lines
 
 
+def _unsupported_coverage(diff: "GraphDiff") -> str:
+    unsupported = sorted(set(diff.before.graph.graph.get("unsupported", [])) |
+                         set(diff.after.graph.graph.get("unsupported", [])))
+    return ", ".join(_safe_markdown(item) for item in unsupported)[:2000]
+
+
 def _metric_lines(diff: "GraphDiff") -> List[str]:
     lines: List[str] = []
     counts = (
@@ -175,6 +181,9 @@ def build_report(
 
     lines.append("Recommendation:")
     lines.append(f"  {_recommendation(diff, decision)}")
+    unsupported = _unsupported_coverage(diff)
+    if unsupported:
+        lines.extend(["", "Outside current model coverage: " + unsupported])
     lines.extend(coverage_lines(diff))
     lines.append("")
     lines.append(
@@ -194,8 +203,7 @@ def _safe_markdown(value):
 def build_pr_comment(diff, decision=None, before_dir=None, after_dir=None):
     decision = decision or decide(diff)
     paths = diff.new_critical_paths or diff.new_attack_paths
-    coverage = sorted(set(diff.before.graph.graph.get('unsupported', [])) |
-                      set(diff.after.graph.graph.get('unsupported', [])))
+    unsupported = _unsupported_coverage(diff)
     lines = [MARKER, '## BlastRadius Security Check', '',
              f'**Decision: {decision.icon} {decision.decision.value}**', '',
              f'**Security score:** {diff.before.score} → {diff.after.score}',
@@ -216,8 +224,8 @@ def build_pr_comment(diff, decision=None, before_dir=None, after_dir=None):
     if decision.policy_notes:
         lines.extend(['', '**Policy:**'] + ['- ' + _safe_markdown(note) for note in decision.policy_notes[:8]])
     lines.extend(['', '**Recommendation:**', _recommendation(diff, decision)])
-    if coverage:
-        lines.extend(['', '**Outside current model coverage:** ' + ', '.join(_safe_markdown(c) for c in coverage)[:2000]])
+    if unsupported:
+        lines.extend(['', '**Outside current model coverage:** ' + unsupported])
     lines.extend(coverage_lines(diff))
     lines.extend(['', '_Simplified static AWS model, not proof of infrastructure safety. '
                   'Unsupported relationships and unknown values can hide paths. No AWS access or deployment._'])
