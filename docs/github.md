@@ -176,8 +176,8 @@ content returns 409. Invalid signatures return 401; invalid supported payloads
 return 400. The backlog cap (`MAX_PENDING_DELIVERIES=1000`) returns 503 with
 `github_backlog_full` without persisting the new delivery. Payloads are cleared
 when a delivery reaches a terminal state, and signed redelivery re-arms rejected
-rows. When the shared job semaphore is full, return 503 without recording
-acceptance so the event can be redelivered.
+rows. When the job semaphore is full, the persisted delivery is deferred (`202`)
+and dispatched when a slot frees.
 
 Each PR is re-read using a repository-scoped read token. Installation, repository,
 PR number, open state, head/base repository IDs, refs and SHAs must match.
@@ -232,7 +232,7 @@ link and model/retention limitations. New heads update the same comment.
 | GET retries | At most 3 attempts, bounded backoff |
 | Mutation HTTP attempts | One; uncertain POSTs reconcile by reads |
 | Publication passes | At most 2 per delivery attempt |
-| Delivery retries | At most 3 total attempts via signed redelivery |
+| Delivery retries | At most 3 automatic attempts (30 s × attempt backoff); signed redelivery re-arms `rejected` rows |
 | Recursive tree | At most 10,000 entries, never truncated |
 | Source | `BR_MAX_FILES` per snapshot; half `BR_MAX_BODY_BYTES` source bytes per snapshot; combined serialized input at most `BR_MAX_BODY_BYTES` |
 | Check discovery | At most 100 checks at the head |

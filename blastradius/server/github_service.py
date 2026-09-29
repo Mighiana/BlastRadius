@@ -10,7 +10,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 
 from fastapi import HTTPException
 from pydantic import ValidationError
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -45,6 +45,11 @@ DISPATCH_POLL_SECONDS = 2.0
 def _log(event: str, **fields: str | int) -> None:
     """Delivery lifecycle log: identifiers and outcomes only, never payload or headers."""
     LOGGER.info(json.dumps({"event": event, **fields}, sort_keys=True))
+
+
+def _admission_lock(session: Session) -> None:
+    if session.get_bind().dialect.name == "postgresql":
+        session.execute(text("SELECT pg_advisory_xact_lock(481936026)"))
 
 
 class _Stopping(Exception):
@@ -179,6 +184,7 @@ class GitHubService:
                         _log("github.webhook_duplicate", delivery_id=delivery_id)
                         return {"status": "duplicate"}
                 else:
+                    _admission_lock(session)
                     backlog = (
                         session.scalar(
                             select(func.count())
@@ -347,8 +353,13 @@ class GitHubService:
                     claim["root"],
                     claim["policy"],
                 )
-                self.futures.add(future)
-                future.add_done_callback(self.futures.discard)
+                def discard(done: Future) -> None:
+                    with self.jobs.running_lock:
+                        self.futures.discard(done)
+
+                with self.jobs.running_lock:
+                    self.futures.add(future)
+                future.add_done_callback(discard)
                 self.jobs.track(future)
             except RuntimeError:
                 self.active.discard(delivery_id)

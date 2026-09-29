@@ -117,6 +117,7 @@ class JobManager:
         self.draining = threading.Event()
         self.stopping = threading.Event()
         self.running: set[Future] = set()
+        self.running_lock = threading.Lock()
 
     def recover(self) -> None:
         while True:
@@ -237,8 +238,13 @@ class JobManager:
             self.slots.release()
 
     def track(self, future: Future) -> None:
-        self.running.add(future)
-        future.add_done_callback(self.running.discard)
+        def discard(done: Future) -> None:
+            with self.running_lock:
+                self.running.discard(done)
+
+        with self.running_lock:
+            self.running.add(future)
+        future.add_done_callback(discard)
 
     def drain(
         self,
@@ -249,10 +255,14 @@ class JobManager:
         self.draining.set()
         for executor, _ in executors:
             executor.shutdown(wait=False, cancel_futures=False)
-        wait(set(self.running), timeout=max(0.0, deadline - time.monotonic()))
+        with self.running_lock:
+            running = set(self.running)
+        wait(running, timeout=max(0.0, deadline - time.monotonic()))
         for _, futures in executors:
             if futures is not None:
-                for future in set(futures):
+                with self.running_lock:
+                    pending = set(futures)
+                for future in pending:
                     future.cancel()
         self.stopping.set()
         for executor, _ in executors:

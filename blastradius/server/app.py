@@ -151,16 +151,20 @@ def create_app(
             if cached is not None:
                 demos.update(cached)
                 return
-            started = time.perf_counter()
-            demos.update(build_demos(settings))
-            LOGGER.warning(
-                json.dumps(
-                    {
-                        "event": "demo.build_fallback",
-                        "duration_ms": round((time.perf_counter() - started) * 1000, 2),
-                    }
+            def build_fallback() -> None:
+                started = time.perf_counter()
+                local = build_demos(settings)
+                demos.update(local)
+                LOGGER.warning(
+                    json.dumps(
+                        {
+                            "event": "demo.build_fallback",
+                            "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                        }
+                    )
                 )
-            )
+
+            threading.Thread(target=build_fallback, name="demo-build", daemon=True).start()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -283,13 +287,20 @@ def create_app(
                 wait_thread.join(timeout=5)
             if retention_thread is not None:
                 retention_thread.join(timeout=5)
-            await run_in_threadpool(github.shutdown, deadline)
-            executors: list[tuple[ThreadPoolExecutor, set[Future] | None]] = [
-                (jobs.executor, None)
-            ]
-            if settings.github_enabled:
-                executors.insert(0, (github.executor, github.futures))
-            await run_in_threadpool(jobs.drain, executors, deadline)
+            try:
+                await run_in_threadpool(github.shutdown, deadline)
+                executors: list[tuple[ThreadPoolExecutor, set[Future] | None]] = [
+                    (jobs.executor, None)
+                ]
+                if settings.github_enabled:
+                    executors.insert(0, (github.executor, github.futures))
+                await run_in_threadpool(jobs.drain, executors, deadline)
+            except Exception as error:
+                LOGGER.error(
+                    json.dumps(
+                        {"event": "service.drain_failed", "error": type(error).__name__}
+                    )
+                )
             release_started = time.monotonic()
             LEASE_LOGGER.info(json.dumps({"event": "service.lease_release_started"}))
             released = lease.release()
@@ -513,6 +524,8 @@ def create_app(
 
     @app.get("/api/demo/{scenario_id}")
     def demo(scenario_id: str, stage: Literal["safe", "risky", "remediated"] = "risky"):
+        if len(demos) != 9:
+            raise HTTPException(503, "demos_warming")
         if (scenario_id, stage) not in demos:
             raise HTTPException(404, "not_found")
         return demos[(scenario_id, stage)]
