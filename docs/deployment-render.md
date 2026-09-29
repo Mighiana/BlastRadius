@@ -64,14 +64,15 @@ The live endpoint confirms that the process is serving. The ready endpoint
 confirms that migrations, the service lease and demo fixtures are available.
 Then open the service in a browser and complete a real OIDC sign-in.
 
-The image demo cache is built with the default `BR_JOB_TIMEOUT`,
-`BR_MAX_BODY_BYTES`, and `BR_MAX_RESOURCES`. Overriding any of these at runtime
-logs `demo.cache_miss` with reason `settings` and rebuilds the demos in the
-background; the service continues serving and accepting webhooks while this
-happens, but `/health/ready` remains 503 until all demos are built. The cache
-generator (`python -m blastradius.server.demos`) uses the default limits and
-has no build-time override, so either keep the runtime defaults for these three
-settings or accept the background rebuild on each cold start.
+The image demo cache is built with the default `BR_MAX_RESOURCES`.
+Overriding it at runtime logs `demo.cache_miss` with reason `settings` and
+rebuilds the demos in the background; the service continues serving and
+accepting webhooks while this happens, but `/health/ready` remains 503 until
+all demos are built. `BR_JOB_TIMEOUT` and `BR_MAX_BODY_BYTES` may be overridden
+freely because they do not change completed demo results. The cache generator
+(`python -m blastradius.server.demos`) uses the default limits and has no
+build-time override, so either keep the runtime default for
+`BR_MAX_RESOURCES` or accept the background rebuild on each cold start.
 If the background build fails, `demo.build_failed` is logged and readiness
 remains 503; redeploy with a rebuilt image after correcting the failure.
 

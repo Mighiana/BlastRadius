@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Check } from 'lucide-react';
+import { Check, Minus } from 'lucide-react';
 import { plansSchema, usageSchema } from '../api';
 import { useResource } from '../hooks';
 import { useOrganization, useSession } from '../session';
@@ -12,8 +12,9 @@ const values: Record<string, string> = {
   free: 'Evaluate a first Terraform workflow with stored evidence.',
   pro: 'Review changes across several repositories with longer history.',
   team: 'Share review workflows, organization policy and audit visibility.',
-  enterprise: 'Discuss deployment, scale and configurable limits with the operator.',
+  enterprise: 'Everything in Team, plus configurable limits.',
 };
+const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`;
 
 export function PlanCards() {
   const catalog = useResource('/api/plans', plansSchema);
@@ -24,21 +25,25 @@ export function PlanCards() {
     <div className="pricing-grid">{catalog.data?.plans.map(plan => <article className={`price-card ${plan.code === 'pro' ? 'featured' : ''}`} key={plan.code}>
       <span className="eyebrow">{plan.code}</span>
       <h2>{plan.monthly_price_usd === null ? 'Custom' : `$${plan.monthly_price_usd}`}<small>{plan.code === 'free' ? 'Free plan' : plan.monthly_price_usd === null ? 'Contact the operator' : 'Proposed / month · USD'}</small></h2>
-      <p>{plan.configurable ? 'Configurable limits. Shown defaults apply until an operator configures your workspace.' : plan.assignment === 'signup' ? 'Start with your next infrastructure change.' : 'Commercial beta · assigned manually by an operator.'}</p>
       <p>{values[plan.code]}</p>
-      <ul>{[
-        `${plan.limits.analyses_per_month.toLocaleString()} analyses / month`,
-        `${plan.limits.projects} projects`, `${plan.limits.members} workspace ${plan.limits.members === 1 ? 'member' : 'members'}`,
-        `${plan.limits.retention_days} days of evidence retention`, 'JSON & Markdown reports',
-        ...(plan.features.sarif ? ['SARIF exports'] : ['SARIF requires Pro or above']),
-        ...(plan.features.advanced_policy ? ['Project policy controls'] : []),
-        ...(plan.features.team ? ['Team roles & invitations'] : []),
-        ...(plan.features.organization_policy ? ['Workspace policy'] : []),
-        ...(plan.features.audit ? ['Audit visibility'] : []),
-      ].map(text => <li key={text}><Check size={17} aria-hidden="true" />{text}</li>)}</ul>
+      <ul>{(plan.configurable ? [
+        { text: 'Everything in Team', ok: true },
+        { text: `Configurable limits (defaults: ${plan.limits.analyses_per_month.toLocaleString()} analyses, ${plural(plan.limits.projects, 'project')}, ${plural(plan.limits.members, 'member')}, ${plan.limits.retention_days} days)`, ok: true },
+        { text: 'Deployment and scale discussed with the operator', ok: true },
+      ] : [
+        { text: `${plan.limits.analyses_per_month.toLocaleString()} analyses / month`, ok: true },
+        { text: plural(plan.limits.projects, 'project'), ok: true }, { text: `${plural(plan.limits.members, 'workspace member')}`, ok: true },
+        { text: `${plan.limits.retention_days} days of evidence retention`, ok: true }, { text: 'JSON & Markdown reports', ok: true },
+        plan.features.sarif ? { text: 'SARIF exports', ok: true } : { text: 'No SARIF exports (Pro and above)', ok: false },
+        ...(plan.features.advanced_policy ? [{ text: 'Project policy controls', ok: true }] : []),
+        ...(plan.features.team ? [{ text: 'Team roles & invitations', ok: true }] : []),
+        ...(plan.features.organization_policy ? [{ text: 'Workspace policy', ok: true }] : []),
+        ...(plan.features.audit ? [{ text: 'Audit visibility', ok: true }] : []),
+      ]).map(item => <li key={item.text} className={item.ok ? undefined : 'limitation'}>{item.ok ? <Check size={17} aria-hidden="true" /> : <Minus size={17} aria-hidden="true" />}{item.text}</li>)}</ul>
       {plan.assignment === 'signup' ? originMismatch && session ? <a className="button primary" href={`${new URL(session.auth.public_url).origin}/dashboard`}>Get started at configured origin</a> : <Link className="button primary" to="/dashboard">Get started</Link>
-        : <><Link className="button primary" to="/beta">Request early access</Link><div className="checkout-status"><span>Self-service checkout</span><button className="button secondary" disabled>Coming soon</button></div><p className="footnote">Self-service upgrades and payments are unavailable. A beta request is stored for operator review; it does not guarantee access.</p></>}
+        : <Link className={`button ${plan.code === 'pro' ? 'primary' : 'secondary'}`} to="/beta">Request early access</Link>}
     </article>)}</div>
+    {catalog.data && <p className="pricing-footnote">Paid plans are operator-granted beta entitlements: self-service checkout is coming later, and a beta request does not guarantee access. Prices are proposed.</p>}
   </>;
 }
 function Usage() {
@@ -57,12 +62,12 @@ function Usage() {
     </section>}</>;
 }
 export function Pricing() {
-  return <div className="container page"><PageHeading eyebrow="COMMERCIAL BETA" title="A plan for every review.">Proposed pricing. No payment processing. Start on Free; paid plans require operator-granted beta access.</PageHeading><PlanCards />
-    <section className="panel pricing-note"><h2>What counts as an analysis?</h2><p>A job accepted for processing counts toward the monthly UTC quota, including a job that later fails. Rejected submissions do not count. Public demos do not use workspace quota.</p><p>All plans provide static evidence, not proof of security. AWS credentials are not required; BlastRadius does not deploy infrastructure.</p><Link className="text-link" to="/guide">Read the guide</Link></section>
-    <section className="panel"><h2>Before you start</h2><div className="faq">{[
+  return <div className="container page"><PageHeading eyebrow="COMMERCIAL BETA" title="A plan for every review.">Start on Free. Paid plans are granted by the operator during the beta.</PageHeading><PlanCards />
+    <section className="panel pricing-note"><h2>Before you start</h2><div className="faq">{[
+      ['What counts as an analysis?', 'A job accepted for processing counts toward the monthly UTC quota, including a job that later fails. Rejected submissions and public demos do not count.'],
       ['Do I need AWS credentials?', 'No. Bring baseline and candidate Terraform files, or a Terraform plan JSON generated in your trusted environment. Static analysis does not require AWS access.'],
       ['Does BlastRadius deploy or execute anything?', 'It does not deploy infrastructure, run Terraform or providers, or execute candidate repository scripts. Suggested patches require human review.'],
-      ['What does SAFE mean?', 'No new modeled blocking findings detected. This is a bounded result under the selected model and policy, not proof that infrastructure is secure. Existing exposure and coverage gaps may remain.'],
+      ['What does NO NEW PATHS mean?', 'The change adds no new modeled path to sensitive data under the selected model and policy. It is not proof that infrastructure is secure: existing exposure and coverage gaps may remain.'],
       ['Can I use GitHub Actions without the SaaS?', 'Yes. Use the documented CLI and Actions workflow in your own environment. A SaaS account and GitHub App installation are not required; CI results do not automatically enter workspace history.'],
       ['How long are results retained?', 'The server catalog above is authoritative. Reports become unavailable after the current plan’s retention window. Operators manage physical cleanup and backups; deleting a report does not erase copies already exported.'],
       ['What does private beta mean?', 'The product is still being evaluated with Terraform teams. Proposed paid prices are subject to validation, payments are disabled, and beta interest does not create an account, promise an invitation or send email.'],

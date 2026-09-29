@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import logging
 import time
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -11,9 +13,11 @@ from blastradius.server.beta import feedback_payload
 from blastradius.server.config import Settings
 from blastradius.server.db import Database
 from blastradius.server.events import RETENTION_DAYS, event_summary
+from blastradius.server.failures import FailureCode
 from blastradius.server.models import (
     Analysis,
     AnalysisFeedback,
+    AnalysisStatus,
     BetaInterest,
     LoginSession,
     Organization,
@@ -22,7 +26,7 @@ from blastradius.server.models import (
 )
 from blastradius.server.persistence import audit
 from blastradius.server.plans import catalog
-from blastradius.server.quotas import usage_payload
+from blastradius.server.quotas import usage_payloads
 
 RESOURCES = (
     "users",
@@ -35,21 +39,8 @@ RESOURCES = (
     "feedback",
     "events",
 )
-FAILURE_CODES = frozenset(
-    (
-        "analysis_failed",
-        "analysis_timeout",
-        "dispatch_failed",
-        "github_analysis_failed",
-        "invalid_analysis_input",
-        "invalid_worker_result",
-        "resource_limit_exceeded",
-        "result_too_large",
-        "server_restarted",
-        "service_lease_lost",
-        "worker_failed",
-    )
-)
+FAILURE_CODES = frozenset(FailureCode)
+logger = logging.getLogger(__name__)
 
 
 def is_platform_admin(user: User | None, login: LoginSession | None, settings: Settings) -> bool:
@@ -64,6 +55,13 @@ def is_platform_admin(user: User | None, login: LoginSession | None, settings: S
         and user.email
         and user.id in settings.web_admin_user_ids
     )
+
+
+def failure_category(row: Analysis) -> FailureCode:
+    if row.error in FAILURE_CODES:
+        return FailureCode(row.error)
+    logger.warning(json.dumps({"event": "operator.unknown_failure_code", "analysis_id": row.id}))
+    return FailureCode.ANALYSIS_FAILED
 
 
 def inspect_resource(
@@ -94,15 +92,19 @@ def inspect_resource(
             for row in session.scalars(select(User).order_by(User.id).limit(limit).offset(offset))
         ]
     if resource in ("organizations", "usage"):
+        orgs = list(
+            session.scalars(
+                select(Organization).order_by(Organization.id).limit(limit).offset(offset)
+            )
+        )
+        usage = usage_payloads(session, orgs)
         return [
             {
                 "id": row.id,
-                **usage_payload(session, row),
+                **usage[row.id],
                 **({"name": row.name} if trusted_cli else {"created_at": row.created_at}),
             }
-            for row in session.scalars(
-                select(Organization).order_by(Organization.id).limit(limit).offset(offset)
-            )
+            for row in orgs
         ]
     if resource == "projects":
         return [
@@ -122,12 +124,12 @@ def inspect_resource(
                 "id": row.id,
                 "organization_id": row.organization_id,
                 "project_id": row.project_id,
-                "error": row.error if row.error in FAILURE_CODES else "analysis_failed",
+                "error": failure_category(row),
                 **(
                     {}
                     if trusted_cli
                     else {
-                        "status": "failed",
+                        "status": AnalysisStatus.FAILED,
                         "created_at": row.created_at,
                         "completed_at": row.completed_at,
                     }
@@ -135,7 +137,7 @@ def inspect_resource(
             }
             for row in session.scalars(
                 select(Analysis)
-                .where(Analysis.status == "failed")
+                .where(Analysis.status == AnalysisStatus.FAILED)
                 .order_by(Analysis.created_at.desc(), Analysis.id)
                 .limit(limit)
                 .offset(offset)
