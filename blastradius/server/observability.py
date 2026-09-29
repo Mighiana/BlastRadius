@@ -8,6 +8,11 @@ from datetime import datetime, timezone
 from blastradius.server.config import Settings
 
 
+def log_event(logger: logging.Logger, level: int, event: str, **fields: object) -> None:
+    """Emit one structured JSON log line for JsonFormatter to merge into its record."""
+    logger.log(level, json.dumps({"event": event, **fields}, sort_keys=True), stacklevel=2)
+
+
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, object] = {
