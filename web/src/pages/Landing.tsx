@@ -6,7 +6,7 @@ const HOPS = [
   { icon: Shield, name: 'Web SG', text: 'Now allows SSH from 0.0.0.0/0' },
   { icon: Cpu, name: 'EC2 instance', text: 'Becomes reachable' },
   { icon: KeyRound, name: 'IAM role', text: 'Grants s3:GetObject' },
-  { icon: Database, name: 'Customer data', text: 'Sensitive bucket exposed', sensitive: true },
+  { icon: Database, name: 'Customer data', text: 'Sensitive bucket reachable', sensitive: true },
 ];
 
 export default function Landing() {
@@ -14,9 +14,9 @@ export default function Landing() {
     <section className="hero container">
       <div className="hero-copy"><div className="hero-kicker"><span className="dot" /> TERRAFORM SECURITY ANALYSIS · IN THE PULL REQUEST</div>
         <h1>See what your <span>Terraform change</span> makes reachable.</h1>
-        <p>One line in a pull request can open a path to your customer data. BlastRadius shows that path and blocks the merge.</p>
+        <p>One line in a pull request can open a path to your customer data. BlastRadius shows that path and returns BLOCK CHANGE before merge.</p>
         <div className="button-row"><Link className="button primary large" to="/demo">Try the live demo<ArrowRight size={18} aria-hidden="true" /></Link><Link className="button secondary large" to="/guide#github"><GitPullRequest size={18} aria-hidden="true" />Set up the PR check</Link></div>
-        <ul className="hero-assurances"><li><Check size={14} aria-hidden="true" />No cloud credentials</li><li><Check size={14} aria-hidden="true" />Nothing is executed or deployed</li><li><Check size={14} aria-hidden="true" />Works in GitHub Actions and the CLI</li></ul>
+        <ul className="hero-assurances"><li><Check size={14} aria-hidden="true" />No cloud credentials</li><li><Check size={14} aria-hidden="true" />No Terraform, providers or repository code executed</li><li><Check size={14} aria-hidden="true" />Works in GitHub Actions and the CLI</li></ul>
       </div>
       <figure className="product-preview story" aria-label="Example: a one-line Terraform change opens a path from the internet to customer data">
         <div className="preview-top"><span className="preview-brand"><GitCompareArrows size={16} aria-hidden="true" /> main.tf · pull request #42</span><span className="tag">BUNDLED DEMO</span></div>

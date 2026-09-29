@@ -77,6 +77,8 @@ for (const width of widths) {
       await expect(page.getByRole('group', { name: 'Demo scenario' }).getByRole('button')).toHaveCount(3);
       for (const scenario of ['Public SSH exposure', 'Overly broad IAM permission', 'Public sensitive S3 bucket']) {
         await page.getByRole('group', { name: 'Demo scenario' }).getByRole('button', { name: new RegExp(scenario) }).click();
+        await expect(page.getByLabel('Analysis decision').getByText('BLOCK CHANGE', { exact: true })).toBeVisible();
+        await page.getByRole('button', { name: 'Reset baseline' }).click();
         await expect(page.getByLabel('Analysis decision').getByText('NO NEW PATHS', { exact: true })).toBeVisible();
         await page.getByRole('button', { name: 'Simulate risky change' }).click();
         await expect(page.getByLabel('Analysis decision').getByText('BLOCK CHANGE', { exact: true })).toBeVisible();
