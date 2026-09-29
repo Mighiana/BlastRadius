@@ -798,6 +798,21 @@ def test_api_response_size_redirect_and_request_budget(settings):
             api.request("GET", "//evil.test/token", TOKEN)
 
 
+def test_api_request_stops_when_stop_callable_changes_during_response(settings):
+    calls = 0
+
+    def stop():
+        nonlocal calls
+        calls += 1
+        return calls > 1
+
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, content=b"{}"))
+    with GitHubAPI(settings, transport, stop=stop) as api:
+        with pytest.raises(GitHubError, match="service_stopping"):
+            api.request("GET", "/resource", TOKEN)
+    assert calls >= 2
+
+
 def test_retention_prevents_late_publication_and_run_visibility(harness):
     app, client, provider, project, _ = harness
     send(harness)
@@ -1053,6 +1068,36 @@ def test_consecutive_interruptions_consume_attempts(harness, monkeypatch):
             "github_attempts_exhausted",
             None,
         )
+
+
+def test_service_stopping_keeps_inflight_delivery_queued(harness, monkeypatch):
+    app, _, _, _, _ = harness
+
+    def stopping(*_args):
+        assert app.state.jobs.stopping.is_set()
+        raise GitHubError("service_stopping", retryable=True)
+
+    monkeypatch.setattr(app.state.github, "process", stopping)
+    app.state.jobs.stopping.set()
+    assert send(harness).json() == {"status": "queued"}
+    drain(app)
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, delivery.error) == ("queued", None)
+    app.state.github.recover()
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, delivery.error) == ("pending", "server_restarted")
+
+
+def test_failed_submission_requeues_delivery(harness):
+    app, _, _, _, _ = harness
+    app.state.github.executor.shutdown()
+    response = send(harness)
+    assert response.status_code == 202
+    assert response.json() == {"status": "deferred"}
+    with app.state.db.session() as session:
+        assert session.get(GitHubDelivery, "delivery-1").status == "pending"
 
 
 def test_redelivery_rearms_rejected_payload_unavailable_row(harness):

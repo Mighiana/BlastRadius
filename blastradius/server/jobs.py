@@ -246,7 +246,6 @@ class JobManager:
         futures: set[Future],
         deadline: float,
         cancel_unstarted: bool,
-        wait_running: bool = True,
     ) -> None:
         """Let running work finish until ``deadline``, then stop it; never wait unbounded.
 
@@ -257,7 +256,7 @@ class JobManager:
         executor.shutdown(wait=False, cancel_futures=cancel_unstarted)
         wait(set(futures), timeout=max(0.0, deadline - time.monotonic()))
         self.stopping.set()
-        executor.shutdown(wait=wait_running)
+        executor.shutdown(wait=True)
 
     def shutdown(self, deadline: float | None = None) -> None:
         if deadline is None:

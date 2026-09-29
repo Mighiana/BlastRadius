@@ -54,7 +54,9 @@ class _Stopping(Exception):
 class GitHubService:
     def __init__(self, db: Database, settings: Settings, jobs: JobManager):
         self.db, self.settings, self.jobs = db, settings, jobs
-        self.api_factory: Callable[[], GitHubAPI] = lambda: GitHubAPI(settings)
+        self.api_factory: Callable[[], GitHubAPI] = lambda: GitHubAPI(
+            settings, stop=self.jobs.stopping.is_set
+        )
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="github")
         self.lock = threading.Lock()
         self.wake = threading.Event()
@@ -112,7 +114,6 @@ class GitHubService:
             self.jobs.running,
             deadline,
             cancel_unstarted=True,
-            wait_running=False,
         )
 
     def receive(
@@ -306,6 +307,14 @@ class GitHubService:
                 )
             except RuntimeError:
                 self.jobs.slots.release()
+                try:
+                    with self.db.session(write=True) as session:
+                        delivery = session.get(GitHubDelivery, delivery_id)
+                        if delivery and delivery.status == "queued":
+                            delivery.status = "pending"
+                except LeaseLost:
+                    pass
+                self.wake.set()
                 return self._deferred(delivery_id, "service_stopping")
             return {"status": "queued"}
 
@@ -389,13 +398,16 @@ class GitHubService:
         except (LeaseLost, _Stopping):
             status = None
         except GitHubError as exc:
-            status = "retryable" if exc.retryable or exc.uncertain else "rejected"
-            error = exc.code
-            if exc.code == "github_installation_unavailable":
-                with self.db.session(write=True) as session:
-                    connection = session.get(RepositoryConnection, connection_id)
-                    if connection:
-                        connection.status = "revoked"
+            if exc.code == "service_stopping":
+                status = None
+            else:
+                status = "retryable" if exc.retryable or exc.uncertain else "rejected"
+                error = exc.code
+                if exc.code == "github_installation_unavailable":
+                    with self.db.session(write=True) as session:
+                        connection = session.get(RepositoryConnection, connection_id)
+                        if connection:
+                            connection.status = "revoked"
         except Exception:
             status, error = "retryable", "github_processing_failed"
         finally:
