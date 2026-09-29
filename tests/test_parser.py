@@ -86,3 +86,14 @@ def test_demo_configs_differ_by_exactly_one_line():
     assert changed[0][1].strip() == 'cidr_blocks = ["0.0.0.0/0"]'
     # Guard against the files drifting apart anywhere else.
     assert len(list(difflib.unified_diff(safe, vulnerable, n=0, lineterm=""))) == 5
+
+
+def test_repeated_policy_parses_are_independent_copies():
+    policy = '{"Statement": [{"Effect": "Allow", "Action": ["s3:GetObject"], "Resource": "${aws_s3_bucket.a.arn}"}]}'
+    first = parse_policy_document(policy)
+    first["Statement"][0]["Action"].append("s3:*")
+    first["Statement"].append({"Effect": "Deny"})
+    first["Version"] = "mutated"
+    second = parse_policy_document(policy)
+    assert second == {"Statement": [{"Effect": "Allow", "Action": ["s3:GetObject"], "Resource": "${aws_s3_bucket.a.arn}"}]}
+    assert second["Statement"][0]["Resource"].addresses == ("aws_s3_bucket.a",)
