@@ -12,7 +12,7 @@ from typing import Dict, List, Tuple
 
 from blastradius.graph.attack_paths import AnalysisResult
 from blastradius.graph.graph_builder import node_of
-from blastradius.parser.models import AttackPath, GraphEdge, Risk
+from blastradius.parser.models import AttackPath, GraphEdge
 from blastradius.security import explain
 
 
@@ -182,7 +182,3 @@ def highlight_edges(diff: GraphDiff) -> List[Tuple[str, str]]:
             if key not in edges:
                 edges.append(key)
     return edges
-
-
-def worst_risk(*results: AnalysisResult) -> Risk:
-    return Risk.max(*[r.risk_level for r in results]) if results else Risk.LOW

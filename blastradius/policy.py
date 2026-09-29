@@ -88,9 +88,6 @@ class Policy:
         return f"{self.source}: {detail}"
 
 
-DEFAULT_POLICY = Policy()
-
-
 def _coerce_bool(value: Any, key: str, warnings: List[str], fallback: bool) -> bool:
     if isinstance(value, bool):
         return value
