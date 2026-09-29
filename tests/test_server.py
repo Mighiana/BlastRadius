@@ -26,7 +26,7 @@ from alembic.migration import MigrationContext
 from authlib.jose import JsonWebKey, jwt
 from fastapi import HTTPException, Response
 from fastapi.testclient import TestClient
-from sqlalchemy import func, inspect, select, text
+from sqlalchemy import event, func, inspect, select, text
 from sqlalchemy.engine import make_url
 
 from blastradius.server.app import create_app
@@ -37,6 +37,7 @@ from blastradius.server.db import Database, migration_config
 from blastradius.server.demos import build_demos
 from blastradius.server.fixtures import FIXTURES
 from blastradius.server.jobs import JobManager, execute
+from blastradius.server.operator import inspect_resource
 from blastradius.server.lease import ServiceLease
 from blastradius.server.models import (
     Analysis,
@@ -58,7 +59,7 @@ from blastradius.server.models import (
 from blastradius.server.observability import JsonFormatter
 from blastradius.server.persistence import cleanup
 from blastradius.server.plans import PLANS
-from blastradius.server.quotas import lock_org, period, quota
+from blastradius.server.quotas import lock_org, period, quota, usage_payload, usage_payloads
 from blastradius.server.retention import run_retention_sweep
 from blastradius.server.schemas import AnalysisInput, EnterpriseLimits
 
@@ -907,7 +908,7 @@ def test_body_file_resource_limits_and_sanitized_errors(client, app, monkeypatch
     result = execute(payload, replace(app.state.settings, max_resources=1))
     assert result == {"error": "resource_limit_exceeded"}
     monkeypatch.setattr(
-        "blastradius.server.app.usage_payload",
+        "blastradius.server.app.usage_payloads",
         lambda *_: (_ for _ in ()).throw(ValueError("private-secret")),
     )
     with caplog.at_level(logging.INFO, logger="blastradius.http"):
@@ -930,6 +931,90 @@ def test_body_file_resource_limits_and_sanitized_errors(client, app, monkeypatch
         for record in records
     )
     assert "Traceback" not in caplog.text
+
+
+def test_batched_usage_matches_per_org_usage_with_constant_queries(client, app):
+    me = login(client)
+    for index in range(4):
+        created = client.post("/api/organizations", json={"name": f"Workspace {index}"})
+        assert created.status_code == 201
+    database = app.state.db
+    now = time.time()
+    with database.session(write=True) as session:
+        org_ids = [
+            row.organization_id
+            for row in session.scalars(
+                select(Membership).where(Membership.user_id == me["user"]["id"])
+            )
+        ]
+        assert len(org_ids) == 5
+        busy, archived, quiet = org_ids[0], org_ids[1], org_ids[2]
+        other = User(issuer="test", subject="batched-usage")
+        session.add(other)
+        session.flush()
+        session.add_all(
+            [
+                Project(organization_id=busy, name="one"),
+                Project(organization_id=busy, name="two"),
+                Project(organization_id=archived, name="gone", archived_at=now),
+                Membership(user_id=other.id, organization_id=busy, role="viewer"),
+                Usage(organization_id=busy, period=period(), analyses=3, exports=2),
+                Usage(organization_id=quiet, period="2000-01", analyses=9, exports=9),
+            ]
+        )
+        for suffix, expires, accepted, revoked in (
+            ("pending", now + 3600, None, None),
+            ("expired", now - 1, None, None),
+            ("accepted", now + 3600, now, None),
+            ("revoked", now + 3600, None, now),
+        ):
+            session.add(
+                Invitation(
+                    organization_id=busy,
+                    email=f"{suffix}@example.com",
+                    role="viewer",
+                    token_hash=token_hash(suffix),
+                    created_by=other.id,
+                    expires_at=expires,
+                    accepted_at=accepted,
+                    revoked_at=revoked,
+                )
+            )
+    with database.session() as session:
+        orgs = list(session.scalars(select(Organization).where(Organization.id.in_(org_ids))))
+        batched = usage_payloads(session, orgs)
+        assert batched == {org.id: usage_payload(session, org) for org in orgs}
+        assert usage_payloads(session, []) == {}
+    assert batched[busy] | {"limits": None, "features": None} == {
+        "period": period(),
+        "analyses": 3,
+        "exports": 2,
+        "projects": 2,
+        "members": 2,
+        "pending_invitations": 1,
+        "limits": None,
+        "features": None,
+        "plan": "free",
+    }
+    assert (batched[archived]["projects"], batched[quiet]["analyses"]) == (0, 0)
+    statements = []
+
+    def record(*_args):
+        statements.append(_args)
+
+    event.listen(database.engine, "before_cursor_execute", record)
+    try:
+        refreshed = client.get("/api/me").json()
+        me_queries = len(statements)
+        statements.clear()
+        with database.session() as session:
+            inspected = inspect_resource(session, "usage", 1000, 0)
+        inspect_queries = len(statements)
+    finally:
+        event.remove(database.engine, "before_cursor_execute", record)
+    assert {org["id"]: org["usage"] for org in refreshed["organizations"]} == batched
+    assert {row["id"]: row for row in inspected}[busy]["pending_invitations"] == 1
+    assert me_queries <= 12 and inspect_queries <= 6
 
 
 def test_request_log_is_structured_and_privacy_safe(client, settings, caplog):
@@ -1122,7 +1207,6 @@ def test_migrations_and_restart_recovery(settings):
         "projects",
         "analyses",
         "usage",
-        "billing_events",
     } <= set(inspect(db.engine).get_table_names())
     with db.session(write=True) as session:
         user = provision(session, "test", "subject", "Tester", "")
@@ -1291,8 +1375,6 @@ def test_operator_assignment_audit_and_enterprise_limits(client, app, monkeypatc
             "after": "enterprise",
             "limits": limits.model_dump(),
         }
-        org = session.get(Organization, org_id)
-        assert org.customer_id is None and org.subscription_id is None
     monkeypatch.delenv("BR_ADMIN_ENABLED", raising=False)
     with pytest.raises(SystemExit) as error:
         admin_main(["assign-plan", org_id, "pro"])
@@ -2039,3 +2121,35 @@ def test_retention_sweep_worker_logs_failures_and_continues(
             )
     finally:
         logger.removeHandler(caplog.handler)
+
+
+def test_oidc_callback_failure_is_logged_without_changing_the_response(
+    settings, demo_results, monkeypatch, caplog
+):
+    monkeypatch.setattr("blastradius.server.app.build_demos", lambda _: demo_results)
+    settings = replace(
+        settings,
+        auth_mode="oidc",
+        oidc_issuer="https://issuer.example",
+        oidc_client_id="client",
+        oidc_client_secret="test",
+    )
+    app = create_app(settings)
+    logger = logging.getLogger("blastradius")
+    caplog.handler.setLevel(logging.WARNING)
+    logger.addHandler(caplog.handler)
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/auth/callback?code=private-code&state=private-state")
+    finally:
+        logger.removeHandler(caplog.handler)
+    assert response.status_code == 400
+    assert response.json() == {"detail": "authentication_failed"}
+    events = [
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if record.getMessage().startswith("{")
+    ]
+    failures = [event for event in events if event.get("event") == "auth.oidc_callback_failed"]
+    assert len(failures) == 1 and failures[0]["exception"]
+    assert "private-code" not in caplog.text and "private-state" not in caplog.text

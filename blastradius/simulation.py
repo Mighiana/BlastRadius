@@ -11,7 +11,7 @@ from __future__ import annotations
 import difflib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Tuple
 
 from blastradius.security.hcl_edit import broaden_s3_policy, widen_admin_ingress
 
@@ -107,15 +107,3 @@ def simulate(
 
     result.diff = "".join(diff_chunks)
     return result
-
-
-def available_simulations(source_dir: PathLike) -> List[Simulation]:
-    """Which registered simulations can actually be applied to this directory."""
-    combined = "\n".join(
-        p.read_text(encoding="utf-8") for p in sorted(Path(source_dir).glob("*.tf"))
-    )
-    return [sim for sim in SIMULATIONS.values() if sim.applies_to(combined)]
-
-
-def get(simulation_id: str) -> Optional[Simulation]:
-    return SIMULATIONS.get(simulation_id)

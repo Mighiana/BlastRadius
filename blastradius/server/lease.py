@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import fcntl
+import json
+import logging
 import threading
 from pathlib import Path
 from typing import IO
@@ -12,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from blastradius.server.db import Database, LeaseLost
 
+logger = logging.getLogger("blastradius.server.lease")
 
 OWNER = """
 SELECT EXISTS (
@@ -72,6 +75,7 @@ class ServiceLease:
         with self.lock:
             if self.lost.is_set():
                 return False
+            detail: dict[str, str] = {"reason": "lock_file_closed"}
             if self.connection is not None:
                 try:
                     if self.connection.closed or self.connection.invalidated:
@@ -80,10 +84,14 @@ class ServiceLease:
                     self.connection.commit()
                     if owner:
                         return True
-                except (SQLAlchemyError, LeaseLost):
-                    pass
+                    detail = {"reason": "lock_not_held"}
+                except LeaseLost:
+                    detail = {"reason": "connection_closed"}
+                except SQLAlchemyError as error:
+                    detail = {"reason": "probe_failed", "exception": type(error).__name__}
             elif self.file and not self.file.closed:
                 return True
+            logger.warning(json.dumps({"event": "service.lease_lost", **detail}))
             self.lost.set()
             return False
 
@@ -117,8 +125,15 @@ class ServiceLease:
                             ).scalar()
                         )
                         self.connection.commit()
-                except SQLAlchemyError:
-                    pass
+                except SQLAlchemyError as error:
+                    logger.warning(
+                        json.dumps(
+                            {
+                                "event": "service.lease_release_failed",
+                                "exception": type(error).__name__,
+                            }
+                        )
+                    )
                 finally:
                     self.connection.close()
                     self.connection = None

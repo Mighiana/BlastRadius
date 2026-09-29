@@ -37,6 +37,18 @@ def test_demo_cache_miss_reasons_are_logged(tmp_path, demo_results, monkeypatch,
         }
 
         write_demo_cache(cache, settings)
+        runtime_overrides = Settings(
+            data_dir=settings.data_dir,
+            job_timeout_seconds=settings.job_timeout_seconds + 1,
+            max_body_bytes=settings.max_body_bytes + 1,
+        )
+        assert len(load_demo_cache(cache, runtime_overrides)) == 9
+        assert json.loads(caplog.records[-1].getMessage()) == {
+            "event": "demo.cache_loaded",
+            "count": 9,
+        }
+
+        write_demo_cache(cache, settings)
         mismatched = Settings(data_dir=settings.data_dir, max_resources=settings.max_resources + 1)
         assert load_demo_cache(cache, mismatched) is None
         assert json.loads(caplog.records[-1].getMessage()) == {
