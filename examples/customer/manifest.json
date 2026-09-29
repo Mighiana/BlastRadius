@@ -1,6 +1,6 @@
 {
   "analyzer_version": "0.1.0",
-  "engine_source_sha256": "51bd656c6482c62e2e01720ec7db378cf1b136bf8b91b6aec7f0d7ed24fc7da7",
+  "engine_source_sha256": "d9474a612c134d2aece3cb1d3f07e92b4e0ac47ae22b073f38d3b0f0b2ee9da2",
   "invocation": "python -I -m blastradius.cli",
   "working_directory": "examples/customer",
   "runs": [
