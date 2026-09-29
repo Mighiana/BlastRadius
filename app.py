@@ -11,9 +11,9 @@ import html
 import json
 import os
 import re
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Dict, List, Tuple, cast
+from typing import Callable, Dict, List, Optional, Tuple, TypeVar, cast
 
 import networkx as nx
 import streamlit as st
@@ -24,7 +24,7 @@ from blastradius.graph.attack_paths import AnalysisResult
 from blastradius.graph.diff_engine import GraphDiff, Verdict, highlight_edges, highlight_nodes
 from blastradius.parser import parse_directory
 from blastradius.report import build_report, responsible_change
-from blastradius.policy import PolicyError, discover_policy
+from blastradius.policy import Policy, PolicyError, discover_policy
 from blastradius.parser.models import AttackPath, GraphEdge, NodeType, ResourceNode, Risk
 from blastradius import gitsource, scenarios, simulation
 from blastradius.security import remediation
@@ -227,19 +227,43 @@ def validated_directory(directory: Path) -> Path:
     return workspace().validate_input(directory, BUNDLED_DIRS, trusted=trusted_local_enabled())
 
 
-def analyze_dir(directory: Path, label: str) -> AnalysisResult:
-    directory = validated_directory(directory)
+_T = TypeVar("_T")
+DirectoryKey = Tuple[str, str]
+
+
+def directory_key(directory: Path) -> DirectoryKey:
     fingerprint = hashlib.sha256()
     for path in sorted(directory.glob("*.tf")):
         fingerprint.update(path.name.encode("utf-8"))
         fingerprint.update(path.read_bytes())
-    cache = st.session_state.setdefault("analysis_cache", {})
-    key = (str(directory), fingerprint.hexdigest())
+    return str(directory), fingerprint.hexdigest()
+
+
+def session_cached(name: str, key: object, compute: Callable[[], _T]) -> _T:
+    cache = st.session_state.setdefault(name, {})
     if key not in cache:
         if len(cache) >= 16:
             cache.clear()
-        cache[key] = analyze(build_graph(parse_directory(directory)), label)
-    return cache[key]
+        cache[key] = compute()
+    return cast(_T, cache[key])
+
+
+def analyze_dir(directory: Path, label: str) -> AnalysisResult:
+    directory = validated_directory(directory)
+    return session_cached(
+        "analysis_cache",
+        directory_key(directory),
+        lambda: analyze(build_graph(parse_directory(directory)), label),
+    )
+
+
+def remediation_plan(directory: Path) -> remediation.RemediationPlan:
+    directory = validated_directory(directory)
+    return session_cached(
+        "remediation_cache",
+        directory_key(directory),
+        lambda: remediation.generate_safer_config(directory),
+    )
 
 
 def new_job(purpose: str) -> Path:
@@ -667,12 +691,38 @@ def section_change(diff: GraphDiff, before_dir: Path, after_dir: Path) -> None:
     render_coverage_diagnostics(diff)
 
 
-def section_pr_report(diff: GraphDiff, decision: DeploymentDecision, before_dir: Path, after_dir: Path) -> None:
+@dataclass(frozen=True)
+class ReportExports:
+    text: str
+    markdown: str
+    json: str
+    sarif: str
+
+
+def report_exports(
+    diff: GraphDiff,
+    decision: DeploymentDecision,
+    before_dir: Path,
+    after_dir: Path,
+    plan: remediation.RemediationPlan,
+    policy: Policy,
+) -> ReportExports:
+    def build() -> ReportExports:
+        text = build_report(diff, decision, before_dir, after_dir)
+        return ReportExports(
+            text=text,
+            markdown=report_markdown(text),
+            json=json.dumps(export_payload(diff, decision, before_dir, after_dir, plan), indent=2),
+            sarif=json.dumps(build_sarif(diff, decision), indent=2),
+        )
+
+    key = (directory_key(before_dir), directory_key(after_dir), repr(policy))
+    return session_cached("report_cache", key, build)
+
+
+def section_pr_report(exports: ReportExports, decision: DeploymentDecision) -> None:
     """Priority 5: the comment BlastRadius would post on the pull request."""
     heading("Report & exports")
-    text = build_report(diff, decision, before_dir, after_dir)
-    markdown_download = report_markdown(text)
-    payload = export_payload(diff, decision, before_dir, after_dir)
     status_color = "#34d399" if decision.passed else "#f87171"
     st.markdown(
         f'<span class="br-note">This is the check BlastRadius would post on the PR. '
@@ -681,10 +731,10 @@ def section_pr_report(diff: GraphDiff, decision: DeploymentDecision, before_dir:
         unsafe_allow_html=True,
     )
     # st.code gives a one-click copy button in the top-right corner.
-    st.code(text, language="markdown")
+    st.code(exports.text, language="markdown")
     st.download_button(
         "Download PR report",
-        data=markdown_download,
+        data=exports.markdown,
         file_name="blastradius-pr-report.md",
         mime="text/markdown",
         icon=":material/download:",
@@ -692,14 +742,14 @@ def section_pr_report(diff: GraphDiff, decision: DeploymentDecision, before_dir:
     )
     st.download_button(
         "Download JSON",
-        data=json.dumps(payload, indent=2),
+        data=exports.json,
         file_name="blastradius-result.json",
         mime="application/json",
         key="download_json",
     )
     st.download_button(
         "Download SARIF",
-        data=json.dumps(build_sarif(diff, decision), indent=2),
+        data=exports.sarif,
         file_name="blastradius-result.sarif",
         mime="application/json",
         key="download_sarif",
@@ -711,14 +761,19 @@ def section_pr_report(diff: GraphDiff, decision: DeploymentDecision, before_dir:
 
 
 def export_payload(
-    diff: GraphDiff, decision: DeploymentDecision, before_dir: Path, after_dir: Path
+    diff: GraphDiff,
+    decision: DeploymentDecision,
+    before_dir: Path,
+    after_dir: Path,
+    plan: Optional[remediation.RemediationPlan] = None,
 ) -> dict:
+    plan = plan or remediation.generate_safer_config(after_dir)
     return {
         **json_payload(diff, decision),
         "responsible_change": responsible_change(before_dir, after_dir),
         "recommendations": [
             {"title": rec.title, "detail": rec.detail, "severity": rec.severity.value}
-            for rec in remediation.generate_safer_config(after_dir).recommendations
+            for rec in plan.recommendations
         ],
         "limitations": list(LIMITATIONS),
     }
@@ -730,9 +785,8 @@ def report_markdown(text: str) -> str:
     )
 
 
-def section_remediation(after_dir: Path) -> None:
+def section_remediation(after_dir: Path, plan: remediation.RemediationPlan) -> None:
     heading("Remediation")
-    plan = remediation.generate_safer_config(validated_directory(after_dir))
 
     if not plan.recommendations:
         st.success("No remediation needed for this configuration.", icon=":material/task_alt:")
@@ -1039,9 +1093,8 @@ def path_summary_line(diff: GraphDiff) -> None:
                    icon=":material/verified_user:")
 
 
-def primary_action(after_dir: Path, key: str) -> None:
+def primary_action(after_dir: Path, plan: remediation.RemediationPlan, key: str) -> None:
     """The single most useful next step, surfaced on the Overview tab."""
-    plan = remediation.generate_safer_config(validated_directory(after_dir))
     if plan.can_autofix:
         if st.button(
             "Generate Safer Configuration & Re-analyze",
@@ -1059,7 +1112,9 @@ def primary_action(after_dir: Path, key: str) -> None:
         )
 
 
-def render_overview(diff: GraphDiff, decision: DeploymentDecision, after_dir: Path) -> None:
+def render_overview(
+    diff: GraphDiff, decision: DeploymentDecision, after_dir: Path, plan: remediation.RemediationPlan
+) -> None:
     st.markdown(decision_banner(decision, diff), unsafe_allow_html=True)
     if not diff.complete:
         for item in coverage_diagnostics(diff):
@@ -1071,17 +1126,22 @@ def render_overview(diff: GraphDiff, decision: DeploymentDecision, after_dir: Pa
     st.markdown(summary_cards(diff.before, diff.after), unsafe_allow_html=True)
     heading("What became reachable")
     path_summary_line(diff)
-    primary_action(after_dir, key="apply_fix_primary")
+    primary_action(after_dir, plan, key="apply_fix_primary")
 
 
 def render_tabs(
-    diff: GraphDiff, decision: DeploymentDecision, before_dir: Path, after_dir: Path
+    diff: GraphDiff,
+    decision: DeploymentDecision,
+    before_dir: Path,
+    after_dir: Path,
+    plan: remediation.RemediationPlan,
+    policy: Policy,
 ) -> None:
     overview, attack_path, infra_diff, pr_report, remediate = st.tabs(
         ["Overview", "Attack Path", "Infrastructure Diff", "Report & exports", "Remediation"]
     )
     with overview:
-        render_overview(diff, decision, after_dir)
+        render_overview(diff, decision, after_dir, plan)
     with attack_path:
         section_graphs(diff)
         section_paths(diff)
@@ -1089,13 +1149,17 @@ def render_tabs(
         section_change(diff, before_dir, after_dir)
         section_details(diff)
     with pr_report:
-        section_pr_report(diff, decision, before_dir, after_dir)
+        section_pr_report(report_exports(diff, decision, before_dir, after_dir, plan, policy), decision)
     with remediate:
-        section_remediation(after_dir)
+        section_remediation(after_dir, plan)
 
 
 def render_demo_mode(
-    diff: GraphDiff, decision: DeploymentDecision, before_dir: Path, after_dir: Path
+    diff: GraphDiff,
+    decision: DeploymentDecision,
+    before_dir: Path,
+    after_dir: Path,
+    plan: remediation.RemediationPlan,
 ) -> None:
     """Phase 7: a single uncluttered screen for a live presentation."""
     st.markdown(decision_banner(decision, diff), unsafe_allow_html=True)
@@ -1113,7 +1177,7 @@ def render_demo_mode(
             "BLOCK CHANGE → SAFE TO MERGE — re-analysis confirms the attack path is eliminated."
         )
     heading("Remediation")
-    primary_action(after_dir, key="demo_apply_fix")
+    primary_action(after_dir, plan, key="demo_apply_fix")
 
 
 def render_app() -> None:
@@ -1174,6 +1238,7 @@ def render_app() -> None:
         st.error(markdown_text(error))
         return
     decision = decide(diff, policy)
+    plan = remediation_plan(after_dir)
     if policy.source:
         st.caption(markdown_text(policy.describe()))
     for note in decision.policy_notes:
@@ -1181,9 +1246,9 @@ def render_app() -> None:
             st.caption(markdown_text(note))
 
     if st.session_state.get("demo_mode"):
-        render_demo_mode(diff, decision, before_dir, after_dir)
+        render_demo_mode(diff, decision, before_dir, after_dir, plan)
     else:
-        render_tabs(diff, decision, before_dir, after_dir)
+        render_tabs(diff, decision, before_dir, after_dir, plan, policy)
     render_validation_block()
 
 
