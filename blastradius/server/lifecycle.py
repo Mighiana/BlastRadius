@@ -1,6 +1,7 @@
 import json
 import secrets
 import time
+from collections import defaultdict
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -492,7 +493,15 @@ def lifecycle_router(db: Database, settings: Settings) -> APIRouter:
                 .order_by(AttackPath.id)
                 .limit(limit)
                 .offset(offset)
-            )
+            ).all()
+            hops: dict[str, list[dict]] = defaultdict(list)
+            if rows:
+                for hop in session.scalars(
+                    select(AttackPathHop)
+                    .where(AttackPathHop.path_id.in_([row.id for row in rows]))
+                    .order_by(AttackPathHop.path_id, AttackPathHop.position)
+                ):
+                    hops[hop.path_id].append({"position": hop.position, **hop.evidence})
             return {
                 "normalized_version": job.normalized_version,
                 "paths": [
@@ -505,14 +514,7 @@ def lifecycle_router(db: Database, settings: Settings) -> APIRouter:
                         "labels": row.labels,
                         "explanation": row.explanation,
                         "reaches_sensitive": row.reaches_sensitive,
-                        "hops": [
-                            {"position": hop.position, **hop.evidence}
-                            for hop in session.scalars(
-                                select(AttackPathHop)
-                                .where(AttackPathHop.path_id == row.id)
-                                .order_by(AttackPathHop.position)
-                            )
-                        ],
+                        "hops": hops.get(row.id, []),
                     }
                     for row in rows
                 ],
