@@ -22,13 +22,14 @@ function Management({ org }: { org: Organization }) {
   const { refresh } = useSession();
   const entitled = org.usage.features.team;
   const reload = async () => { members.reload(); invitations.reload(); audit.reload(); await refresh(); };
+  const ownerCount = members.data?.members.filter(item => item.role === 'owner').length ?? 0;
   return <div className="report-stack"><section className="panel"><h2>Workspace members</h2>
     <p>Owners manage ownership. Admins manage projects and non-owner members. Developers run analyses. Viewers inspect retained evidence.</p>
     {!entitled && <p className="notice">Invitations and role changes require Team or Enterprise. Existing members remain visible.</p>}
     <ErrorNotice error={action.error} />{action.notice && <p role="status" className="notice">{action.notice}</p>}
     <ErrorNotice error={members.error} retry={members.reload} />{members.loading && <Loading>Loading members…</Loading>}
     <div className="management-list">{members.data?.members.map(member => {
-      const protectedOwner = member.role === 'owner' && (org.role !== 'owner' || members.data?.members.filter(item => item.role === 'owner').length === 1);
+      const protectedOwner = member.role === 'owner' && (org.role !== 'owner' || ownerCount === 1);
       return <article key={member.user_id}><div><strong>{member.name}</strong><p>{member.email} · {member.role}</p>{protectedOwner && <small>Ownership protection: this owner cannot be removed or demoted here.</small>}</div>
         <div className="button-row"><label>Role for {member.name}<select disabled={action.busy || !entitled || protectedOwner} value={roles[member.user_id] ?? member.role} onChange={e => setRoles({ ...roles, [member.user_id]: roleSchema.parse(e.target.value) })}>{(['owner', 'admin', 'developer', 'viewer'] as const).filter(value => value !== 'owner' || org.role === 'owner' || member.role === 'owner').map(value => <option key={value}>{value}</option>)}</select></label>
           <button className="button secondary" disabled={action.busy || !entitled || protectedOwner || !roles[member.user_id] || roles[member.user_id] === member.role} onClick={() => { void action.run(async () => { await mutate(`${base}/members/${encodeURIComponent(member.user_id)}`, 'PATCH', { role: roles[member.user_id] }); await reload(); }, 'Member role updated.'); }}>Save role</button>

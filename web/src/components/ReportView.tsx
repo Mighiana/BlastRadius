@@ -22,26 +22,38 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
     } catch (err) { setError(err instanceof Error ? err : new Error('Export failed.')); }
     finally { setExporting(false); }
   }
+  function jumpTo(id: string) {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  const jumpLinks: Array<[string, string]> = [
+    ['report-change', 'Change'],
+    ['report-graph', 'Path'],
+    ['report-reachable', 'Reachable'],
+    ['remediation', 'Fix'],
+    ['report-coverage', 'Coverage'],
+    ['report-export', 'Export'],
+  ];
   return <div className="report-stack">
-    <section className={`verdict-panel ${report.decision === 'BLOCK CHANGE' ? 'blocked' : ''}`} aria-label="Analysis decision">
+    <section id="report-verdict" className={`verdict-panel ${report.decision === 'BLOCK CHANGE' ? 'blocked' : ''}`} aria-label="Analysis decision">
       <div><Decision decision={report.decision} /><h2>{report.headline}</h2>
-        <p>{report.decision === 'BLOCK CHANGE' ? 'Review the new exposure, supporting evidence and remediation before merging.' : report.decision === 'SAFE TO MERGE' ? 'No new modeled blocking findings detected. No new modeled critical paths does not prove safety. Review evidence and coverage before merging.' : 'Review nonblocking findings and coverage before merging. This decision does not prove safety.'}</p></div>
+        <p>{report.decision === 'BLOCK CHANGE' ? 'Review the new exposure, supporting evidence and remediation before merging.' : report.decision === 'SAFE TO MERGE' ? 'This change adds no new modeled path to sensitive data. It does not prove safety: existing exposure and coverage gaps may remain. Review evidence and coverage before merging.' : 'Review nonblocking findings and coverage before merging. This decision does not prove safety.'}</p></div>
       <div className="verdict-mark">{report.decision === 'BLOCK CHANGE' ? <ShieldAlert size={40} aria-hidden="true" /> : report.decision === 'SAFE TO MERGE' ? <ShieldCheck size={40} aria-hidden="true" /> : <ShieldQuestion size={40} aria-hidden="true" />}</div>
     </section>
+    <nav className="report-jump" aria-label="Report sections">
+      {jumpLinks.map(([id, label]) => <a key={id} href={`#${id}`} onClick={event => { event.preventDefault(); jumpTo(id); }}>{label}</a>)}
+    </nav>
     {report.analysis_complete === false && <div role="alert" className="notice error">Analysis incomplete. Counts are lower bounds within the modeled coverage. Resolve the coverage diagnostics before treating this change as safe.</div>}
     <div className="metrics">
-      <div className="metric score"><span>Security score</span><div><span>{report.score.before}</span><ArrowRight size={20} aria-hidden="true" /><strong>{report.score.after}<small>/100</small></strong></div>
-        <small><span className={report.score.delta < 0 ? 'danger-text' : ''}>{report.score.delta > 0 ? '+' : ''}{report.score.delta} points</span> · Heuristic · not a risk probability</small></div>
       <div className="metric"><span>New critical paths</span><strong className={report.new_critical_paths.length ? 'danger-text' : ''}>{report.new_critical_paths.length}</strong><small>{report.new_attack_paths.length} total new paths · {report.removed_critical_paths.length} critical removed</small></div>
       <div className="metric"><span>New sensitive reachability</span><strong className={report.newly_reachable_sensitive.length ? 'danger-text' : ''}>{report.newly_reachable_sensitive.length}</strong><small>Newly reachable sensitive resources</small></div>
       <div className="metric"><span>New exposed resources</span><strong>{report.newly_exposed.length}</strong><small>{report.before.risk_level} → {report.after.risk_level}</small></div>
     </div>
-    <section className="panel change-summary" aria-label="Responsible change">
+    <section id="report-change" className="panel change-summary" aria-label="Responsible change">
       <div><p className="eyebrow">WHAT CAUSED IT?</p><h2><GitBranch size={18} aria-hidden="true" />Responsible change</h2>
         <p>{report.demo?.stage === 'safe' ? 'Baseline configuration — no candidate change yet.' : report.responsible_change || 'Review the modeled changes and relationship evidence below.'}</p></div>
-      <nav className="button-row" aria-label="Report sections"><a className="button secondary" href="#remediation">Review remediation</a><a className="button secondary" href="#report-export">Export</a></nav>
+      <nav className="button-row" aria-label="Report actions"><a className="button secondary" href="#remediation">Review remediation</a><a className="button secondary" href="#report-export">Export</a></nav>
     </section>
-    <section className="panel graph-panel">
+    <section id="report-graph" className="panel graph-panel">
       <div className="panel-heading"><div><p className="eyebrow">FOLLOW THE CONNECTIONS</p><h2>One change. A different attack surface.</h2></div>
         <div className="segmented" role="group" aria-label="Graph snapshot">
           <button aria-pressed={side === 'before'} onClick={() => setSide('before')}>Before</button>
@@ -58,7 +70,7 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
         </details>)}
         {!report.responsible_changes.length && <p className="muted">No HCL source changes to display. For plan inputs, review modeled changes and relationship evidence.</p>}
       </section>
-      <section className="panel"><h2>What became reachable</h2>
+      <section id="report-reachable" className="panel"><h2>What became reachable</h2>
         <h3>Sensitive resources</h3>
         {report.newly_reachable_sensitive.length ? <ul className="resource-list">{report.newly_reachable_sensitive.map(id => <li key={id}><code>{id}</code></li>)}</ul> : <p className="muted">No newly reachable sensitive resources.</p>}
         <h3>Decision evidence</h3>
@@ -79,7 +91,8 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
         <p className="muted">Merge the patch into your candidate files and submit another analysis to verify the result.</p>
       </details>}
     </section>
-    <section className="panel"><h2>Coverage & scoring</h2>
+    <section id="report-coverage" className="panel"><h2>Coverage & scoring</h2>
+      <p className="score-line"><span>Heuristic score</span><span>{report.score.before}</span><ArrowRight size={16} aria-hidden="true" /><strong>{report.score.after}<small>/100</small></strong><small><span className={report.score.delta < 0 ? 'danger-text' : ''}>{report.score.delta > 0 ? '+' : ''}{report.score.delta} points</span> · Heuristic · not a risk probability</small></p>
       <h3>Recommended next step</h3><p>{report.decision === 'BLOCK CHANGE' ? 'Review the responsible change and supporting paths, validate suggested edits, then upload the updated candidate for another comparison.' : 'Review existing exposure and coverage gaps with your team before deciding to merge. If you change the candidate, run a new comparison.'} Export evidence when you need a record for the review.</p>
       {report.limitations.map(text => <p key={text}>{text}</p>)}
       <details open={report.analysis_complete === false}><summary>Coverage diagnostics ({report.diagnostics.length})</summary><ul className="findings">{report.diagnostics.map((d, i) => <li key={i}><strong>{d.code}</strong><p>{d.message}</p>{d.phase && <p>{d.phase}: <code>{d.resource}</code>{d.attribute && ` · ${d.attribute}`}{d.source_file && ` · ${d.source_file}`}</p>}</li>)}</ul></details>

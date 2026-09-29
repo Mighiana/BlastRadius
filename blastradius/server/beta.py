@@ -12,7 +12,13 @@ from blastradius.server.auth import require_csrf, require_user
 from blastradius.server.config import Settings
 from blastradius.server.db import Database
 from blastradius.server.events import RETENTION_DAYS, lock_commercial, record_event
-from blastradius.server.models import Analysis, AnalysisFeedback, BetaInterest, ProductEvent
+from blastradius.server.models import (
+    Analysis,
+    AnalysisFeedback,
+    AnalysisStatus,
+    BetaInterest,
+    ProductEvent,
+)
 from blastradius.server.persistence import audit, visible_analysis
 from blastradius.server.schemas import StrictModel, email_identity
 
@@ -165,7 +171,7 @@ def beta_router(db: Database, settings: Settings) -> APIRouter:
         with db.session(write=True) as session:
             user = require_user(request, session, settings, True)
             job, _ = visible_analysis(session, user, analysis_id)
-            if job.status not in ("succeeded", "failed"):
+            if job.status not in (AnalysisStatus.SUCCEEDED, AnalysisStatus.FAILED):
                 raise HTTPException(409, "analysis_not_terminal")
             session.scalar(select(Analysis).where(Analysis.id == job.id).with_for_update())
             lock_commercial(session)

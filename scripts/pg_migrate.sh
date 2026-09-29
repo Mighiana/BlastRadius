@@ -17,7 +17,7 @@ usage() {
 }
 
 TABLES="users organizations memberships sessions projects analyses usage invitations \
-audit_events findings attack_paths attack_path_hops analysis_artifacts billing_events \
+audit_events findings attack_paths attack_path_hops analysis_artifacts \
 github_installations repository_connections github_deliveries github_runs commercial_lock \
 beta_interest analysis_feedback product_events alembic_version"
 
