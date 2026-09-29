@@ -26,6 +26,7 @@ const CODE_HELP: Record<string, string> = {
   IAM_POLICY_EXPRESSION_UNRESOLVED: 'The policy document is templated or not literal JSON.',
   UNMODELED_SG_HOP: 'SG-to-SG ingress is not modeled.',
 };
+const UNSUPPORTED_RESOURCE_HELP = 'These types are not in the reachability model. They cannot create a modeled path, but they can hide one.';
 
 export function ReportView({ report, jobId }: { report: Report; jobId?: string }) {
   const [side, setSide] = useState<'before' | 'after'>('after');
@@ -56,7 +57,7 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
     ['report-coverage', 'Coverage'],
     ['report-export', 'Export'],
   ];
-  const blockingDiagnostics = report.diagnostics.filter(diagnostic => diagnostic.blocks_analysis !== false);
+  const blockingDiagnostics = report.diagnostics.filter(diagnostic => diagnostic.blocks_analysis === true);
   const diagnosticGroups = Array.from(
     blockingDiagnostics.reduce((groups, diagnostic) => {
       const group = groups.get(diagnostic.code) ?? [];
@@ -66,11 +67,33 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
     }, new Map<string, typeof blockingDiagnostics>()),
   ).sort(([codeA, diagnosticsA], [codeB, diagnosticsB]) =>
     diagnosticsB.length - diagnosticsA.length || codeA.localeCompare(codeB));
-  function unsupportedSummary(diagnostics: typeof blockingDiagnostics) {
-    const types = [...new Set(diagnostics.map(diagnostic => diagnostic.message.split(': ').at(-1) ?? diagnostic.message))];
-    const shown = types.slice(0, 8).join(', ');
-    const remaining = types.length - Math.min(types.length, 8);
-    return `${types.length} resource types outside coverage: ${shown}${remaining ? ` +${remaining} more` : ''}`;
+  function unsupportedSummaries(diagnostics: typeof blockingDiagnostics) {
+    const moduleAddresses = [...new Set(diagnostics
+      .filter(diagnostic => diagnostic.message.includes('(module/indexed address not modeled)'))
+      .map(diagnostic => (diagnostic.message.split(': ').at(-1) ?? diagnostic.message)
+        .replace(/\s+\(module\/indexed address not modeled\)\s*$/, '')))];
+    const types = [...new Set(diagnostics
+      .filter(diagnostic => !diagnostic.message.includes('(module/indexed address not modeled)'))
+      .map(diagnostic => (diagnostic.message.split(': ').at(-1) ?? diagnostic.message)
+        .replace(/\s+\([^)]*\)\s*$/, '')))];
+    const summaries: Array<[string, string]> = [];
+    if (moduleAddresses.length) {
+      const shown = moduleAddresses.slice(0, 8).join(', ');
+      const remaining = moduleAddresses.length - Math.min(moduleAddresses.length, 8);
+      summaries.push([
+        `${moduleAddresses.length} resources at module or indexed addresses not modeled: ${shown}${remaining ? ` +${remaining} more` : ''}`,
+        'Resources inside modules or created with count/for_each are not expanded, even when the type is supported.',
+      ]);
+    }
+    if (types.length) {
+      const shown = types.slice(0, 8).join(', ');
+      const remaining = types.length - Math.min(types.length, 8);
+      summaries.push([
+        `${types.length} resource types outside coverage: ${shown}${remaining ? ` +${remaining} more` : ''}`,
+        UNSUPPORTED_RESOURCE_HELP,
+      ]);
+    }
+    return summaries;
   }
   return <div className="report-stack">
     <section id="report-verdict" className={`verdict-panel ${report.decision === 'BLOCK CHANGE' ? 'blocked' : ''}`} aria-label="Analysis decision">
@@ -135,13 +158,20 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
       <h3>Recommended next step</h3><p>{report.decision === 'BLOCK CHANGE' ? 'Review the responsible change and supporting paths, validate suggested edits, then upload the updated candidate for another comparison.' : 'Review existing exposure and coverage gaps with your team before deciding to merge. If you change the candidate, run a new comparison.'} Export evidence when you need a record for the review.</p>
       {report.limitations.map(text => <p key={text}>{text}</p>)}
       {report.analysis_complete === false && <div className="why-review">
-        <p className="muted">The decision is REVIEW REQUIRED because the model could not fully evaluate this change. Counts are lower bounds.</p>
-        <h3>Why this needs review</h3>
+        <p className="muted">{report.decision === 'BLOCK CHANGE'
+          ? 'The change is blocked, and the model also could not fully evaluate it — more paths may exist. Counts are lower bounds.'
+          : 'The decision is REVIEW REQUIRED because the model could not fully evaluate this change. Counts are lower bounds.'}</p>
+        <h3>{report.decision === 'BLOCK CHANGE' ? 'Coverage gaps in this analysis' : 'Why this needs review'}</h3>
         <ul>
-          {diagnosticGroups.map(([code, diagnostics]) => <li key={code}>
-            <strong>{code === 'UNSUPPORTED_RESOURCE' ? unsupportedSummary(diagnostics) : `${diagnostics.length}× ${CODE_LABEL[code] ?? code}`}</strong>
-            <p>{CODE_HELP[code] ?? diagnostics[0]?.message ?? code}</p>
-          </li>)}
+          {diagnosticGroups.flatMap(([code, diagnostics]) => code === 'UNSUPPORTED_RESOURCE'
+            ? unsupportedSummaries(diagnostics).map(([summary, help]) => <li key={`${code}-${summary}`}>
+              <strong>{summary}</strong>
+              <p>{help}</p>
+            </li>)
+            : [<li key={code}>
+              <strong>{`${diagnostics.length}× ${CODE_LABEL[code] ?? code}`}</strong>
+              <p>{CODE_HELP[code] ?? diagnostics[0]?.message ?? code}</p>
+            </li>])}
         </ul>
       </div>}
       <details open={report.analysis_complete === false}><summary>Coverage diagnostics ({report.diagnostics.length})</summary><ul className="findings">{report.diagnostics.map((d, i) => <li key={i}><strong>{d.code}</strong><p>{d.message}</p>{d.phase && <p>{d.phase}: <code>{d.resource}</code>{d.attribute && ` · ${d.attribute}`}{d.source_file && ` · ${d.source_file}`}</p>}</li>)}</ul></details>

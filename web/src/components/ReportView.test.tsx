@@ -9,11 +9,13 @@ describe('report evidence and graph', () => {
   it('summarizes blocking coverage diagnostics for incomplete reports', () => {
     const report = {
       ...risky,
+      decision: 'REVIEW REQUIRED' as const,
       analysis_complete: false,
       diagnostics: [
         { code: 'UNSUPPORTED_RESOURCE', severity: 'warning', message: 'Outside modeled coverage: aws_lambda_function', blocks_analysis: true },
         { code: 'UNSUPPORTED_RESOURCE', severity: 'warning', message: 'Outside modeled coverage: aws_db_instance', blocks_analysis: true },
         { code: 'UNSUPPORTED_RESOURCE', severity: 'warning', message: 'Outside modeled coverage (no reachability effect): aws_vpc', blocks_analysis: false },
+        { code: 'model_limitations', severity: 'info', message: 'Synthetic notice without a blocking flag' },
         { code: 'UNEXPANDED_MODULE', severity: 'warning', message: 'Module cannot be expanded', blocks_analysis: true },
         { code: 'UNEXPANDED_MODULE', severity: 'warning', message: 'Module cannot be expanded', blocks_analysis: true },
       ],
@@ -21,7 +23,24 @@ describe('report evidence and graph', () => {
     render(<ReportView report={report} />);
     expect(screen.getByText(/2 resource types outside coverage/)).toBeVisible();
     expect(screen.getByText('2× Modules not expanded')).toBeVisible();
-    expect(within(screen.getByText('Why this needs review').parentElement!).queryByText(/aws_vpc/)).not.toBeInTheDocument();
+    const summary = screen.getByText('Why this needs review').parentElement!;
+    expect(within(summary).queryByText(/aws_vpc|Synthetic notice/)).not.toBeInTheDocument();
+  });
+  it('uses blocked wording and splits module-address coverage gaps', () => {
+    const report = {
+      ...risky,
+      analysis_complete: false,
+      diagnostics: [
+        { code: 'UNSUPPORTED_RESOURCE', severity: 'warning', message: 'Outside modeled coverage: module.web.aws_instance.server (module/indexed address not modeled)', blocks_analysis: true },
+        { code: 'UNSUPPORTED_RESOURCE', severity: 'warning', message: 'Outside modeled coverage: aws_db_instance', blocks_analysis: true },
+      ],
+    };
+    render(<ReportView report={report} />);
+    expect(screen.getByText('The change is blocked, and the model also could not fully evaluate it — more paths may exist. Counts are lower bounds.')).toBeVisible();
+    const summary = screen.getByText('Coverage gaps in this analysis').parentElement!;
+    expect(within(summary).getByText('1 resources at module or indexed addresses not modeled: module.web.aws_instance.server')).toBeVisible();
+    expect(within(summary).getByText('1 resource types outside coverage: aws_db_instance')).toBeVisible();
+    expect(within(summary).getByText('Resources inside modules or created with count/for_each are not expanded, even when the type is supported.')).toBeVisible();
   });
   it('does not render review reasons for complete reports', () => {
     render(<ReportView report={safe} />);
