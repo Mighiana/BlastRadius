@@ -166,6 +166,7 @@ class JobManager:
 
     def finish(self, analysis_id: str, response: object, run_id: str | None = None) -> str:
         validated = worker_response(response)
+        cause: str | None = None
         for attempt in range(3):
             try:
                 with self.db.session(write=True) as session:
@@ -190,17 +191,40 @@ class JobManager:
                 return outcome
             except LeaseLost:
                 raise
-            except SQLAlchemyError:
+            except SQLAlchemyError as error:
+                cause = type(error).__name__
+                self._log_persistence_error(analysis_id, attempt, error)
                 validated = {"error": "worker_failed"}
                 if attempt < 2:
                     time.sleep(0.05 * (attempt + 1))
-            except Exception:
+            except Exception as error:
+                cause = type(error).__name__
+                self._log_persistence_error(analysis_id, attempt, error)
                 validated = {"error": "worker_failed"}
         self.persistence_failed.set()
         logger.error(
-            json.dumps({"event": "analysis.persistence_failed", "analysis_id": analysis_id})
+            json.dumps(
+                {
+                    "event": "analysis.persistence_failed",
+                    "analysis_id": analysis_id,
+                    "exception": cause,
+                }
+            )
         )
         raise RuntimeError("terminal_persistence_failed")
+
+    @staticmethod
+    def _log_persistence_error(analysis_id: str, attempt: int, error: Exception) -> None:
+        logger.warning(
+            json.dumps(
+                {
+                    "event": "analysis.persistence_error",
+                    "analysis_id": analysis_id,
+                    "attempt": attempt + 1,
+                    "exception": type(error).__name__,
+                }
+            )
+        )
 
     def _run(self, analysis_id: str, payload: AnalysisInput) -> None:
         started = time.monotonic()
