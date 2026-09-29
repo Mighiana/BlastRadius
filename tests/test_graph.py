@@ -123,3 +123,24 @@ def test_empty_config_produces_only_internet_node():
 
     graph = build_graph(ParsedConfig())
     assert list(graph.nodes) == [INTERNET_ID]
+
+
+def test_every_relationship_has_remediation():
+    from blastradius.graph.graph_builder import _relationship_metadata
+
+    for relationship in Relationship:
+        assert _relationship_metadata(relationship).remediation
+
+
+def test_edges_are_annotated_from_relationship_metadata(vulnerable_result):
+    expected = {
+        Relationship.INGRESS_ALLOWS: ("exposure", "Restrict ingress to intended CIDRs and ports."),
+        Relationship.PROTECTS: ("reachability", "Review the instance security-group attachment and network routes."),
+        Relationship.ASSUMES_ROLE: ("privilege", "Use least-privilege instance roles and protect metadata credentials."),
+        Relationship.CAN_ACCESS: ("data_access", "Narrow IAM actions and bucket ARNs; verify effective policies."),
+        Relationship.CONTAINS: ("impact", "Verify sensitivity classification and restrict access to this bucket."),
+    }
+    edges = [data["edge"] for _, _, data in vulnerable_result.graph.edges(data=True)]
+    assert {edge.relationship for edge in edges} == set(expected)
+    for edge in edges:
+        assert (edge.category, edge.remediation) == expected[edge.relationship]

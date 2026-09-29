@@ -44,6 +44,7 @@ class Database:
         self.engine = create_engine(settings.database_url, **options)
         if sqlite:
             event.listen(self.engine, "connect", _sqlite_options)
+            event.listen(self.engine, "checkout", _sqlite_enforce_foreign_keys)
         self.sessions = sessionmaker(self.engine, expire_on_commit=False)
         self.fence: Callable[[Session], None] | None = None
         self.lease_healthy: Callable[[], bool] = lambda: True
@@ -107,6 +108,12 @@ def _sqlite_options(connection, _record) -> None:
     cursor.close()
 
 
+def _sqlite_enforce_foreign_keys(connection, _record, _proxy) -> None:
+    cursor = connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
 def _set_transaction_timeouts(session: Session) -> None:
     if session.bind is not None and session.bind.dialect.name == "postgresql":
         connection = session.connection()
@@ -115,6 +122,13 @@ def _set_transaction_timeouts(session: Session) -> None:
 
 
 def run_migrations(connection: Connection) -> None:
+    sqlite = connection.dialect.name == "sqlite"
+    if sqlite:
+        # Batch rebuilds drop and recreate tables; with enforcement on, dropping a
+        # parent cascades ON DELETE into its children. Checkout re-enables it.
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
     context.configure(connection=connection, target_metadata=Base.metadata, render_as_batch=True)
     with context.begin_transaction():
         context.run_migrations()
+        if sqlite and connection.exec_driver_sql("PRAGMA foreign_key_check").first():
+            raise RuntimeError("Migrations left SQLite foreign key violations.")

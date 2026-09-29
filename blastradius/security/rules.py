@@ -211,13 +211,16 @@ def arn_bucket_reference(resource: object) -> Optional[Tuple[str, bool]]:
 
     References elsewhere in the string (object keys, prefixes) name no grant target.
     """
-    if not policy_references(resource) or not isinstance(resource, str):
+    if not isinstance(resource, str):
+        return None
+    references = policy_references(resource)
+    if not references:
         return None
     match = _ARN_POSITION_BUCKET.match(resource)
     if not match:
         return None
     address = match[1] or match[2]
-    if address not in policy_references(resource):
+    if address not in references:
         return None
     return address, bool(match[3] and len(match[3]) > 1)
 
@@ -291,39 +294,69 @@ def s3_access_findings(policy_document: Any) -> List[S3AccessFinding]:
     return findings
 
 
+@dataclass
+class ResourceIndex:
+    """Role and bucket attachments of one config's resources, grouped in a single pass.
+
+    Lists keep the resources' original order so indexed lookups match a linear scan.
+    """
+
+    managed_policies: Dict[str, TerraformResource] = field(default_factory=dict)
+    role_policies: Dict[str, List[TerraformResource]] = field(default_factory=dict)
+    bucket_acls: Dict[str, List[TerraformResource]] = field(default_factory=dict)
+    bucket_policies: Dict[str, List[TerraformResource]] = field(default_factory=dict)
+    bucket_access_blocks: Dict[str, List[TerraformResource]] = field(default_factory=dict)
+
+    @classmethod
+    def build(cls, config_resources: List[TerraformResource]) -> "ResourceIndex":
+        index = cls()
+        by_bucket = {
+            "aws_s3_bucket_acl": index.bucket_acls,
+            "aws_s3_bucket_policy": index.bucket_policies,
+            "aws_s3_bucket_public_access_block": index.bucket_access_blocks,
+        }
+        for resource in config_resources:
+            if resource.type == "aws_iam_policy":
+                index.managed_policies.setdefault(resource.address, resource)
+            elif resource.type in ("aws_iam_role_policy", "aws_iam_role_policy_attachment"):
+                for role_address in references(resource.get("role")):
+                    index.role_policies.setdefault(role_address, []).append(resource)
+            elif resource.type in by_bucket:
+                for bucket_address in references(resource.get("bucket")):
+                    by_bucket[resource.type].setdefault(bucket_address, []).append(resource)
+        return index
+
+
 def role_policy_sources(
     role_address: str,
     config_resources: List[TerraformResource],
+    index: Optional[ResourceIndex] = None,
 ) -> List[Tuple[str, Any]]:
     """Policy documents applying to a role, paired with the resource that owns them.
 
     The owning address is what lets the UI answer "which Terraform block created
-    this edge?".
+    this edge?". Pass a prebuilt `index` when calling once per role.
     """
+    index = index if index is not None else ResourceIndex.build(config_resources)
     sources: List[Tuple[str, Any]] = []
-    for resource in config_resources:
+    for resource in index.role_policies.get(role_address, []):
         if resource.type == "aws_iam_role_policy":
-            if role_address in references(resource.get("role")):
-                sources.append((resource.address, resource.get("policy")))
-        elif resource.type == "aws_iam_role_policy_attachment":
-            if role_address not in references(resource.get("role")):
-                continue
-            for ref in references(resource.get("policy_arn")):
-                managed = next(
-                    (r for r in config_resources if r.address == ref and r.type == "aws_iam_policy"),
-                    None,
-                )
-                if managed is not None:
-                    sources.append((managed.address, managed.get("policy")))
+            sources.append((resource.address, resource.get("policy")))
+            continue
+        for ref in references(resource.get("policy_arn")):
+            managed = index.managed_policies.get(ref)
+            if managed is not None:
+                sources.append((managed.address, managed.get("policy")))
     return sources
 
 
 def role_policy_documents(
     role_address: str,
     config_resources: List[TerraformResource],
+    index: Optional[ResourceIndex] = None,
 ) -> List[Any]:
     """Collect every inline/attached policy document that applies to a role."""
-    return [document for _, document in role_policy_sources(role_address, config_resources)]
+    return [document for _, document in role_policy_sources(role_address, config_resources, index)]
 
 
 PUBLIC_ACLS = ("public-read", "public-read-write")
@@ -340,9 +373,13 @@ class PublicBucketFinding:
     conditional: bool = False
 
 
-def bucket_public_access_block(bucket: TerraformResource, config_resources: list[TerraformResource]) -> dict[str, bool]:
-    controls = [r for r in config_resources if r.type == "aws_s3_bucket_public_access_block"
-                and bucket.address in references(r.get("bucket"))]
+def bucket_public_access_block(
+    bucket: TerraformResource,
+    config_resources: list[TerraformResource],
+    index: Optional[ResourceIndex] = None,
+) -> dict[str, bool]:
+    index = index if index is not None else ResourceIndex.build(config_resources)
+    controls = index.bucket_access_blocks.get(bucket.address, [])
     if len(controls) != 1:
         return {}
     return {name: controls[0].get(name) is True for name in (
@@ -353,6 +390,7 @@ def bucket_public_access_block(bucket: TerraformResource, config_resources: list
 def public_bucket_findings(
     bucket: TerraformResource,
     config_resources: List[TerraformResource],
+    index: Optional[ResourceIndex] = None,
 ) -> List[PublicBucketFinding]:
     """Detect direct public exposure of an S3 bucket.
 
@@ -360,15 +398,13 @@ def public_bucket_findings(
       * a public canned ACL, set inline on the bucket or via `aws_s3_bucket_acl`
       * a bucket policy that allows an `s3:Get*`/`*` action to Principal `"*"`
     """
+    index = index if index is not None else ResourceIndex.build(config_resources)
     findings: List[PublicBucketFinding] = []
-    controls = bucket_public_access_block(bucket, config_resources)
+    controls = bucket_public_access_block(bucket, config_resources, index)
 
     acl_sources: List[Tuple[str, Any]] = [(bucket.address, bucket.get("acl"))]
-    for resource in config_resources:
-        if resource.type == "aws_s3_bucket_acl" and bucket.address in references(
-            resource.get("bucket")
-        ):
-            acl_sources.append((resource.address, resource.get("acl")))
+    for resource in index.bucket_acls.get(bucket.address, []):
+        acl_sources.append((resource.address, resource.get("acl")))
 
     for address, acl in acl_sources:
         if isinstance(acl, str) and acl.strip().lower() in PUBLIC_ACLS and not controls.get("ignore_public_acls"):
@@ -381,11 +417,7 @@ def public_bucket_findings(
                 )
             )
 
-    for resource in config_resources:
-        if resource.type != "aws_s3_bucket_policy":
-            continue
-        if bucket.address not in references(resource.get("bucket")):
-            continue
+    for resource in index.bucket_policies.get(bucket.address, []):
         for statement in policy_statements(parse_policy_document(resource.get("policy"))):
             if statement.get("Effect") != "Allow":
                 continue
