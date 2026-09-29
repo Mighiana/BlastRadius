@@ -6,9 +6,38 @@
 Terraform. Directory parsing is nonrecursive, matching a single Terraform root.
 Terraform `.tf.json` inputs are not evaluated; their presence in a source root
 is diagnosed. HCL quotations, heredocs and literal resource references retain
-the original parser normalization contract. `jsonencode`, variables, locals,
+the original parser normalization contract. Literal `jsonencode` policy
+documents are normalized (see below). Variables, locals, unsupported
 functions, `dynamic`, `count`, `for_each` and unexpanded module calls are
 diagnosed when relevant rather than silently establishing safety.
+
+### IAM policy source forms
+
+| Construct | Status |
+|---|---|
+| heredoc JSON | supported |
+| literal JSON string | supported |
+| `jsonencode` literal object | supported |
+| `jsonencode` with `aws_*` resource references (bare or `"${ref}"`) | supported |
+| `jsonencode` containing `var.`/`local.`/`data.`/`module.`/`each.`/`count.` references | review required — `IAM_POLICY_EXPRESSION_UNRESOLVED` |
+| `jsonencode` containing other function calls | review required — `IAM_POLICY_EXPRESSION_UNRESOLVED` |
+| `jsonencode` strings with non-`aws_*` `${...}` interpolation (in any field or key) or `%{...}` directives | review required — `IAM_POLICY_EXPRESSION_UNRESOLVED` |
+| Policy strings that only *look like* references (`"aws_s3_bucket.x.arn"`, `"\u0061ws_…"`, `"$${aws_…}"`, text containing an address) | literal text — never linked to a resource; only real traversals and `${aws_*}` templates create edges |
+| `jsonencode` expressions longer than 128 KiB (AWS inline policies are ≤10 KiB) | review required — `IAM_POLICY_EXPRESSION_UNRESOLVED` |
+| `jsonencode` strings with `\n \t \r \" \\ \uNNNN \UNNNNNNNN` escapes, `$${` / `%%{` | supported (decoded as Terraform does; invalid escapes are malformed) |
+| malformed or structureless policy | review required — `INVALID_POLICY` |
+
+`jsonencode` arguments are read by a bounded allowlisted expression reader
+(`blastradius/parser/expression.py`): objects, lists, strings, numbers,
+booleans, null, Terraform resource traversals and interpolated references —
+nothing else. `aws_*` traversals are normalized to the same `"${address.arn}"`
+form the plan parser emits, so heredoc JSON, literal JSON and `jsonencode` all
+converge on one canonical policy representation before coverage validation and
+graph construction. Unresolvable sub-expressions emit
+`IAM_POLICY_EXPRESSION_UNRESOLVED` with a short bounded reason (never raw
+policy text) and the analysis stays REVIEW rather than guessing permissions.
+The reader has no `eval`/`exec`, runs no Terraform, and enforces node, depth
+and size budgets independent of the file-level limits.
 
 `parse_plan`, `parse_plan_file`, and `parse_plan_pair` read saved Terraform plan
 JSON. Prefer full `planned_values` and `prior_state.values` snapshots. The
