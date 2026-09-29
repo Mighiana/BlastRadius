@@ -172,8 +172,10 @@ are analyzed. Unsupported events
 or actions return 202 with `status: ignored` after signature validation.
 Lifecycle events return `handled`; accepted PRs return `queued`. A duplicate
 delivery ID or event/body digest returns `duplicate`. Reusing an ID with other
-content returns 409. Invalid signatures return 401; invalid supported payloads
-return 400. The backlog cap (`MAX_PENDING_DELIVERIES=1000`) returns 503 with
+content returns 409 for supported persisted events; unsupported events are not
+recorded, so reusing their IDs is not detected by design. Invalid signatures
+return 401; invalid supported payloads return 400. The backlog cap
+(`MAX_PENDING_DELIVERIES=1000`) returns 503 with
 `github_backlog_full` without persisting the new delivery. Payloads are cleared
 when a delivery reaches a terminal state, and signed redelivery re-arms rejected
 rows. When the job semaphore is full, the persisted delivery is deferred (`202`)

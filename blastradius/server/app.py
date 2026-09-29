@@ -153,16 +153,25 @@ def create_app(
                 return
             def build_fallback() -> None:
                 started = time.perf_counter()
-                local = build_demos(settings)
-                demos.update(local)
-                LOGGER.warning(
-                    json.dumps(
-                        {
-                            "event": "demo.build_fallback",
-                            "duration_ms": round((time.perf_counter() - started) * 1000, 2),
-                        }
+                try:
+                    local = build_demos(settings)
+                    demos.update(local)
+                    LOGGER.warning(
+                        json.dumps(
+                            {
+                                "event": "demo.build_fallback",
+                                "duration_ms": round(
+                                    (time.perf_counter() - started) * 1000, 2
+                                ),
+                            }
+                        )
                     )
-                )
+                except Exception as error:
+                    LOGGER.error(
+                        json.dumps(
+                            {"event": "demo.build_failed", "error": type(error).__name__}
+                        )
+                    )
 
             threading.Thread(target=build_fallback, name="demo-build", daemon=True).start()
 
@@ -245,6 +254,8 @@ def create_app(
                         lease.acquire()
                     except RuntimeError:
                         continue
+                    if stop_wait.is_set():
+                        return
                     LEASE_LOGGER.info(
                         json.dumps(
                             {
@@ -260,6 +271,8 @@ def create_app(
                         return
                     except Exception:
                         fatal("startup_failed")
+                        return
+                    if stop_wait.is_set():
                         return
                     starting.clear()
                     LOGGER.info(json.dumps({"event": "service.ready"}))
@@ -284,7 +297,18 @@ def create_app(
             jobs.draining.set()
             deadline = time.monotonic() + settings.shutdown_drain_seconds
             if wait_thread is not None:
-                wait_thread.join(timeout=5)
+                startup_join_started = time.monotonic()
+                wait_thread.join()
+                LOGGER.info(
+                    json.dumps(
+                        {
+                            "event": "service.startup_join",
+                            "duration_ms": round(
+                                (time.monotonic() - startup_join_started) * 1000
+                            ),
+                        }
+                    )
+                )
             if retention_thread is not None:
                 retention_thread.join(timeout=5)
             try:

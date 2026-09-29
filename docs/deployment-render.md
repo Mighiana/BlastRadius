@@ -70,6 +70,8 @@ logs `demo.cache_miss` with reason `settings` and rebuilds the demos in the
 background; the service continues serving and accepting webhooks while this
 happens, but `/health/ready` remains 503 until all demos are built. Rebuild the
 image with matching settings to avoid the warm-up.
+If the background build fails, `demo.build_failed` is logged and readiness
+remains 503; redeploy with a rebuilt image after correcting the failure.
 
 ## Zero-downtime deploy settings
 

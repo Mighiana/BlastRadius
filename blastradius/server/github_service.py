@@ -568,11 +568,12 @@ class GitHubService:
                     session.add(run)
                 if run.status == "pending" and run.analysis_id is None:
                     org = lock_org(session, project.organization_id)
-                    try:
-                        quota(session, org, "analyses_per_month")
-                    except HTTPException:
-                        run.status, run.error = "ready", "analysis_quota_exceeded"
-                    else:
+                    if run.error != "server_restarted":
+                        try:
+                            quota(session, org, "analyses_per_month")
+                        except HTTPException:
+                            run.status, run.error = "ready", "analysis_quota_exceeded"
+                    if run.status == "pending":
                         job = Analysis(
                             project_id=project.id,
                             organization_id=project.organization_id,
@@ -591,6 +592,7 @@ class GitHubService:
                         session.add(job)
                         session.flush()
                         run.analysis_id = job.id
+                        run.error = None
                         analysis_event(session, job, "analysis_started")
                         audit(session, org.id, "github", "github.analysis", job.id)
                 analysis_id, run_status = run.analysis_id, run.status

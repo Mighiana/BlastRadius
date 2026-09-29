@@ -1170,8 +1170,12 @@ def test_service_stopping_keeps_inflight_delivery_queued(harness, monkeypatch):
 
 
 def test_stopped_snapshot_resumes_with_a_fresh_analysis(harness, monkeypatch):
-    app, _, provider, _, _ = harness
+    app, _, provider, project, _ = harness
     factory = app.state.github.api_factory
+    with app.state.db.session(write=True) as session:
+        org = session.scalar(select(Organization))
+        org.plan = "enterprise"
+        org.plan_limits = {"analyses_per_month": 1}
 
     class StoppingAPI:
         def __init__(self):
@@ -1198,7 +1202,9 @@ def test_stopped_snapshot_resumes_with_a_fresh_analysis(harness, monkeypatch):
         run = session.scalar(select(GitHubRun))
         analysis = session.get(Analysis, run.analysis_id)
         delivery = session.get(GitHubDelivery, "delivery-1")
+        usage = session.get(Usage, (project["organization_id"], period()))
         assert (delivery.status, analysis.status, run.status) == ("queued", "running", "pending")
+        assert usage.analyses == 1
         assert not provider.writes
 
     app.state.jobs.recover()
@@ -1213,6 +1219,7 @@ def test_stopped_snapshot_resumes_with_a_fresh_analysis(harness, monkeypatch):
         delivery = session.get(GitHubDelivery, "delivery-1")
         assert (delivery.status, analysis.status, run.status) == ("handled", "succeeded", "published")
         assert session.scalar(select(func.count()).select_from(Analysis)) == 2
+        assert session.get(Usage, (project["organization_id"], period())).analyses == 1
     assert len(provider.checks) == len(provider.comments) == 1
 
 
