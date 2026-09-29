@@ -20,6 +20,7 @@ pytest.importorskip("fastapi", reason="install .[server,dev] for handoff tests")
 import test_github_app
 import test_server
 import blastradius.server.db as db_module
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from authlib.jose import JsonWebKey
 from sqlalchemy import func, select, text
@@ -30,6 +31,7 @@ from blastradius.server.db import Database
 from blastradius.server.github_api import GitHubAPI
 from blastradius.server.github_routes import register_installation
 from blastradius.server.jobs import execute
+from blastradius.server.github_types import PullEvent
 from blastradius.server.models import Analysis, GitHubDelivery, GitHubRun
 from blastradius.server.schemas import AnalysisInput
 
@@ -294,7 +296,91 @@ def test_shutdown_drains_queued_github_deliveries(db_settings, provider, monkeyp
         assert started.wait(10)
         assert send(client, provider, "queued", "synchronize").json() == {"status": "queued"}
     with observer(db_settings).session() as session:
-        assert {delivery.status for delivery in session.scalars(select(GitHubDelivery))} == {"handled"}
+            assert {delivery.status for delivery in session.scalars(select(GitHubDelivery))} == {"handled"}
+
+
+@pytest.mark.parametrize("migration_database", ["postgres"], indirect=True)
+def test_drain_failure_still_releases_lease(db_settings, provider, monkeypatch):
+    old = instance(db_settings, provider)
+    successor = instance(db_settings, provider)
+
+    def fail_drain(*_args):
+        raise RuntimeError("drain failed")
+
+    monkeypatch.setattr(old.state.jobs, "drain", fail_drain)
+    with TestClient(old) as old_client:
+        connect(old_client, old, db_settings)
+        new_client = TestClient(successor)
+        new_client.__enter__()
+        try:
+            assert new_client.get("/health/ready").status_code == 503
+            old_client.__exit__(None, None, None)
+            assert wait_ready(new_client) < 5
+        finally:
+            new_client.__exit__(None, None, None)
+
+
+@pytest.mark.parametrize("migration_database", ["postgres"], indirect=True)
+def test_postgres_backlog_admission_is_serialized(db_settings, provider, monkeypatch):
+    app = instance(db_settings, provider)
+    monkeypatch.setattr("blastradius.server.github_service.MAX_PENDING_DELIVERIES", 8)
+    with TestClient(app) as client:
+        connect(client, app, db_settings)
+        monkeypatch.setattr(app.state.github, "dispatch_pending", lambda: 0)
+        for _ in range(app.state.settings.max_jobs):
+            assert app.state.jobs.reserve()
+        try:
+            def receive(index):
+                event = provider.event(ACTIONS[index % len(ACTIONS)])
+                payload = PullEvent.model_validate(event)
+                digest = hashlib.sha256(f"digest-{index}".encode()).hexdigest()
+                try:
+                    app.state.github.receive(f"concurrent-{index}", digest, "pull_request", payload)
+                    return 202
+                except HTTPException as error:
+                    return error.status_code, error.detail
+
+            with ThreadPoolExecutor(max_workers=16) as executor:
+                results = list(executor.map(receive, range(16)))
+            assert results.count(202) == 8
+            assert results.count((503, "github_backlog_full")) == 8
+            with app.state.db.session() as session:
+                assert session.scalar(select(func.count()).select_from(GitHubDelivery)) == 8
+        finally:
+            for _ in range(app.state.settings.max_jobs):
+                app.state.jobs.slots.release()
+
+
+@pytest.mark.parametrize("migration_database", ["postgres"], indirect=True)
+def test_demo_cache_fallback_warms_in_background(
+    db_settings, provider, demo_results, monkeypatch, tmp_path
+):
+    cache = tmp_path / "corrupt-demo-cache.json"
+    cache.write_text("{not-json", encoding="utf-8")
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocked_build(_settings):
+        started.set()
+        assert release.wait(10)
+        return demo_results
+
+    monkeypatch.setattr("blastradius.server.app.build_demos", blocked_build)
+    app = instance(replace(db_settings, demo_cache=cache), provider)
+    with TestClient(app) as client:
+        assert started.wait(5)
+        connect(client, app, db_settings)
+        assert send(client, provider, "warming").status_code == 202
+        assert client.get("/health/ready").status_code == 503
+        warming = client.get("/api/demo/public_ssh")
+        assert warming.status_code == 503
+        assert warming.json()["detail"] == "demos_warming"
+        release.set()
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and client.get("/health/ready").status_code != 200:
+            time.sleep(0.05)
+        assert client.get("/health/ready").status_code == 200
+        assert client.get("/api/demo/public_ssh").status_code == 200
 
 
 @pytest.mark.parametrize("migration_database", ["postgres"], indirect=True)
