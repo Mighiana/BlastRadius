@@ -11,7 +11,7 @@ the UI can explain itself.
 
 from __future__ import annotations
 
-from typing import List
+from typing import Dict, List, Optional
 from collections import Counter
 from copy import deepcopy
 from dataclasses import dataclass
