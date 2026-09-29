@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import threading
 from contextlib import contextmanager
 
@@ -232,3 +233,36 @@ def test_persistence_outage_hides_stale_progress_without_exposing_other_tenants(
     with original() as session:
         job = session.get(Analysis, job_id)
         assert job.status == "failed" and job.error == "server_restarted"
+
+
+def test_persistence_bug_is_logged_before_normalizing_to_worker_failed(
+    client, app, demo_results, monkeypatch, caplog
+):
+    me = login(client)
+    proj = project(client, me)
+
+    def broken(*_):
+        raise KeyError("unexpected_result_shape")
+
+    monkeypatch.setattr("blastradius.server.jobs.persist_result", broken)
+    monkeypatch.setattr(
+        "blastradius.server.jobs.execute",
+        lambda *_: {"result": demo_results[("public_ssh", "safe")]},
+    )
+    job = terminal(client, submit(client, proj["id"]).json()["id"])
+    assert job["status"] == "failed" and job["error"] == "worker_failed"
+    events = [
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if record.getMessage().startswith("{")
+    ]
+    errors = [event for event in events if event.get("event") == "analysis.persistence_error"]
+    assert errors == [
+        {
+            "event": "analysis.persistence_error",
+            "analysis_id": job["id"],
+            "attempt": 1,
+            "exception": "KeyError",
+        }
+    ]
+    assert not any(event.get("event") == "analysis.persistence_failed" for event in events)
