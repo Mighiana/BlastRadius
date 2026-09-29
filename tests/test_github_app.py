@@ -33,7 +33,7 @@ from blastradius.server.github_api import (
 )
 from blastradius.server.github_publish import MARKER, publish, summary
 from blastradius.server.github_routes import register_installation
-from blastradius.server.github_types import Repository
+from blastradius.server.github_types import PullEvent, Repository
 from blastradius.server.models import (
     Analysis,
     GitHubDelivery,
@@ -839,17 +839,28 @@ def test_blob_integrity_and_truncated_tree_validation(settings):
             api.snapshot(TOKEN, repository, HEAD, ".")
 
 
-def test_restart_recovery_and_queue_backpressure_are_redeliverable(harness):
+def test_queue_backpressure_persists_the_delivery_for_later_dispatch(harness):
     app, _, provider, _, _ = harness
     for _ in range(app.state.settings.max_jobs):
         assert app.state.jobs.reserve()
     try:
-        assert send(harness).status_code == 503
+        response = send(harness)
+        assert response.status_code == 202 and response.json() == {"status": "deferred"}
         with app.state.db.session() as session:
-            assert session.get(GitHubDelivery, "delivery-1") is None
+            delivery = session.get(GitHubDelivery, "delivery-1")
+            assert delivery.status == "pending" and delivery.payload
+        assert send(harness).json() == {"status": "duplicate"}
     finally:
         for _ in range(app.state.settings.max_jobs):
             app.state.jobs.slots.release()
+    app.state.github.dispatch_pending()
+    drain(app)
+    assert run_record(app).status == "published"
+    assert len(provider.checks) == len(provider.comments) == 1
+
+
+def test_restart_recovery_redispatches_a_queued_delivery_from_its_stored_payload(harness):
+    app, _, provider, _, _ = harness
     with app.state.db.session(write=True) as session:
         raw = json.dumps(provider.event()).encode()
         session.add(
@@ -858,12 +869,30 @@ def test_restart_recovery_and_queue_backpressure_are_redeliverable(harness):
                 body_hash=hashlib.sha256(b"pull_request\0" + raw).hexdigest(),
                 event="pull_request",
                 status="queued",
+                payload=PullEvent.model_validate(provider.event()).model_dump_json(),
             )
         )
     app.state.github.recover()
-    assert send(harness).json() == {"status": "queued"}
+    app.state.github.dispatch_pending()
     drain(app)
     assert run_record(app).status == "published"
+    assert send(harness).json() == {"status": "duplicate"}
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, delivery.attempts, delivery.payload) == ("handled", 2, None)
+
+
+def test_legacy_queued_delivery_without_payload_is_rejected_not_retried_forever(harness):
+    app, _, provider, _, _ = harness
+    with app.state.db.session(write=True) as session:
+        session.add(
+            GitHubDelivery(id="legacy", body_hash="0" * 64, event="pull_request", status="queued")
+        )
+    app.state.github.recover()
+    app.state.github.dispatch_pending()
+    with app.state.db.session() as session:
+        assert session.get(GitHubDelivery, "legacy").error == "github_payload_unavailable"
+    assert not provider.writes
 
 
 def test_concurrent_deliveries_reserve_one_analysis_and_publish_once(harness):

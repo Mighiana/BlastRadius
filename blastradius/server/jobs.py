@@ -9,7 +9,7 @@ import sys
 import tempfile
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from collections.abc import Callable
 from pathlib import Path
 
@@ -32,6 +32,7 @@ def execute(
     settings: Settings,
     policy_snapshot: dict | None = None,
     lease_healthy: Callable[[], bool] | None = None,
+    stopping: threading.Event | None = None,
 ) -> dict:
     jobs_dir = settings.data_dir.resolve() / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -77,7 +78,9 @@ def execute(
                     deadline = time.monotonic() + settings.job_timeout_seconds
                     while process.poll() is None:
                         error = (
-                            "service_lease_lost"
+                            "server_restarted"
+                            if stopping is not None and stopping.is_set()
+                            else "service_lease_lost"
                             if not lease_healthy()
                             else "analysis_timeout"
                             if time.monotonic() >= deadline
@@ -111,6 +114,9 @@ class JobManager:
             max_workers=settings.workers, thread_name_prefix="analysis"
         )
         self.persistence_failed = threading.Event()
+        self.draining = threading.Event()
+        self.stopping = threading.Event()
+        self.running: set[Future] = set()
 
     def recover(self) -> None:
         while True:
@@ -142,14 +148,15 @@ class JobManager:
 
     def reserve(self) -> bool:
         return (
-            self.db.lease_healthy()
+            not self.draining.is_set()
+            and self.db.lease_healthy()
             and not self.persistence_failed.is_set()
             and self.slots.acquire(blocking=False)
         )
 
     def submit(self, analysis_id: str, payload: AnalysisInput) -> None:
         try:
-            self.executor.submit(self._run, analysis_id, payload)
+            self.track(self.executor.submit(self._run, analysis_id, payload))
         except Exception:
             self.finish(analysis_id, {"error": "dispatch_failed"})
             raise
@@ -210,7 +217,9 @@ class JobManager:
                         "project_id": job.project_id,
                     }
                 )
-            response = execute(payload, self.settings, policy_snapshot, self.db.lease_healthy)
+            response = execute(
+                payload, self.settings, policy_snapshot, self.db.lease_healthy, self.stopping
+            )
             context["outcome"] = self.finish(analysis_id, response)
         except LeaseLost:
             context["outcome"] = "service_lease_lost"
@@ -223,5 +232,23 @@ class JobManager:
             logger.info(json.dumps({"event": "analysis.completed", **context}))
             self.slots.release()
 
-    def shutdown(self) -> None:
-        self.executor.shutdown(wait=True)
+    def track(self, future: Future) -> None:
+        self.running.add(future)
+        future.add_done_callback(self.running.discard)
+
+    def drain(self, executor: ThreadPoolExecutor, futures: set[Future], deadline: float) -> None:
+        """Let running work finish until ``deadline``, then stop it; never wait unbounded.
+
+        Unstarted work is cancelled and stays queued in the database for the
+        next lease holder, so the lease is not held for its runtime.
+        """
+        self.draining.set()
+        executor.shutdown(wait=False, cancel_futures=True)
+        wait(set(futures), timeout=max(0.0, deadline - time.monotonic()))
+        self.stopping.set()
+        executor.shutdown(wait=True)
+
+    def shutdown(self, deadline: float | None = None) -> None:
+        if deadline is None:
+            deadline = time.monotonic() + self.settings.shutdown_drain_seconds
+        self.drain(self.executor, self.running, deadline)

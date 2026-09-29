@@ -1,3 +1,10 @@
+import hashlib
+import json
+import sys
+import tempfile
+from pathlib import Path
+
+import blastradius
 from blastradius.server.config import Settings
 from blastradius.server.fixtures import FIXTURES
 from blastradius.server.jobs import execute
@@ -36,3 +43,47 @@ def build_demos(settings: Settings) -> dict[tuple[str, str], dict]:
             }
             demos[(scenario_id, stage)] = result["result"]
     return demos
+
+
+def demo_fingerprint() -> str:
+    """Digest of the analyzer source and fixtures a demo cache was computed from."""
+    digest = hashlib.sha256()
+    package = Path(blastradius.__file__).parent
+    for path in sorted(package.rglob("*.py")):
+        digest.update(path.relative_to(package).as_posix().encode() + b"\0")
+        digest.update(path.read_bytes() + b"\0")
+    return digest.hexdigest()
+
+
+def write_demo_cache(path: Path, settings: Settings) -> None:
+    demos = build_demos(settings)
+    path.write_text(
+        json.dumps(
+            {
+                "fingerprint": demo_fingerprint(),
+                "demos": [[scenario, stage, result] for (scenario, stage), result in demos.items()],
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+
+def load_demo_cache(path: Path | None) -> dict[tuple[str, str], dict] | None:
+    """Demos precomputed at image build time, or ``None`` when absent or stale."""
+    if path is None or not path.is_file():
+        return None
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+        if document["fingerprint"] != demo_fingerprint():
+            return None
+        demos = {(scenario, stage): result for scenario, stage, result in document["demos"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    expected = {(scenario, stage) for scenario in FIXTURES for stage in ("safe", "risky", "remediated")}
+    return demos if set(demos) == expected else None
+
+
+if __name__ == "__main__":
+    with tempfile.TemporaryDirectory() as directory:
+        write_demo_cache(Path(sys.argv[1]), Settings(data_dir=Path(directory)))

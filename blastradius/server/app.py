@@ -33,7 +33,7 @@ from blastradius.server.auth import (
 from blastradius.server.config import Settings
 from blastradius.server.beta import beta_router
 from blastradius.server.db import Database, LeaseLost
-from blastradius.server.demos import build_demos
+from blastradius.server.demos import build_demos, load_demo_cache
 from blastradius.server.fixtures import FIXTURES
 from blastradius.server.events import record_event
 from blastradius.server.github_routes import github_router
@@ -58,6 +58,7 @@ from blastradius.server.static import FrontendFiles, FrontendMount
 
 
 LOGGER = logging.getLogger(__name__)
+LEASE_LOGGER = logging.getLogger("blastradius.server.lease")
 
 
 def _fatal_startup(reason: str) -> None:
@@ -142,7 +143,10 @@ def create_app(
             raise RuntimeError("Database schema is not ready; run python -m blastradius.server.migrate")
         jobs.recover()
         github.recover()
-        demos.update(build_demos(settings))
+
+    def load_demos() -> None:
+        if not demos:
+            demos.update(load_demo_cache(settings.demo_cache) or build_demos(settings))
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -189,12 +193,23 @@ def create_app(
             )
             retention_thread.start()
 
+        await run_in_threadpool(load_demos)
+        wait_started = time.monotonic()
         try:
             lease.acquire()
+            LEASE_LOGGER.info(json.dumps({"event": "service.lease_acquired", "waited_ms": 0}))
         except RuntimeError:
             if settings.lease_wait_seconds <= 0:
                 raise
             starting.set()
+            LEASE_LOGGER.info(
+                json.dumps(
+                    {
+                        "event": "service.lease_acquire_wait",
+                        "wait_limit_seconds": settings.lease_wait_seconds,
+                    }
+                )
+            )
 
             def reject_while_starting(_session: Session) -> None:
                 raise LeaseLost("service_starting")
@@ -212,6 +227,14 @@ def create_app(
                         lease.acquire()
                     except RuntimeError:
                         continue
+                    LEASE_LOGGER.info(
+                        json.dumps(
+                            {
+                                "event": "service.lease_acquired",
+                                "waited_ms": round((time.monotonic() - wait_started) * 1000),
+                            }
+                        )
+                    )
                     try:
                         start_components()
                     except RuntimeError as error:
@@ -223,6 +246,7 @@ def create_app(
                     starting.clear()
                     LOGGER.info(json.dumps({"event": "service.ready"}))
                     start_retention_worker()
+                    github.start(stop_wait)
                     return
 
             wait_thread = threading.Thread(
@@ -234,19 +258,32 @@ def create_app(
                 await run_in_threadpool(start_components)
                 LOGGER.info(json.dumps({"event": "service.ready"}))
                 start_retention_worker()
+                github.start(stop_wait)
             yield
         finally:
-            LOGGER.info(json.dumps({"event": "service.stopping"}))
+            LOGGER.info(json.dumps({"event": "service.shutdown_started"}))
             stop_wait.set()
+            jobs.draining.set()
+            deadline = time.monotonic() + settings.shutdown_drain_seconds
+            if wait_thread is not None:
+                wait_thread.join(timeout=5)
             if retention_thread is not None:
                 retention_thread.join(timeout=5)
-            await run_in_threadpool(github.shutdown)
-            await run_in_threadpool(jobs.shutdown)
-            if starting.is_set():
-                if wait_thread is not None:
-                    wait_thread.join(timeout=2)
-            else:
-                lease.release()
+            await run_in_threadpool(github.shutdown, deadline)
+            await run_in_threadpool(jobs.shutdown, deadline)
+            release_started = time.monotonic()
+            LEASE_LOGGER.info(json.dumps({"event": "service.lease_release_started"}))
+            released = lease.release()
+            LEASE_LOGGER.info(
+                json.dumps(
+                    {
+                        "event": "service.lease_released",
+                        "held": released,
+                        "duration_ms": round((time.monotonic() - release_started) * 1000),
+                    }
+                )
+            )
+            LOGGER.info(json.dumps({"event": "service.stopping"}))
             db.engine.dispose()
 
     app = FastAPI(

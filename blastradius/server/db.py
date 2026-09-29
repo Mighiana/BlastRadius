@@ -61,6 +61,23 @@ class Database:
                 session.rollback()
                 raise
 
+    @contextmanager
+    def intake(self) -> Iterator[Session]:
+        """Unfenced transaction for durable, idempotent inbound records.
+
+        Usable while another process holds the service lease; it must never
+        execute or claim work, which stays behind ``session()``'s fence.
+        """
+        with self.sessions() as session:
+            try:
+                if self.engine.dialect.name == "sqlite":
+                    session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+                yield session
+                session.commit()
+            except BaseException:
+                session.rollback()
+                raise
+
     def migrate(self) -> None:
         config = migration_config()
         with self.engine.begin() as connection:
