@@ -174,8 +174,21 @@ class GitHubService:
         """
         _log("github.webhook_received", delivery_id=delivery_id, github_event=event)
 
-        def admit_redelivery(session: Session, delivery: GitHubDelivery) -> None:
+        def admit_redelivery(
+            session: Session, delivery: GitHubDelivery, *, payloadless_retryable: bool = False
+        ) -> bool:
             _admission_lock(session)
+            session.refresh(delivery)
+            if (
+                delivery.status != "rejected"
+                and not (
+                    payloadless_retryable
+                    and delivery.status == "retryable"
+                    and delivery.payload is None
+                )
+            ):
+                _log("github.webhook_duplicate", delivery_id=delivery_id)
+                return False
             backlog = (
                 session.scalar(
                     select(func.count())
@@ -191,6 +204,7 @@ class GitHubService:
                     error="github_backlog_full",
                 )
                 raise HTTPException(503, "github_backlog_full")
+            return True
 
         if payload is None:
             try:
@@ -214,7 +228,8 @@ class GitHubService:
                     )
                 if delivery:
                     if delivery.status == "rejected" and payload is not None:
-                        admit_redelivery(session, delivery)
+                        if not admit_redelivery(session, delivery):
+                            return {"status": "duplicate"}
                         delivery.status = "pending"
                         delivery.error = None
                         delivery.next_attempt_at = None
@@ -223,7 +238,10 @@ class GitHubService:
                         delivery_id = delivery.id
                     elif delivery.status == "retryable":
                         if delivery.payload is None and payload is not None:
-                            admit_redelivery(session, delivery)
+                            if not admit_redelivery(
+                                session, delivery, payloadless_retryable=True
+                            ):
+                                return {"status": "duplicate"}
                             delivery.status, delivery.error, delivery.next_attempt_at = (
                                 "pending",
                                 None,

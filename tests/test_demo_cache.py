@@ -91,6 +91,9 @@ def test_demo_cache_miss_reasons_are_logged(tmp_path, demo_results, monkeypatch,
 def test_build_demos_uses_a_separate_work_directory(tmp_path, monkeypatch):
     settings = Settings(data_dir=tmp_path / "data")
     work_dirs = []
+    stale = settings.data_dir / "demos" / "job-stale"
+    stale.mkdir(parents=True)
+    (stale / "leftover").write_text("stale", encoding="utf-8")
 
     def fake_execute(_payload, _settings, work_dir=None):
         work_dirs.append(work_dir)
@@ -109,3 +112,4 @@ def test_build_demos_uses_a_separate_work_directory(tmp_path, monkeypatch):
     assert work_dirs
     assert {path for path in work_dirs} == {settings.data_dir / "demos"}
     assert not (settings.data_dir / "jobs").exists()
+    assert not stale.exists()

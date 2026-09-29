@@ -2,6 +2,7 @@ import hashlib
 import importlib.metadata
 import json
 import logging
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -19,6 +20,10 @@ LOGGER = logging.getLogger(__name__)
 def build_demos(settings: Settings) -> dict[tuple[str, str], dict]:
     demos: dict[tuple[str, str], dict] = {}
     work_dir = settings.data_dir.resolve() / "demos"
+    work_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    for path in work_dir.glob("job-*"):
+        if path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
     for scenario_id, scenario in FIXTURES.items():
         baseline, risky = scenario["before_files"], scenario["after_files"]
         for stage in ("safe", "risky", "remediated"):

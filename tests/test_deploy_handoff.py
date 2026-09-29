@@ -530,6 +530,42 @@ def test_concurrent_duplicate_intake_on_postgres_stores_one_row(db_settings, pro
 
 
 @pytest.mark.parametrize("migration_database", ["postgres"], indirect=True)
+def test_concurrent_rejected_redelivery_rearms_once(db_settings, provider, monkeypatch):
+    app = instance(db_settings, provider)
+    with TestClient(app) as client:
+        connect(client, app, db_settings)
+        app.state.jobs.draining.set()
+        body = json.dumps(provider.event()).encode()
+        digest = hashlib.sha256(b"pull_request\0" + body).hexdigest()
+        with app.state.db.intake() as session:
+            session.add(
+                GitHubDelivery(
+                    id="rejected-redelivery",
+                    body_hash=digest,
+                    event="pull_request",
+                    status="rejected",
+                    error="github_payload_unavailable",
+                )
+            )
+        monkeypatch.setattr(
+            "blastradius.server.github_service.MAX_PENDING_DELIVERIES", 1
+        )
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            responses = list(
+                pool.map(
+                    lambda _: send(client, provider, "operator-redelivery"),
+                    range(2),
+                )
+            )
+        assert all(response.status_code == 202 for response in responses)
+        assert sum(response.json() == {"status": "deferred"} for response in responses) == 1
+        assert sum(response.json() == {"status": "duplicate"} for response in responses) == 1
+        with app.state.db.session() as session:
+            delivery = session.get(GitHubDelivery, "rejected-redelivery")
+            assert delivery.status == "pending"
+
+
+@pytest.mark.parametrize("migration_database", ["postgres"], indirect=True)
 def test_dispatch_lock_timeout_returns_database_deferred(
     db_settings, provider, monkeypatch, caplog
 ):
