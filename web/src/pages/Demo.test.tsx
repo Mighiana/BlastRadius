@@ -5,7 +5,7 @@ import Demo from './Demo';
 import { risky, safe } from '../test/fixtures';
 
 describe('real API demo transitions', () => {
-  it('requests SAFE, risky and remediated reports rather than deriving results in the browser', async () => {
+  it('opens on risky, then requests safe, risky and remediated reports rather than deriving results in the browser', async () => {
     const urls: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       urls.push(url);
@@ -14,11 +14,13 @@ describe('real API demo transitions', () => {
     }));
     const user = userEvent.setup();
     render(<Demo />);
-    expect(await screen.findByText('SAFE TO MERGE')).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Simulate risky change' }));
     expect(await screen.findByText('BLOCK CHANGE')).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Remediate & re-analyze' }));
-    expect(await screen.findByText('SAFE TO MERGE')).toBeVisible();
+    expect(await screen.findByText('NO NEW PATHS')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Reset baseline' }));
+    expect(await screen.findByText('NO NEW PATHS')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Simulate risky change' }));
+    expect(await screen.findByText('BLOCK CHANGE')).toBeVisible();
     expect(urls).toContain('/api/demo/public_ssh?stage=safe');
     expect(urls).toContain('/api/demo/public_ssh?stage=risky');
     expect(urls).toContain('/api/demo/public_ssh?stage=remediated');
@@ -28,6 +30,6 @@ describe('real API demo transitions', () => {
     render(<Demo />);
     await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(2));
     expect(screen.queryByLabelText('Analysis decision')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Simulate risky change' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Remediate & re-analyze' })).toBeDisabled();
   });
 });

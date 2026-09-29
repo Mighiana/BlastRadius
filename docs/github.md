@@ -162,7 +162,11 @@ silently downgraded to successful analysis.
 `X-GitHub-Delivery`, and `X-GitHub-Event`. HMAC-SHA256 covers the exact raw bytes,
 compared in constant time before JSON parsing. The existing middleware enforces
 `BR_MAX_BODY_BYTES` (default 1 MiB), rejects content encoding, bounds receive time
-to 15 seconds, and rate limits requests. Delivery IDs are limited to 100
+to 15 seconds, and rate limits requests. The per-client `api` rate limit
+(`BR_RATE_LIMIT`, default 180 per minute) is applied by the middleware before
+signature validation, so a burst from one address, including GitHub's shared
+egress, receives 429 `rate_limit_exceeded` instead of 202 and is not persisted;
+GitHub redelivers on its own schedule. Delivery IDs are limited to 100
 alphanumeric/hyphen characters. Verified supported webhook metadata is persisted
 after validation and the request returns 202 after commit; pull-request and
 installation payloads contain metadata only, never Terraform source or tokens.
