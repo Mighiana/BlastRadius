@@ -59,6 +59,7 @@ class GitHubService:
         )
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="github")
         self.futures: set[Future] = set()
+        self.active: set[str] = set()
         self.lock = threading.Lock()
         self.wake = threading.Event()
         self.dispatcher: threading.Thread | None = None
@@ -155,11 +156,7 @@ class GitHubService:
                         select(GitHubDelivery).where(GitHubDelivery.body_hash == digest)
                     )
                 if delivery:
-                    if (
-                        delivery.status == "rejected"
-                        and delivery.error == "github_payload_unavailable"
-                        and payload is not None
-                    ):
+                    if delivery.status == "rejected" and payload is not None:
                         delivery.status = "pending"
                         delivery.error = None
                         delivery.next_attempt_at = None
@@ -231,6 +228,19 @@ class GitHubService:
         dispatched = 0
         while self.db.lease_healthy() and not self.jobs.draining.is_set():
             now = time.time()
+            with self.lock:
+                with self.db.session(write=True) as session:
+                    for orphan in session.scalars(
+                        select(GitHubDelivery).where(GitHubDelivery.status == "queued")
+                    ):
+                        if orphan.id not in self.active:
+                            orphan.status = "pending"
+                            orphan.next_attempt_at = None
+                            _log(
+                                "github.webhook_deferred",
+                                delivery_id=orphan.id,
+                                reason="orphaned_queued",
+                            )
             try:
                 with self.db.session(write=True) as session:
                     delivery = session.scalar(
@@ -264,6 +274,7 @@ class GitHubService:
             return self._deferred(delivery_id, "service_lease_unavailable")
         with self.lock:
             reserved = False
+            self.active.add(delivery_id)
             try:
                 with self.db.session(write=True) as session:
                     delivery = session.scalar(
@@ -272,8 +283,10 @@ class GitHubService:
                         .with_for_update()
                     )
                     if delivery is None:
+                        self.active.discard(delivery_id)
                         return {"status": "queued"}
                     if delivery.status != "pending":
+                        self.active.discard(delivery_id)
                         return {
                             "status": delivery.status
                             if delivery.status in ("handled", "ignored", "rejected")
@@ -289,6 +302,7 @@ class GitHubService:
                         # Recorded before payloads were persisted; only a redelivery can help.
                         delivery.status, delivery.error = "rejected", "github_payload_unavailable"
                         delivery.payload = None
+                        self.active.discard(delivery_id)
                         return self._failed(delivery_id, "github_payload_unavailable")
                     claim: dict = {}
                     if isinstance(payload, LifecycleEvent):
@@ -300,23 +314,29 @@ class GitHubService:
                         status = claim["status"]
                         reserved = status == "queued"
                         if status == "deferred":
+                            self.active.discard(delivery_id)
                             return self._deferred(delivery_id, "analysis_queue_full")
                         if status == "rejected":
+                            self.active.discard(delivery_id)
                             return self._failed(delivery_id, "github_attempts_exhausted")
             except LeaseLost:
+                self.active.discard(delivery_id)
                 if reserved:
                     self.jobs.slots.release()
                 return self._deferred(delivery_id, "service_lease_lost")
             except SQLAlchemyError:
+                self.active.discard(delivery_id)
                 if reserved:
                     self.jobs.slots.release()
                 self.wake.set()
                 return self._deferred(delivery_id, "database_unavailable")
             except BaseException:
+                self.active.discard(delivery_id)
                 if reserved:
                     self.jobs.slots.release()
                 raise
             if not isinstance(payload, PullEvent) or not reserved:
+                self.active.discard(delivery_id)
                 _log("github.webhook_processed", delivery_id=delivery_id, status=status)
                 return {"status": status}
             try:
@@ -332,6 +352,7 @@ class GitHubService:
                 future.add_done_callback(self.futures.discard)
                 self.jobs.track(future)
             except RuntimeError:
+                self.active.discard(delivery_id)
                 self.jobs.slots.release()
                 try:
                     with self.db.session(write=True) as session:
@@ -445,31 +466,50 @@ class GitHubService:
                     # Left queued: the next lease holder's recover() re-arms it.
                     _log("github.webhook_deferred", delivery_id=delivery_id, reason="service_stopping")
                 else:
-                    with self.db.session(write=True) as session:
-                        delivery = session.get(GitHubDelivery, delivery_id)
-                        if delivery:
-                            delivery.status, delivery.error = status, error
-                            if status == "retryable":
-                                if delivery.attempts >= MAX_ATTEMPTS:
-                                    delivery.status = "rejected"
-                                    status = "rejected"
-                                    delivery.next_attempt_at = None
-                                    delivery.payload = None
-                                else:
-                                    delivery.next_attempt_at = (
-                                        time.time() + RETRY_SECONDS * delivery.attempts
-                                    )
-                            else:
-                                delivery.payload = None
-                    _log(
-                        "github.webhook_processed" if status == "handled" else "github.webhook_failed",
-                        delivery_id=delivery_id,
-                        status=status,
-                        **({"error": error} if error else {}),
-                    )
+                    finalized = False
+                    for attempt in range(3):
+                        try:
+                            with self.db.session(write=True) as session:
+                                delivery = session.get(GitHubDelivery, delivery_id)
+                                if delivery:
+                                    delivery.status, delivery.error = status, error
+                                    if status == "retryable":
+                                        if delivery.attempts >= MAX_ATTEMPTS:
+                                            delivery.status = "rejected"
+                                            status = "rejected"
+                                            delivery.next_attempt_at = None
+                                            delivery.payload = None
+                                        else:
+                                            delivery.next_attempt_at = (
+                                                time.time() + RETRY_SECONDS * delivery.attempts
+                                            )
+                                    else:
+                                        delivery.payload = None
+                            finalized = True
+                            break
+                        except SQLAlchemyError:
+                            if attempt < 2:
+                                time.sleep(1)
+                    if finalized:
+                        _log(
+                            "github.webhook_processed"
+                            if status == "handled"
+                            else "github.webhook_failed",
+                            delivery_id=delivery_id,
+                            status=status,
+                            **({"error": error} if error else {}),
+                        )
+                    else:
+                        _log(
+                            "github.webhook_failed",
+                            delivery_id=delivery_id,
+                            error="finalize_failed",
+                        )
             except LeaseLost:
                 _log("github.webhook_deferred", delivery_id=delivery_id, reason="service_lease_lost")
             finally:
+                with self.lock:
+                    self.active.discard(delivery_id)
                 self.jobs.slots.release()
 
     def process(

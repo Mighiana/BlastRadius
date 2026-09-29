@@ -968,6 +968,7 @@ def test_intake_failure_returns_503_and_stores_nothing(harness, monkeypatch, cap
 
 def test_retryable_delivery_becomes_rejected_after_max_attempts(harness, monkeypatch, caplog):
     app, _, _, _, _ = harness
+    original_process = app.state.github.process
 
     def unavailable(*_args):
         raise GitHubError("github_unavailable", retryable=True)
@@ -1008,6 +1009,12 @@ def test_retryable_delivery_becomes_rejected_after_max_attempts(harness, monkeyp
             "status": "rejected",
             "error": "github_unavailable",
         } in events
+        monkeypatch.setattr(app.state.github, "process", original_process)
+        assert send(harness, delivery="redelivery").json() == {"status": "queued"}
+        drain(app)
+        with app.state.db.session() as session:
+            delivery = session.get(GitHubDelivery, "delivery-1")
+            assert (delivery.status, delivery.attempts) == ("handled", 1)
     finally:
         logger.removeHandler(caplog.handler)
 
@@ -1219,6 +1226,51 @@ def test_failed_submission_requeues_delivery(harness, monkeypatch):
     with app.state.db.session() as session:
         delivery = session.get(GitHubDelivery, "delivery-1")
         assert (delivery.status, delivery.attempts) == ("pending", 0)
+
+
+def test_finalize_retries_after_a_database_error(harness, monkeypatch):
+    app, _, _, _, _ = harness
+    original_process = app.state.github.process
+    original_session = app.state.db.session
+    failed = False
+
+    def flaky_session(write=False):
+        nonlocal failed
+        if write and not failed:
+            failed = True
+            raise OperationalError("finalize", {}, RuntimeError("database down"))
+        return original_session(write)
+
+    def process(*args):
+        result = original_process(*args)
+        monkeypatch.setattr(app.state.db, "session", flaky_session)
+        return result
+
+    monkeypatch.setattr(app.state.github, "process", process)
+    assert send(harness).json() == {"status": "queued"}
+    drain(app)
+    with app.state.db.session() as session:
+        assert session.get(GitHubDelivery, "delivery-1").status == "handled"
+
+
+def test_orphaned_queued_delivery_is_rearmed_and_dispatched(harness):
+    app, _, provider, _, _ = harness
+    raw = json.dumps(provider.event()).encode()
+    with app.state.db.session(write=True) as session:
+        session.add(
+            GitHubDelivery(
+                id="orphaned",
+                body_hash=hashlib.sha256(b"pull_request\0" + raw).hexdigest(),
+                event="pull_request",
+                status="queued",
+                attempts=1,
+                payload=PullEvent.model_validate(provider.event()).model_dump_json(),
+            )
+        )
+    assert app.state.github.dispatch_pending() == 1
+    drain(app)
+    with app.state.db.session() as session:
+        assert session.get(GitHubDelivery, "orphaned").status == "handled"
 
 
 def test_redelivery_rearms_rejected_payload_unavailable_row(harness):

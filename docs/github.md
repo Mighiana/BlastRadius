@@ -163,7 +163,9 @@ silently downgraded to successful analysis.
 compared in constant time before JSON parsing. The existing middleware enforces
 `BR_MAX_BODY_BYTES` (default 1 MiB), rejects content encoding, bounds receive time
 to 15 seconds, and rate limits requests. Delivery IDs are limited to 100
-alphanumeric/hyphen characters. No payload body is persisted.
+alphanumeric/hyphen characters. Verified supported webhook metadata is persisted
+after validation and the request returns 202 after commit; pull-request and
+installation payloads contain metadata only, never Terraform source or tokens.
 
 PR `opened`, `synchronize`, `reopened` and relevant base-retarget `edited` actions
 are analyzed. Unsupported events
@@ -171,7 +173,10 @@ or actions return 202 with `status: ignored` after signature validation.
 Lifecycle events return `handled`; accepted PRs return `queued`. A duplicate
 delivery ID or event/body digest returns `duplicate`. Reusing an ID with other
 content returns 409. Invalid signatures return 401; invalid supported payloads
-return 400. When the shared job semaphore is full, return 503 without recording
+return 400. The backlog cap (`MAX_PENDING_DELIVERIES=1000`) returns 503 with
+`github_backlog_full` without persisting the new delivery. Payloads are cleared
+when a delivery reaches a terminal state, and signed redelivery re-arms rejected
+rows. When the shared job semaphore is full, return 503 without recording
 acceptance so the event can be redelivered.
 
 Each PR is re-read using a repository-scoped read token. Installation, repository,
@@ -269,6 +274,9 @@ are re-armed and replayed by the next lease owner with bounded attempts
 are rerun from a fresh analysis record. An identical redelivery of a retryable
 row is a duplicate and preserves its backoff; only a payload-less row is re-armed
 by redelivery. Manual redelivery is needed only after terminal `rejected`.
+Retention is limited to plaintext webhook metadata, with payloads cleared at
+terminal state; delivery rows are covered by the same database backups and
+retention controls as other service rows.
 Security deduplication hashes and publication tombstones remain stored; there is
 no automatic age purge of GitHub delivery rows or old run metadata. Current
 retention gates all report reads and run status visibility, and normal operator
