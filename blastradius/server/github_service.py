@@ -38,6 +38,7 @@ from blastradius.server.models import (
     RepositoryConnection,
     RunStatus,
 )
+from blastradius.server.observability import log_event
 from blastradius.server.persistence import audit, effective_policy
 from blastradius.server.quotas import lock_org, period, quota
 from blastradius.server.schemas import AnalysisInput
@@ -68,7 +69,7 @@ class DispatchStatus(StrEnum):
 
 def _log(event: str, **fields: str | int) -> None:
     """Delivery lifecycle log: identifiers and outcomes only, never payload or headers."""
-    LOGGER.info(json.dumps({"event": event, **fields}, sort_keys=True))
+    log_event(LOGGER, logging.INFO, event, **fields)
 
 
 def _admission_lock(session: Session) -> None:
