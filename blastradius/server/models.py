@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from enum import StrEnum
 
 from sqlalchemy import (
     JSON,
@@ -15,6 +16,43 @@ from sqlalchemy import (
     false,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+class AnalysisStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class InstallationStatus(StrEnum):
+    ACTIVE = "active"
+    SUSPENDED = "suspended"
+    DELETED = "deleted"
+
+
+class ConnectionStatus(StrEnum):
+    ACTIVE = "active"
+    REVOKED = "revoked"
+    DISCONNECTED = "disconnected"
+
+
+class DeliveryStatus(StrEnum):
+    """Persisted lifecycle of a GitHubDelivery."""
+
+    PENDING = "pending"
+    QUEUED = "queued"
+    RETRYABLE = "retryable"
+    REJECTED = "rejected"
+    HANDLED = "handled"
+    IGNORED = "ignored"
+
+
+class RunStatus(StrEnum):
+    PENDING = "pending"
+    READY = "ready"
+    PUBLISHED = "published"
+    EXPIRED = "expired"
 
 
 def identifier() -> str:
@@ -46,10 +84,6 @@ class Organization(Base):
     policy: Mapped[dict | None] = mapped_column(JSON)
     policy_version: Mapped[int] = mapped_column(default=0, server_default="0")
     updated_at: Mapped[float | None]
-    customer_id: Mapped[str | None] = mapped_column(String(255), unique=True)
-    subscription_id: Mapped[str | None] = mapped_column(String(255), unique=True)
-    subscription_status: Mapped[str] = mapped_column(String(50), default="none")
-    billing_event_created: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[float] = mapped_column(default=time.time)
 
 
@@ -118,7 +152,9 @@ class Analysis(Base):
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id"))
     base_label: Mapped[str] = mapped_column(String(120))
     candidate_label: Mapped[str] = mapped_column(String(120))
-    status: Mapped[str] = mapped_column(String(20), default="queued", index=True)
+    status: Mapped[AnalysisStatus] = mapped_column(
+        String(20), default=AnalysisStatus.QUEUED, index=True
+    )
     error: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[float] = mapped_column(default=time.time)
     started_at: Mapped[float | None]
@@ -237,12 +273,6 @@ class AnalysisArtifact(Base):
     created_at: Mapped[float] = mapped_column(default=time.time)
 
 
-class BillingEvent(Base):
-    __tablename__ = "billing_events"
-    id: Mapped[str] = mapped_column(String(255), primary_key=True)
-    created_at: Mapped[float] = mapped_column(default=time.time)
-
-
 class GitHubInstallation(Base):
     __tablename__ = "github_installations"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
@@ -251,7 +281,9 @@ class GitHubInstallation(Base):
     )
     account_id: Mapped[int] = mapped_column(BigInteger)
     account_login: Mapped[str] = mapped_column(String(100))
-    status: Mapped[str] = mapped_column(String(30), default="active")
+    status: Mapped[InstallationStatus] = mapped_column(
+        String(30), default=InstallationStatus.ACTIVE
+    )
     verified_at: Mapped[float] = mapped_column(default=time.time)
 
 
@@ -268,7 +300,7 @@ class RepositoryConnection(Base):
     repository_id: Mapped[int] = mapped_column(BigInteger, unique=True)
     full_name: Mapped[str] = mapped_column(String(255))
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id"))
-    status: Mapped[str] = mapped_column(String(30), default="active")
+    status: Mapped[ConnectionStatus] = mapped_column(String(30), default=ConnectionStatus.ACTIVE)
     created_at: Mapped[float] = mapped_column(default=time.time)
 
 
@@ -277,7 +309,9 @@ class GitHubDelivery(Base):
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
     body_hash: Mapped[str] = mapped_column(String(64), unique=True)
     event: Mapped[str] = mapped_column(String(40))
-    status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
+    status: Mapped[DeliveryStatus] = mapped_column(
+        String(30), default=DeliveryStatus.PENDING, index=True
+    )
     attempts: Mapped[int] = mapped_column(default=0)
     error: Mapped[str | None] = mapped_column(String(100))
     payload: Mapped[str | None] = mapped_column(Text)
@@ -300,7 +334,7 @@ class GitHubRun(Base):
     head_repository_id: Mapped[int] = mapped_column(BigInteger)
     base_ref: Mapped[str] = mapped_column(String(120))
     head_ref: Mapped[str] = mapped_column(String(120))
-    status: Mapped[str] = mapped_column(String(30), default="pending")
+    status: Mapped[RunStatus] = mapped_column(String(30), default=RunStatus.PENDING)
     error: Mapped[str | None] = mapped_column(String(100))
     check_id: Mapped[int | None] = mapped_column(BigInteger)
     check_uncertain: Mapped[bool] = mapped_column(default=False)
@@ -311,6 +345,7 @@ class GitHubRun(Base):
 class CommercialLock(Base):
     __tablename__ = "commercial_lock"
     id: Mapped[int] = mapped_column(primary_key=True)
+    event_count: Mapped[int] = mapped_column(default=0, server_default="0")
 
 
 class BetaInterest(Base):

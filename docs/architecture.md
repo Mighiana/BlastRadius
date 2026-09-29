@@ -79,7 +79,6 @@ current head, rather than assuming the initial migration. Upgrades from populate
 | `usage`, `audit_events` | UTC monthly reservations/export counters and audit events |
 | `github_installations`, `repository_connections` | Operator-verified tenant/provider identity mapping |
 | `github_deliveries`, `github_runs` | Idempotency, PR boundaries, publication reconciliation |
-| `billing_events` and legacy organization billing columns | Inert upgrade-preservation fields; no runtime payment authority |
 
 The models and migrations define foreign keys and cascades. Deleting analysis
 evidence preserves GitHub run tombstones by nulling the analysis link. Usage

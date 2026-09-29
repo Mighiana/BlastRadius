@@ -6,6 +6,18 @@ import { risky, safe } from '../test/fixtures';
 import { validateFiles, validatePlan } from './AnalysisForm';
 
 describe('report evidence and graph', () => {
+  it('renders mobile report navigation and scrolls to the selected section', async () => {
+    const scrollIntoView = vi.fn();
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrollIntoView;
+    const user = userEvent.setup();
+    render(<ReportView report={risky} />);
+    const navigation = screen.getByRole('navigation', { name: 'Report sections' });
+    expect(within(navigation).getAllByRole('link')).toHaveLength(6);
+    await user.click(within(navigation).getByRole('link', { name: 'Fix' }));
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+    Element.prototype.scrollIntoView = originalScrollIntoView;
+  });
   it('never renders or exports an incomplete result claiming SAFE', () => {
     render(<ReportView report={{ ...safe, analysis_complete: false }} />);
     expect(screen.getByRole('alert')).toHaveTextContent('The analysis result is inconsistent');
@@ -47,7 +59,8 @@ describe('report evidence and graph', () => {
   });
   it('does not infer score 100 from SAFE or claim no existing exposure', () => {
     render(<ReportView report={{ ...safe, score: { before: 85, after: 85, delta: 0 } }} />);
-    expect(screen.getByText('SAFE TO MERGE')).toBeVisible();
+    expect(screen.getByText('NO NEW PATHS')).toBeVisible();
+    expect(screen.queryByText('SAFE TO MERGE')).not.toBeInTheDocument();
     expect(screen.getAllByText('85')).toHaveLength(2);
     expect(screen.getByText(/does not prove safety/)).toBeVisible();
   });
