@@ -15,6 +15,7 @@ from blastradius.report import build_report, responsible_change
 from blastradius.sarif import build_sarif
 from blastradius.security.decision import decide
 from blastradius.security.remediation import generate_safer_config, recommend
+from blastradius.server.failures import FailureCode
 from blastradius.server.schemas import AnalysisInput
 
 LIMITATION = "Simplified static AWS model; a path is not proof of exploitability and no path is not proof of safety."
@@ -111,7 +112,7 @@ def analyze_input(
         )
     for config in (before_config, after_config):
         if len(config.resources) > max_resources:
-            raise ResourceLimitError("resource_limit_exceeded")
+            raise ResourceLimitError(FailureCode.RESOURCE_LIMIT_EXCEEDED)
         addresses = [r.address for r in config.resources]
         if len(addresses) != len(set(addresses)):
             raise ValueError("duplicate_resource_address")

@@ -12,7 +12,7 @@ import posixpath
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import List, Literal, Optional, Sequence, overload
 
 GIT_TIMEOUT_SECONDS = 30
 
@@ -35,6 +35,14 @@ class NoTerraformFiles(GitAnalysisError):
 
 class AmbiguousTerraformDir(GitAnalysisError):
     pass
+
+
+@overload
+def _run(repo: Path, args: Sequence[str], binary: Literal[False] = False) -> str: ...
+
+
+@overload
+def _run(repo: Path, args: Sequence[str], binary: Literal[True]) -> bytes: ...
 
 
 def _run(repo: Path, args: Sequence[str], binary: bool = False) -> str | bytes:
@@ -63,7 +71,7 @@ def is_git_repository(repo: Path | str) -> bool:
         output = _run(Path(repo), ["rev-parse", "--is-inside-work-tree"])
     except (GitAnalysisError, OSError):
         return False
-    return str(output).strip() == "true"
+    return output.strip() == "true"
 
 
 def require_repository(repo: Path | str) -> Path:
@@ -78,7 +86,7 @@ def require_repository(repo: Path | str) -> Path:
 def resolve_ref(repo: Path, ref: str) -> str:
     """Return the commit SHA for `ref`, or raise `RefNotFound`."""
     try:
-        return str(_run(repo, ["rev-parse", "--verify", "--quiet", "--end-of-options", f"{ref}^{{commit}}"])).strip()
+        return _run(repo, ["rev-parse", "--verify", "--quiet", "--end-of-options", f"{ref}^{{commit}}"]).strip()
     except GitAnalysisError as error:
         raise RefNotFound(f"Ref not found in repository: {ref}") from error
 
@@ -86,7 +94,7 @@ def resolve_ref(repo: Path, ref: str) -> str:
 def list_terraform_files(repo: Path, ref: str) -> List[str]:
     """All `.tf` paths present at `ref`, as repo-relative POSIX paths."""
     sha = resolve_ref(repo, ref)
-    output = str(_run(repo, ["ls-tree", "-rz", "--name-only", sha]))
+    output = _run(repo, ["ls-tree", "-rz", "--name-only", sha])
     return sorted(path for path in output.split("\0") if path.endswith(".tf"))
 
 
@@ -132,7 +140,7 @@ def materialize(repo: Path, ref: str, directory: str, target: Path) -> List[str]
         name = posixpath.basename(path)
         if "\\" in name or ":" in name or name in (".", ".."):
             raise GitAnalysisError(f"Unsafe snapshot filename: {path!r}")
-        (target / name).write_bytes(content)  # type: ignore[arg-type]
+        (target / name).write_bytes(content)
         written.append(name)
     return sorted(written)
 
@@ -182,9 +190,9 @@ def policy_at_ref(repo, base_sha):
     import yaml
     from blastradius.policy import POLICY_FILENAMES, Policy, PolicyError, load_policy_data
 
-    paths = str(_run(repo, [
+    paths = _run(repo, [
         "ls-tree", "-rz", "--name-only", base_sha
-    ])).split("\0")
+    ]).split("\0")
     for filename in POLICY_FILENAMES:
         if filename not in paths:
             continue

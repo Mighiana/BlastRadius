@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import replace
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -42,7 +44,8 @@ from blastradius.server.models import (
     Project,
     User,
 )
-from blastradius.server.operator import RESOURCES
+from blastradius.server.failures import FailureCode
+from blastradius.server.operator import FAILURE_CODES, RESOURCES
 from test_server import identity_client, login, project, submit, terminal
 
 backend_client = test_server.backend_client
@@ -751,6 +754,39 @@ def test_cli_inspection_and_cleanup_are_bounded(operator_client, monkeypatch, ca
                 == expected[plan["code"]]
             )
     assert not limits["payments_enabled"]
+
+
+def test_failure_codes_are_the_shared_vocabulary():
+    assert FAILURE_CODES == {code.value for code in FailureCode}
+    schema = (Path(__file__).parents[1] / "web/src/operator-api.ts").read_text(encoding="utf-8")
+    web_codes = re.search(r"error: z\.enum\(\[(.*?)\]\)", schema, re.S)
+    assert web_codes
+    assert set(re.findall(r"'([a-z_]+)'", web_codes.group(1))) == FAILURE_CODES
+
+
+def test_admin_failures_log_unknown_codes_without_leaking_them(operator_client, caplog):
+    client, app, _ = operator_client
+    me = client.get("/api/me").json()
+    known_id = seed_analysis(app, me, "failed")
+    unknown_id = seed_analysis(app, me, "failed")
+    with app.state.db.session(write=True) as session:
+        session.get(Analysis, known_id).error = FailureCode.RESULT_TOO_LARGE
+        session.get(Analysis, unknown_id).error = "PRIVATE-TOKEN-unregistered-code"
+    logger = logging.getLogger("blastradius.server.operator")
+    caplog.set_level(logging.WARNING, logger=logger.name)
+    logger.addHandler(caplog.handler)
+    try:
+        failures = {
+            item["id"]: item["error"]
+            for item in client.get("/api/admin/failures").json()["items"]
+        }
+    finally:
+        logger.removeHandler(caplog.handler)
+    assert failures[known_id] == "result_too_large"
+    assert failures[unknown_id] == "analysis_failed"
+    logged = [json.loads(record.getMessage()) for record in caplog.records]
+    assert logged == [{"event": "operator.unknown_failure_code", "analysis_id": unknown_id}]
+    assert "PRIVATE-TOKEN" not in caplog.text
 
 
 def test_admin_failure_redaction_retention_and_pagination(operator_client):
