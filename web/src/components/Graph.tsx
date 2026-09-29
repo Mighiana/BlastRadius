@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from 'react';
+import { useId, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Database, Globe2, KeyRound, Server, Shield, LockKeyhole } from 'lucide-react';
 import type { Edge, Snapshot } from '../api';
 
@@ -30,8 +30,21 @@ export function Graph({ snapshot, compact = false }: { snapshot: Snapshot; compa
   const labelId = useId();
   const path = snapshot.attack_paths.find(p => p.id === selected)
     ?? snapshot.attack_paths.find(p => p.reaches_sensitive) ?? snapshot.attack_paths[0];
-  const nodes = path?.nodes.map(id => snapshot.graph.nodes.find(n => n.id === id)).filter(n => n !== undefined) ?? [];
-  const inspected = snapshot.graph.nodes.find(node => node.id === selectedNode);
+  const nodeById = useMemo(() => new Map(snapshot.graph.nodes.map(node => [node.id, node])), [snapshot.graph.nodes]);
+  const edgesByNode = useMemo(() => {
+    const index = new Map<string, Edge[]>();
+    const add = (id: string, edge: Edge) => {
+      const list = index.get(id);
+      if (list) list.push(edge); else index.set(id, [edge]);
+    };
+    for (const edge of snapshot.graph.edges) {
+      add(edge.source, edge);
+      if (edge.target !== edge.source) add(edge.target, edge);
+    }
+    return index;
+  }, [snapshot.graph.edges]);
+  const nodes = path?.nodes.map(id => nodeById.get(id)).filter(n => n !== undefined) ?? [];
+  const inspected = nodeById.get(selectedNode);
   return <div className="graph" data-testid="attack-graph">
     <div className="graph-toolbar"><span className="eyebrow">MODELED REACHABILITY</span>
       <span className="graph-legend"><i className={path?.reaches_sensitive ? 'dot red' : 'dot'} />{path?.reaches_sensitive ? 'Sensitive data reachable' : 'No critical path'}</span>
@@ -76,7 +89,7 @@ export function Graph({ snapshot, compact = false }: { snapshot: Snapshot; compa
         <span key={node.id}><NodeIcon type={node.type} />{node.name}</span>)}</div>
     </div>}
     {!compact && <><label className="path-select">Inspect any graph node<select value={selectedNode} onChange={e => setSelectedNode(e.target.value)}><option value="">Choose a resource</option>{snapshot.graph.nodes.map(node => <option value={node.id} key={node.id}>{node.name} · {node.type}</option>)}</select></label>
-      {inspected && <section className="node-inspector" aria-label="Selected node evidence"><h3>{inspected.name}</h3><code>{inspected.id}</code><p>{inspected.type} · engine risk: {inspected.risk} · {inspected.sensitive ? 'marked sensitive' : 'not marked sensitive'}</p><p>{path?.nodes.includes(inspected.id) ? 'On the selected attack path.' : 'Outside the selected attack path. This does not establish safety.'}</p>{snapshot.graph.edges.filter(edge => edge.source === inspected.id || edge.target === inspected.id).map((edge, index) => <Evidence key={`${edge.source}-${edge.target}-${index}`} edge={edge} index={index} />)}</section>}
+      {inspected && <section className="node-inspector" aria-label="Selected node evidence"><h3>{inspected.name}</h3><code>{inspected.id}</code><p>{inspected.type} · engine risk: {inspected.risk} · {inspected.sensitive ? 'marked sensitive' : 'not marked sensitive'}</p><p>{path?.nodes.includes(inspected.id) ? 'On the selected attack path.' : 'Outside the selected attack path. This does not establish safety.'}</p>{(edgesByNode.get(inspected.id) ?? []).map((edge, index) => <Evidence key={`${edge.source}-${edge.target}-${index}`} edge={edge} index={index} />)}</section>}
     </>}
     {!compact && <details className="all-relationships">
       <summary>Inspect all graph relationships ({snapshot.graph.edges.length})</summary>
