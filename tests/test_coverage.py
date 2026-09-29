@@ -183,6 +183,11 @@ resource "random_string" "suffix" {
 resource "aws_s3_bucket" "data" {
   bucket = "literal-name"
 }
+
+resource "aws_s3_bucket" "site" {
+  bucket = "www.example.com"
+  tags = { owner = "team.platform.core" }
+}
 """,
         encoding="utf-8",
     )

@@ -25,7 +25,7 @@ SECURITY_ATTRIBUTES = {
     ),
 }
 _REFERENCE = re.compile(r"aws_[a-z0-9_]+\.[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?")
-_TRAVERSAL = re.compile(r"\b([a-z][a-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_-]*)\.[A-Za-z_]")
+_TRAVERSAL = re.compile(r"(?<![\w.-])([a-z][a-z0-9]*_[a-z0-9_]+)\.([A-Za-z_][A-Za-z0-9_-]*)\.[A-Za-z_]")
 _EXPRESSION = re.compile(r"\$\{|(?:var|local|module|data|each|count)\.|\b\w+\s*\(")
 INERT_TYPES = frozenset({
     "aws_vpc",
