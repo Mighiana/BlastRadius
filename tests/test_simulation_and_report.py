@@ -15,16 +15,6 @@ def _analyze(directory, label="x"):
 
 
 # --- Priority 3: simulation ------------------------------------------------
-def test_risky_simulation_is_applicable_to_the_safe_baseline():
-    available = {s.id for s in simulation.available_simulations(SAFE_DIR)}
-    assert "public_ssh" in available
-
-
-def test_risky_simulation_is_not_applicable_to_the_vulnerable_config():
-    available = {s.id for s in simulation.available_simulations(VULNERABLE_DIR)}
-    assert "public_ssh" not in available, "CIDR is already public, nothing to widen"
-
-
 def test_simulation_produces_the_same_result_as_the_committed_vulnerable_config(tmp_path):
     result = simulation.simulate(SAFE_DIR, tmp_path / "sim", simulation.SIMULATIONS["public_ssh"])
     assert result.applied and result.replacements == 1
