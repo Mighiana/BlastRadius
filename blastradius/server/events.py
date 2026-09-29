@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from blastradius.server.models import Analysis, CommercialLock, ProductEvent
+from blastradius.server.models import Analysis, AnalysisStatus, CommercialLock, ProductEvent
 
 EVENT_NAMES = (
     "account_created",
@@ -87,9 +87,9 @@ def analysis_event(db: Session, job: Analysis, name: str) -> None:
 
 
 def terminal_events(db: Session, job: Analysis) -> None:
-    if job.status == "failed":
+    if job.status == AnalysisStatus.FAILED:
         analysis_event(db, job, "analysis_failed")
-    elif job.status == "succeeded":
+    elif job.status == AnalysisStatus.SUCCEEDED:
         analysis_event(db, job, "analysis_completed")
         decision = {
             "BLOCK CHANGE": "block_result",
