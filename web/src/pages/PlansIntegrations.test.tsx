@@ -23,10 +23,12 @@ describe('API-backed plans and retention', () => {
     vi.stubGlobal('fetch', fetcher);
     mount(<Pricing />);
     await screen.findByText('enterprise', { exact: true });
-    expect(screen.getAllByText('777 analyses / month')).toHaveLength(3);
-    expect(screen.getAllByText('123 days of evidence retention')).toHaveLength(3);
+    expect(screen.getAllByText('777 analyses / month')).toHaveLength(2);
+    expect(screen.getAllByText('123 days of evidence retention')).toHaveLength(2);
+    expect(screen.getByText(/Configurable limits \(defaults: 777 analyses/)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Get started' })).toHaveAttribute('href', '/dashboard');
-    for (const button of screen.getAllByRole('button', { name: 'Coming soon' })) expect(button).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /checkout|upgrade|subscribe/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/self-service checkout is coming later/)).toBeInTheDocument();
     expect(screen.queryByText('Project policy controls')).not.toBeInTheDocument();
     expect(fetcher.mock.calls.every(([url]) => url === '/api/me' || url === '/api/plans')).toBe(true);
   });
@@ -83,9 +85,10 @@ describe('GitHub connection status', () => {
 });
 
 describe('trust templates', () => {
-  it.each(['security', 'privacy', 'terms'] as const)('marks %s for legal review with functional navigation', kind => {
+  it.each(['security', 'privacy', 'terms'] as const)('shows %s without internal review notes and with functional navigation', kind => {
     render(<MemoryRouter><Trust kind={kind} /></MemoryRouter>);
-    expect(screen.getByText('LEGAL REVIEW REQUIRED BEFORE COMMERCIAL LAUNCH')).toBeVisible();
+    expect(screen.queryByText(/LEGAL REVIEW REQUIRED|before commercial launch/i)).not.toBeInTheDocument();
+    if (kind === 'security') expect(screen.getByRole('link', { name: 'Report privately on GitHub' })).toHaveAttribute('href', 'https://github.com/Mighiana/BlastRadius/security/advisories/new');
     const navigation = screen.getByRole('navigation', { name: 'Trust pages' });
     expect(within(navigation).getByRole('link', { name: 'Security' })).toHaveAttribute('href', '/security');
     expect(within(navigation).getByRole('link', { name: 'Privacy' })).toHaveAttribute('href', '/privacy');
