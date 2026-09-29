@@ -27,6 +27,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from blastradius.server.app import create_app
 from blastradius.server.admin import assign_plan
 from blastradius.server.config import Settings
+from blastradius.server.db import LeaseLost
 from blastradius.server.events import event_summary
 from blastradius.server.github_api import (
     GitHubAPI,
@@ -1301,6 +1302,59 @@ def test_dispatch_releases_active_delivery_on_every_exit(harness, monkeypatch):
     assert not github.active
     assert github.dispatch("delivery-1") == {"status": "handled"}
     assert not github.active
+
+
+@pytest.mark.parametrize(
+    "fault, expected",
+    [
+        (LeaseLost("lease"), {"status": "deferred"}),
+        (OperationalError("commit", {}, RuntimeError("database down")), {"status": "deferred"}),
+        (KeyError("unexpected"), KeyError),
+    ],
+)
+def test_dispatch_commit_failure_releases_active_delivery_and_slot(
+    harness, monkeypatch, fault, expected
+):
+    app, _, _, _, _ = harness
+    github, db = app.state.github, app.state.db
+    monkeypatch.setattr(github, "dispatch_pending", lambda: 0)
+    for _ in range(app.state.settings.max_jobs):
+        assert app.state.jobs.reserve()
+    try:
+        assert send(harness).json() == {"status": "deferred"}
+    finally:
+        for _ in range(app.state.settings.max_jobs):
+            app.state.jobs.slots.release()
+    original_claim, original_fence = github._claim, db.fence
+    claimed = False
+
+    def claim(*args):
+        nonlocal claimed
+        result = original_claim(*args)
+        claimed = True
+        return result
+
+    def fence(session):
+        if claimed:
+            raise fault
+        if original_fence:
+            original_fence(session)
+
+    monkeypatch.setattr(github, "_claim", claim)
+    monkeypatch.setattr(db, "fence", fence)
+    if isinstance(expected, dict):
+        assert github.dispatch("delivery-1") == expected
+    else:
+        with pytest.raises(expected):
+            github.dispatch("delivery-1")
+    monkeypatch.setattr(db, "fence", original_fence)
+    assert claimed and not github.active
+    for _ in range(app.state.settings.max_jobs):
+        assert app.state.jobs.reserve()
+    for _ in range(app.state.settings.max_jobs):
+        app.state.jobs.slots.release()
+    with db.session() as session:
+        assert session.get(GitHubDelivery, "delivery-1").status == "pending"
 
 
 def test_finalize_retries_after_a_database_error(harness, monkeypatch):
