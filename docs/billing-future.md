@@ -1,10 +1,9 @@
 # Future billing adapter boundary
 
 This release has **no payment integration**. The old SDK, configuration and
-payment routes were removed. The nullable organization customer/subscription
-identifiers, subscription status/event timestamp and legacy `billing_events`
-table are preserved solely to avoid destructive migrations. Runtime entitlement
-code never reads them. Historical values are not evidence of an active purchase.
+payment routes were removed, and migration 0006 dropped the legacy organization
+customer/subscription columns and `billing_events` table. There is no stored
+payment state.
 
 A future, separately approved adapter can project verified external billing state
 into `Organization.plan` and optional Enterprise `plan_limits`, using the same

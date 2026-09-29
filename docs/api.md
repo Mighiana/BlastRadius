@@ -75,8 +75,7 @@ never echo source/token values. Every response has `X-Request-ID` and no-store.
 * `GET /api/organizations/{id}/usage` → `{period,analyses,exports,projects,members,
   pending_invitations,limits,features,plan}`; any member.
 * `GET /api/organizations/{id}/billing` → `{enabled:false,mode:"commercial_beta",
-  plan,usage}`; owner only. Subscription fields are inert
-  legacy placeholders. Checkout/portal/webhook routes are removed.
+  plan,usage}`; owner only. Checkout/portal/webhook routes are removed.
 * `GET /api/organizations/{id}/members` → `{members:[{user_id,role,name,email}]}`;
   owner/admin. Public arbitrary user-ID member creation was removed.
 * `PATCH /api/organizations/{id}/members/{user_id} {role}` → `{user_id,role}`.
