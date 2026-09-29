@@ -2,6 +2,7 @@
 
 import json
 import re
+from functools import lru_cache
 
 from blastradius.parser.expression import (
     ExpressionError,
@@ -16,6 +17,7 @@ _REFERENCE_RE = re.compile(
     r"(?<![\w.])(aws_[a-z0-9_]+)\.([A-Za-z_][A-Za-z0-9_-]*)(?![\w\[-])"
 )
 _JSON_INTERPOLATION = re.compile(r"(?<!\$)\$\{\s*(aws_[^}]*?)\s*\}")
+_POLICY_CACHE_SIZE = 256
 
 
 class DuplicateKeyError(ValueError):
@@ -100,6 +102,22 @@ def evaluate_policy_document(raw: object) -> tuple[dict | None, str | None]:
         return (marked_raw if isinstance(marked_raw, dict) else None), None
     if not isinstance(raw, str):
         return None, None
+    document, reason = _evaluate_policy_text(str(raw))
+    copied = _copy_tree(document)
+    return (copied if isinstance(copied, dict) else None), reason
+
+
+def _copy_tree(node: object) -> object:
+    """Fresh containers around shared immutable leaves, so cached documents stay pristine."""
+    if isinstance(node, dict):
+        return {key: _copy_tree(value) for key, value in node.items()}
+    if isinstance(node, list):
+        return [_copy_tree(item) for item in node]
+    return node
+
+
+@lru_cache(maxsize=_POLICY_CACHE_SIZE)
+def _evaluate_policy_text(raw: str) -> tuple[dict | None, str | None]:
     try:
         check_text_depth(raw)
         document = json.loads(raw, object_pairs_hook=unique_object)
