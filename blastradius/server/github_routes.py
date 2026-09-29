@@ -20,7 +20,14 @@ from blastradius.server.github_api import GitHubAPI, GitHubError
 from blastradius.server.github_service import GitHubService
 from blastradius.server.github_types import ConnectionInput, LifecycleEvent, PullEvent
 from blastradius.server.lifecycle import authorized_org
-from blastradius.server.models import GitHubInstallation, GitHubRun, Project, RepositoryConnection
+from blastradius.server.models import (
+    ConnectionStatus,
+    GitHubInstallation,
+    GitHubRun,
+    InstallationStatus,
+    Project,
+    RepositoryConnection,
+)
 from blastradius.server.persistence import audit, cutoff
 from blastradius.server.quotas import lock_org
 
@@ -58,7 +65,7 @@ def register_installation(
                 account_login=record.account.login,
             )
             session.add(installation)
-        installation.status, installation.verified_at = "active", time.time()
+        installation.status, installation.verified_at = InstallationStatus.ACTIVE, time.time()
         audit(
             session,
             org.id,
@@ -70,7 +77,7 @@ def register_installation(
     return {
         "installation_id": installation_id,
         "organization_id": organization_id,
-        "status": "active",
+        "status": InstallationStatus.ACTIVE,
     }
 
 
@@ -197,7 +204,7 @@ def github_router(db: Database, settings: Settings, service: GitHubService) -> A
             installation = session.get(GitHubInstallation, body.installation_id)
             if not installation or installation.organization_id != project.organization_id:
                 raise HTTPException(404, "not_found")
-            if installation.status != "active" or project.archived_at is not None:
+            if installation.status != InstallationStatus.ACTIVE or project.archived_at is not None:
                 raise HTTPException(409, "github_connection_unavailable")
             account_id = installation.account_id
         try:
@@ -218,7 +225,7 @@ def github_router(db: Database, settings: Settings, service: GitHubService) -> A
                 if (
                     not installation
                     or installation.organization_id != project.organization_id
-                    or installation.status != "active"
+                    or installation.status != InstallationStatus.ACTIVE
                     or project.archived_at is not None
                 ):
                     raise HTTPException(409, "github_connection_unavailable")
@@ -248,7 +255,7 @@ def github_router(db: Database, settings: Settings, service: GitHubService) -> A
                         organization_id=project.organization_id,
                         project_id=project.id,
                     )
-                elif connection.status != "active":
+                elif connection.status != ConnectionStatus.ACTIVE:
                     record_event(
                         session,
                         "github_connected",
@@ -256,7 +263,7 @@ def github_router(db: Database, settings: Settings, service: GitHubService) -> A
                         organization_id=project.organization_id,
                         project_id=project.id,
                     )
-                connection.full_name, connection.status = repo.full_name, "active"
+                connection.full_name, connection.status = repo.full_name, ConnectionStatus.ACTIVE
                 project.repository, project.repository_provider = repo.full_name, "github"
                 project.default_branch, project.updated_at = repo.default_branch, time.time()
                 session.flush()
@@ -277,7 +284,7 @@ def github_router(db: Database, settings: Settings, service: GitHubService) -> A
                 select(RepositoryConnection).where(RepositoryConnection.project_id == project_id)
             )
             if connection:
-                connection.status = "disconnected"
+                connection.status = ConnectionStatus.DISCONNECTED
                 audit(
                     session, project.organization_id, user.id, "github.disconnected", connection.id
                 )
