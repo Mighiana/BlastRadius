@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pydantic import TypeAdapter, ValidationError
 
+from blastradius.security.decision import Decision
 from blastradius.server.config import Settings
 from blastradius.server.db import Database, LeaseLost
 from blastradius.server.github_api import GitHubAPI, GitHubError
@@ -86,22 +87,22 @@ def summary(db: Database, run: GitHubRun, settings: Settings) -> tuple[str, str,
         ):
             raise GitHubError("github_analysis_expired")
         url = f"{settings.public_url.rstrip('/')}/dashboard?project={project.id}"
-        title, conclusion = "REVIEW REQUIRED", "failure"
+        title, conclusion = Decision.REVIEW.value, "failure"
         details = "Analysis unavailable. Review manually or use the safe Actions integration."
         if job:
             url = f"{settings.public_url.rstrip('/')}/dashboard?project={project.id}&analysis={job.id}"
             if job.status == "succeeded":
-                title = job.decision or "REVIEW REQUIRED"
+                title = job.decision or Decision.REVIEW.value
                 complete = bool(job.result and job.result.get("analysis_complete") is True)
-                if title == "SAFE TO MERGE" and complete:
+                if title == Decision.SAFE.value and complete:
                     conclusion = "success"
                 details = (
                     f"Score: {job.score_before} → {job.score_after}. "
                     f"New critical paths: {job.critical_paths_added}; "
                     f"removed: {job.critical_paths_removed}."
                 )
-                if not complete and title == "SAFE TO MERGE":
-                    title = "REVIEW REQUIRED"
+                if not complete and title == Decision.SAFE.value:
+                    title = Decision.REVIEW.value
         text = (
             f"{MARKER}\n## {title}\n\n"
             f"Commit: `{run.head_sha}`\n\n{details}\n\n"

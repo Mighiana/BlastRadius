@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from blastradius.security.decision import Decision
 from blastradius.server.models import Analysis, CommercialLock, ProductEvent
 
 EVENT_NAMES = (
@@ -88,9 +89,9 @@ def terminal_events(db: Session, job: Analysis) -> None:
     elif job.status == "succeeded":
         analysis_event(db, job, "analysis_completed")
         decision = {
-            "BLOCK CHANGE": "block_result",
-            "REVIEW REQUIRED": "review_result",
-            "SAFE TO MERGE": "safe_result",
+            Decision.BLOCK.value: "block_result",
+            Decision.REVIEW.value: "review_result",
+            Decision.SAFE.value: "safe_result",
         }.get(job.decision or "")
         if decision:
             analysis_event(db, job, decision)
