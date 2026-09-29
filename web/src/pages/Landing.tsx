@@ -1,43 +1,53 @@
-import { ArrowRight, GitPullRequest, Terminal, Network, LockKeyhole, GitCompareArrows, FileCheck2, ChevronRight } from 'lucide-react';
+import { ArrowRight, GitPullRequest, Terminal, Network, LockKeyhole, GitCompareArrows, FileCheck2, ChevronRight, Globe, Shield, Cpu, KeyRound, Database, Ban, CheckCircle2, AlertCircle, Lock, Check } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { reportSchema } from '../api';
-import { useResource } from '../hooks';
-import { Decision, ErrorNotice, Loading } from '../components/UI';
-import { Graph } from '../components/Graph';
+
+const HOPS = [
+  { icon: Globe, name: 'Internet', text: 'Anyone, anywhere' },
+  { icon: Shield, name: 'Web SG', text: 'Now allows SSH from 0.0.0.0/0' },
+  { icon: Cpu, name: 'EC2 instance', text: 'Becomes reachable' },
+  { icon: KeyRound, name: 'IAM role', text: 'Grants s3:GetObject' },
+  { icon: Database, name: 'Customer data', text: 'Sensitive bucket exposed', sensitive: true },
+];
 
 export default function Landing() {
-  const preview = useResource('/api/demo/public_ssh?stage=risky', reportSchema);
   return <>
     <section className="hero container">
-      <div className="hero-copy"><div className="hero-kicker"><span className="dot" /> PRIVATE BETA · SECURITY IN THE PULL REQUEST</div>
-        <h1>Your Terraform diff shows what changed.<br /><span>BlastRadius shows what became reachable.</span></h1>
-        <p>See the path from a one-line infrastructure change to your sensitive data. Catch new exposure before it reaches production.</p>
-        <div className="button-row"><Link className="button primary large" to="/demo">Explore the live demo<ArrowRight size={18} aria-hidden="true" /></Link><Link className="button secondary large" to="/guide"><GitPullRequest size={18} aria-hidden="true" />Add to your workflow</Link></div>
-        <Link className="text-link" to="/beta">Request early access</Link>
-        <div className="hero-assurances"><span>No AWS credentials</span><span>No infrastructure changes</span><span>Open source</span></div>
+      <div className="hero-copy"><div className="hero-kicker"><span className="dot" /> TERRAFORM SECURITY ANALYSIS · IN THE PULL REQUEST</div>
+        <h1>See what your <span>Terraform change</span> makes reachable.</h1>
+        <p>Your Terraform diff shows what changed. BlastRadius shows what became reachable, and blocks the merge when a new path leads to sensitive data.</p>
+        <div className="button-row"><Link className="button primary large" to="/demo">Try the live demo<ArrowRight size={18} aria-hidden="true" /></Link><Link className="button secondary large" to="/guide"><GitPullRequest size={18} aria-hidden="true" />Add to GitHub</Link></div>
+        <ul className="hero-assurances"><li><Check size={14} aria-hidden="true" />No cloud credentials</li><li><Check size={14} aria-hidden="true" />Nothing is executed or deployed</li><li><Check size={14} aria-hidden="true" />Works in GitHub Actions and the CLI</li></ul>
       </div>
-      <div className="product-preview">
-        <div className="preview-top"><span className="preview-brand"><GitCompareArrows size={16} aria-hidden="true" /> Infrastructure change review</span><span className="tag">LIVE ENGINE RESULT</span></div>
+      <figure className="product-preview story" aria-label="Example: a one-line Terraform change opens a path from the internet to customer data">
+        <div className="preview-top"><span className="preview-brand"><GitCompareArrows size={16} aria-hidden="true" /> main.tf · pull request #42</span><span className="tag">BUNDLED DEMO</span></div>
         <div className="preview-body">
-          <div className="preview-title"><div><span className="eyebrow">DEMO / PUBLIC SSH EXPOSURE</span><h2>One line opens the entire path.</h2></div>{preview.data && <Decision decision={preview.data.decision} />}</div>
-          <div className="code-change"><code><span className="line-number">28</span><span className="minus">− cidr_blocks = ["10.0.0.0/24"]</span></code><code><span className="line-number">28</span><span className="plus">+ cidr_blocks = ["0.0.0.0/0"]</span></code></div>
-          {preview.loading && <Loading>Loading a real engine comparison…</Loading>}
-          <ErrorNotice error={preview.error} retry={preview.reload} />
-          {preview.data && <><Graph snapshot={preview.data.after} compact />
-            <div className="preview-metrics"><div><strong>{preview.data.new_critical_paths.length}</strong><span>new critical path</span></div><div><strong>{preview.data.newly_reachable_sensitive.length}</strong><span>sensitive resource reached</span></div><div><strong>{preview.data.score.before} <ArrowRight size={18} aria-hidden="true" /> {preview.data.score.after}</strong><span>heuristic security score / 100</span></div>
-              <Link to="/demo">Inspect the evidence<ChevronRight size={17} aria-hidden="true" /></Link></div>
-          </>}
+          <div className="code-change"><code><span className="line-number">19</span><span>  resource "aws_security_group" "web" {'{'}</span></code><code><span className="line-number">25</span><span className="muted">    from_port   = 22</span></code><code><span className="line-number">28</span><span className="minus">−   cidr_blocks = ["10.0.0.0/24"]</span></code><code><span className="line-number">28</span><span className="plus">+   cidr_blocks = ["0.0.0.0/0"]</span></code></div>
+          <div className="story-compare">
+            <div className="story-state safe"><span><CheckCircle2 size={16} aria-hidden="true" />Before</span><strong><Lock size={15} aria-hidden="true" />SSH from 10.0.0.0/24</strong><small>Private network only</small></div>
+            <ArrowRight className="story-arrow" size={20} aria-hidden="true" />
+            <div className="story-state risky"><span><AlertCircle size={16} aria-hidden="true" />After</span><strong><Globe size={15} aria-hidden="true" />SSH from 0.0.0.0/0</strong><small>Open to the entire internet</small></div>
+          </div>
+          <p className="story-label">New attack path introduced</p>
+          <ol className="story-path">{HOPS.map(hop => <li key={hop.name} className={hop.sensitive ? 'sensitive' : undefined}><span className="story-node"><hop.icon size={22} aria-hidden="true" /></span><strong>{hop.name}</strong><small>{hop.text}</small></li>)}</ol>
+          <div className="story-verdict"><strong><Ban size={20} aria-hidden="true" />BLOCK CHANGE</strong><span>A new path to sensitive data was introduced.</span></div>
+          <div className="story-footer"><span>Responsible change: <code>10.0.0.0/24 → 0.0.0.0/0</code></span><Link to="/demo">See the real engine result<ChevronRight size={17} aria-hidden="true" /></Link></div>
         </div>
-      </div>
+      </figure>
       <p className="hero-caption">A modeled attack path is evidence to review, not proof of exploitability.</p>
     </section>
+    <section className="container section steps-section" id="how-it-works">
+      <div className="how-steps">{[
+        { n: '1', icon: GitCompareArrows, title: 'Compare', text: 'Baseline and candidate Terraform, a plan JSON, or the pull request itself.' },
+        { n: '2', icon: Network, title: 'Trace', text: 'Follow new reachability from public entry points to sensitive resources.' },
+        { n: '3', icon: FileCheck2, title: 'Decide', text: 'BLOCK, REVIEW or SAFE, with the responsible line and per-hop evidence.' },
+      ].map(step => <article className="step-card" key={step.n}><span className="step-number">{step.n}</span><span className="step-icon"><step.icon size={24} aria-hidden="true" /></span><div><h2>{step.title}</h2><p>{step.text}</p></div></article>)}</div>
+    </section>
     <section className="value-strip"><div className="container"><span>BUILT FOR THE WAY YOU SHIP</span><strong><Terminal size={19} aria-hidden="true" />Terraform</strong><strong><GitPullRequest size={19} aria-hidden="true" />GitHub Actions</strong><strong><Network size={19} aria-hidden="true" />AWS infrastructure</strong><strong><FileCheck2 size={19} aria-hidden="true" />SARIF reports</strong></div></section>
-    <section className="container section" id="how-it-works"><div className="section-intro"><p className="eyebrow">FROM DIFF TO DECISION</p><h2>Understand the change.<br />Follow the consequences.</h2><p>A port, a role, and a bucket can look harmless in isolation. See what they connect when a pull request brings them together.</p></div>
-      <div className="feature-grid">{[
-        { n: '01', icon: GitCompareArrows, title: 'Compare your infrastructure', text: 'Start with baseline and candidate Terraform files, a plan JSON, or a GitHub pull request in your own CI.' },
-        { n: '02', icon: Network, title: 'Trace what became reachable', text: 'Compare directed attack graphs. Follow public entry points, compute identities, permissions and sensitive storage.' },
-        { n: '03', icon: FileCheck2, title: 'Make an informed merge decision', text: 'Get BLOCK, REVIEW or SAFE with the responsible change, per-hop evidence and specific remediation guidance.' },
-      ].map(item => <article className="feature-card" key={item.n}><span className="feature-number">{item.n}</span><item.icon size={26} aria-hidden="true" /><h3>{item.title}</h3><p>{item.text}</p></article>)}</div>
+    <section className="container section why-section"><div className="section-intro"><p className="eyebrow">WHY NOT JUST READ THE DIFF?</p><h2>The diff says what changed.<br />It never says what that connects.</h2></div>
+      <div className="why-grid">
+        <article><span className="eyebrow">TERRAFORM DIFF</span><div className="code-change"><code><span className="line-number">28</span><span className="minus">− cidr_blocks = ["10.0.0.0/24"]</span></code><code><span className="line-number">28</span><span className="plus">+ cidr_blocks = ["0.0.0.0/0"]</span></code></div><p><strong>What changed?</strong> One CIDR.</p></article>
+        <article className="why-answer"><span className="eyebrow">BLASTRADIUS</span><p className="why-path">Internet <ArrowRight size={14} aria-hidden="true" /> Web SG <ArrowRight size={14} aria-hidden="true" /> EC2 <ArrowRight size={14} aria-hidden="true" /> IAM role <ArrowRight size={14} aria-hidden="true" /> Customer data</p><p><strong>What became reachable?</strong> A sensitive S3 bucket, from anywhere on the internet, through an instance role that never appeared in the diff.</p></article>
+      </div>
     </section>
     <section className="container section"><div className="section-intro"><p className="eyebrow">SMALL CHANGES. CONNECTED CONSEQUENCES.</p><h2>Review the path, not just the finding.</h2></div>
       <div className="use-cases"><article><span className="tag">NETWORK</span><h3>An open port is only the beginning.</h3><p>Understand which instance, role and sensitive bucket sit behind an ingress change.</p></article><article><span className="tag">IDENTITY</span><h3>Permissions change the destination.</h3><p>See how a broader IAM grant connects an exposed workload to additional data.</p></article><article><span className="tag">STORAGE</span><h3>Public access changes the boundary.</h3><p>Catch direct public exposure of storage marked sensitive in Terraform.</p></article></div>
@@ -57,6 +67,6 @@ export default function Landing() {
         ['Can I run GitHub Actions without a SaaS account?', 'Yes. The documented CLI and Actions workflow run in your environment without a BlastRadius SaaS account. They do not automatically upload reports into workspace history.'],
       ].map(([question, answer]) => <details key={question}><summary>{question}</summary><p>{answer}</p></details>)}</div>
     </section>
-    <section className="container section"><div className="final-cta"><p className="eyebrow">KNOW BEFORE YOU MERGE</p><h2>See what one line can open.</h2><p>Three real scenarios. Every connection explained.</p><Link className="button primary large" to="/demo">Explore the live demo<ArrowRight size={18} aria-hidden="true" /></Link></div></section>
+    <section className="container section"><div className="final-cta"><p className="eyebrow">KNOW BEFORE YOU MERGE</p><h2>See what one line can open.</h2><p>Three real scenarios. Every connection explained.</p><Link className="button primary large" to="/demo">Try the live demo<ArrowRight size={18} aria-hidden="true" /></Link></div></section>
   </>;
 }

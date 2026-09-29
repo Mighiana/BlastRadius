@@ -70,7 +70,7 @@ for (const width of widths) {
       const failures: string[] = [];
       page.on('pageerror', error => failures.push(error.message));
       await page.goto('/');
-      await expect(page.getByRole('heading', { level: 1 })).toHaveText('Your Terraform diff shows what changed.BlastRadius shows what became reachable.');
+      await expect(page.getByRole('heading', { level: 1 })).toHaveText('See what your Terraform change makes reachable.');
       await expect(page.locator('.product-preview').getByText('BLOCK CHANGE', { exact: true })).toBeVisible();
       await contained(page);
       await navigate(page, 'Product demo');

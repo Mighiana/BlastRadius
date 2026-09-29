@@ -9,7 +9,7 @@ import sys
 import tempfile
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from collections.abc import Callable
 from pathlib import Path
 
@@ -32,8 +32,11 @@ def execute(
     settings: Settings,
     policy_snapshot: dict | None = None,
     lease_healthy: Callable[[], bool] | None = None,
+    stopping: threading.Event | None = None,
+    work_dir: Path | None = None,
 ) -> dict:
-    jobs_dir = settings.data_dir.resolve() / "jobs"
+    jobs_dir = work_dir or settings.data_dir.resolve() / "jobs"
+    jobs_dir = jobs_dir.resolve()
     jobs_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     with tempfile.TemporaryDirectory(prefix="job-", dir=jobs_dir) as directory:
         workdir = Path(directory)
@@ -77,7 +80,9 @@ def execute(
                     deadline = time.monotonic() + settings.job_timeout_seconds
                     while process.poll() is None:
                         error = (
-                            "service_lease_lost"
+                            "server_restarted"
+                            if stopping is not None and stopping.is_set()
+                            else "service_lease_lost"
                             if not lease_healthy()
                             else "analysis_timeout"
                             if time.monotonic() >= deadline
@@ -111,6 +116,10 @@ class JobManager:
             max_workers=settings.workers, thread_name_prefix="analysis"
         )
         self.persistence_failed = threading.Event()
+        self.draining = threading.Event()
+        self.stopping = threading.Event()
+        self.running: set[Future] = set()
+        self.running_lock = threading.Lock()
 
     def recover(self) -> None:
         while True:
@@ -142,14 +151,15 @@ class JobManager:
 
     def reserve(self) -> bool:
         return (
-            self.db.lease_healthy()
+            not self.draining.is_set()
+            and self.db.lease_healthy()
             and not self.persistence_failed.is_set()
             and self.slots.acquire(blocking=False)
         )
 
     def submit(self, analysis_id: str, payload: AnalysisInput) -> None:
         try:
-            self.executor.submit(self._run, analysis_id, payload)
+            self.track(self.executor.submit(self._run, analysis_id, payload))
         except Exception:
             self.finish(analysis_id, {"error": "dispatch_failed"})
             raise
@@ -210,7 +220,13 @@ class JobManager:
                         "project_id": job.project_id,
                     }
                 )
-            response = execute(payload, self.settings, policy_snapshot, self.db.lease_healthy)
+            response = (
+                {"error": "server_restarted"}
+                if self.stopping.is_set()
+                else execute(
+                    payload, self.settings, policy_snapshot, self.db.lease_healthy, self.stopping
+                )
+            )
             context["outcome"] = self.finish(analysis_id, response)
         except LeaseLost:
             context["outcome"] = "service_lease_lost"
@@ -223,5 +239,38 @@ class JobManager:
             logger.info(json.dumps({"event": "analysis.completed", **context}))
             self.slots.release()
 
-    def shutdown(self) -> None:
-        self.executor.shutdown(wait=True)
+    def track(self, future: Future) -> None:
+        def discard(done: Future) -> None:
+            with self.running_lock:
+                self.running.discard(done)
+
+        with self.running_lock:
+            self.running.add(future)
+        future.add_done_callback(discard)
+
+    def drain(
+        self,
+        executors: list[tuple[ThreadPoolExecutor, set[Future] | None]],
+        deadline: float,
+    ) -> None:
+        """Let all work finish until the shared deadline, then stop it."""
+        self.draining.set()
+        for executor, _ in executors:
+            executor.shutdown(wait=False, cancel_futures=False)
+        with self.running_lock:
+            running = set(self.running)
+        wait(running, timeout=max(0.0, deadline - time.monotonic()))
+        for _, futures in executors:
+            if futures is not None:
+                with self.running_lock:
+                    pending = set(futures)
+                for future in pending:
+                    future.cancel()
+        self.stopping.set()
+        for executor, _ in executors:
+            executor.shutdown(wait=True)
+
+    def shutdown(self, deadline: float | None = None) -> None:
+        if deadline is None:
+            deadline = time.monotonic() + self.settings.shutdown_drain_seconds
+        self.drain([(self.executor, None)], deadline)

@@ -23,6 +23,9 @@ SELECT EXISTS (
 """
 
 
+KEEPALIVES = (("idle", 10), ("interval", 5), ("count", 3))
+
+
 class ServiceLease:
     def __init__(self, db: Database, data_dir: Path):
         self.db = db
@@ -41,6 +44,10 @@ class ServiceLease:
             ).scalar():
                 self.connection.close()
                 raise RuntimeError("Only one server process per database is supported")
+            # A vanished owner host is detected by the server in ~25s instead of
+            # the OS default (hours), so its session lock cannot outlive it.
+            for name, value in KEEPALIVES:
+                self.connection.exec_driver_sql(f"SET tcp_keepalives_{name} = {value}")
             self.pid = self.connection.exec_driver_sql("SELECT pg_backend_pid()").scalar_one()
             # Drain transactions admitted by the previous owner before recovery.
             self.connection.exec_driver_sql("SELECT pg_advisory_xact_lock(481936025)")
@@ -92,18 +99,31 @@ class ServiceLease:
         if not self.healthy():
             raise LeaseLost("service_lease_lost")
 
-    def release(self) -> None:
+    def release(self) -> bool:
+        """Drop this process's own lease; returns whether it was still held.
+
+        The advisory lock is session-scoped, so unlocking on our own connection can
+        never release a successor that acquired it after this session lost it.
+        """
         with self.lock:
             self.lost.set()
+            released = False
             if self.connection is not None:
                 try:
                     if not self.connection.closed and not self.connection.invalidated:
-                        self.connection.exec_driver_sql("SELECT pg_advisory_unlock(481936024)")
+                        released = bool(
+                            self.connection.exec_driver_sql(
+                                "SELECT pg_advisory_unlock(481936024)"
+                            ).scalar()
+                        )
                         self.connection.commit()
                 except SQLAlchemyError:
                     pass
                 finally:
                     self.connection.close()
+                    self.connection = None
             if self.file and not self.file.closed:
                 fcntl.flock(self.file, fcntl.LOCK_UN)
                 self.file.close()
+                released = True
+            return released

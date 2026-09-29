@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import fcntl
+import json
+import logging
+import threading
 import time
 from pathlib import Path
 
@@ -87,3 +90,83 @@ def test_lease_wait_zero_preserves_startup_failure(tmp_path):
     finally:
         fcntl.flock(handle, fcntl.LOCK_UN)
         handle.close()
+
+
+def test_lease_wait_shutdown_joins_startup_before_releasing_lease(tmp_path, monkeypatch):
+    settings = _prepared_settings(tmp_path, 10)
+    handle = _held_lock(settings)
+    entered = threading.Event()
+    release = threading.Event()
+    original_ready = Database.ready
+
+    def blocked_ready(database):
+        entered.set()
+        assert release.wait(10)
+        return original_ready(database)
+
+    monkeypatch.setattr(Database, "ready", blocked_ready)
+    records = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    capture = Capture()
+    app_logger = logging.getLogger("blastradius.server.app")
+    lease_logger = logging.getLogger("blastradius.server.lease")
+    app_logger.addHandler(capture)
+    lease_logger.addHandler(capture)
+    client = TestClient(create_app(settings))
+    client.__enter__()
+    try:
+        fcntl.flock(handle, fcntl.LOCK_UN)
+        assert entered.wait(5)
+        release_thread = threading.Thread(
+            target=lambda: (time.sleep(0.3), release.set())
+        )
+        release_thread.start()
+        started = time.monotonic()
+        client.__exit__(None, None, None)
+        duration = time.monotonic() - started
+        release_thread.join()
+        assert duration >= 0.25
+    finally:
+        release.set()
+        handle.close()
+        app_logger.removeHandler(capture)
+        lease_logger.removeHandler(capture)
+
+    events = [
+        json.loads(record.getMessage()).get("event")
+        for record in records
+        if record.getMessage().startswith("{")
+    ]
+    assert "service.ready" not in events
+    assert events.index("service.startup_join") < events.index("service.lease_released")
+
+
+def test_demo_build_failure_keeps_live_but_not_ready(tmp_path, monkeypatch):
+    def fail_build(_settings):
+        raise RuntimeError("demo failure")
+
+    monkeypatch.setattr("blastradius.server.app.build_demos", fail_build)
+    settings = _prepared_settings(tmp_path, 0)
+    records = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    capture = Capture()
+    app_logger = logging.getLogger("blastradius.server.app")
+    app_logger.addHandler(capture)
+    with TestClient(create_app(settings)) as client:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not any(
+            "demo.build_failed" in record.getMessage() for record in records
+        ):
+            time.sleep(0.05)
+        app_logger.removeHandler(capture)
+        assert any("demo.build_failed" in record.getMessage() for record in records)
+        assert client.get("/health/live").status_code == 200
+        assert client.get("/health/ready").status_code == 503

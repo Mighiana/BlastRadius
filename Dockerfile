@@ -31,7 +31,8 @@ ENV PATH="/opt/venv/bin:$PATH" \
     BR_AUTO_MIGRATE=false \
     BR_DATA_DIR=/app/.local \
     BR_STATIC_DIR=/app/web/dist \
-    BLASTRADIUS_ALEMBIC_CONFIG=/app/alembic.ini
+    BLASTRADIUS_ALEMBIC_CONFIG=/app/alembic.ini \
+    BR_DEMO_CACHE=/app/demo-cache.json
 RUN /usr/local/bin/python -m pip uninstall --yes pip \
     && rm -rf /usr/local/lib/python3.12/ensurepip /root/.cache \
         /usr/local/include/python3.12 /usr/local/lib/python3.12/config-* \
@@ -41,6 +42,7 @@ RUN /usr/local/bin/python -m pip uninstall --yes pip \
     && chown blastradius:blastradius /app/.local
 WORKDIR /app
 COPY --from=python-build /opt/venv /opt/venv
+RUN python -I -m blastradius.server.demos /app/demo-cache.json
 COPY --from=frontend /build/web/dist ./web/dist
 COPY alembic.ini ./
 COPY scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh
