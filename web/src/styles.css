@@ -230,6 +230,11 @@ details>code{display:block;padding-top:12px}
 .verdict-panel p{font-size:.74rem;color:#b6bfca;max-width:800px}
 .verdict-mark{color:#bce7c8;flex-shrink:0}
 .blocked .verdict-mark{color:#f3a1af}
+#report-verdict,#report-change,#report-graph,#report-reachable,#remediation,#report-coverage,#report-export{scroll-margin-top:128px}
+.report-jump{display:none;position:sticky;top:77px;z-index:5;gap:8px;overflow-x:auto;padding:8px 0;background:var(--bg);scrollbar-width:none}
+.report-jump::-webkit-scrollbar{display:none}
+.report-jump a{flex:0 0 auto;min-height:36px;padding:7px 10px;border:1px solid #354356;border-radius:4px;background:#141d29;color:#bac6d6;font-size:.68rem;line-height:1.5}
+.report-jump a:hover{background:#202d3e}
 .metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
 .score-line{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:.8rem;color:var(--muted);margin-bottom:14px}
 .score-line strong{font-family:"Space Grotesk",sans-serif;font-size:1.15rem;color:#e5eaf1}.score-line strong small{font-size:.7rem}.score-line>small{font-size:.66rem}
@@ -442,6 +447,7 @@ progress::-webkit-progress-bar{background:#26374a;border-radius:5px}progress::-w
   .preview-body .graph-path{max-width:520px;margin:auto}
   .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
   .report-columns{grid-template-columns:1fr}
+  .report-jump{display:flex}
   .workspace-layout{grid-template-columns:1fr}
   .project-sidebar{display:grid;grid-template-columns:1fr 1fr;gap:14px 24px}
   .project-sidebar>.panel-heading,.project-sidebar>p{grid-column:1}
@@ -463,6 +469,7 @@ progress::-webkit-progress-bar{background:#26374a;border-radius:5px}progress::-w
   .change-summary .button-row{flex-shrink:1}
   .report-stack .graph-node{min-height:unset}
   .container{width:calc(100% - 40px)}
+  .report-jump{top:65px}
   .header-inner{height:65px}.brand{font-size:1.15rem}
   .mobile-menu{display:flex}
   .main-nav{display:none;position:absolute;top:65px;left:0;width:100%;background:#101925;border-bottom:1px solid #3d4d60;padding:22px;box-shadow:0 20px 30px #0005;align-items:stretch;gap:4px}

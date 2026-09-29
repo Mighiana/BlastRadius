@@ -6,6 +6,18 @@ import { risky, safe } from '../test/fixtures';
 import { validateFiles, validatePlan } from './AnalysisForm';
 
 describe('report evidence and graph', () => {
+  it('renders mobile report navigation and scrolls to the selected section', async () => {
+    const scrollIntoView = vi.fn();
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrollIntoView;
+    const user = userEvent.setup();
+    render(<ReportView report={risky} />);
+    const navigation = screen.getByRole('navigation', { name: 'Report sections' });
+    expect(within(navigation).getAllByRole('link')).toHaveLength(6);
+    await user.click(within(navigation).getByRole('link', { name: 'Fix' }));
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+    Element.prototype.scrollIntoView = originalScrollIntoView;
+  });
   it('never renders or exports an incomplete result claiming SAFE', () => {
     render(<ReportView report={{ ...safe, analysis_complete: false }} />);
     expect(screen.getByRole('alert')).toHaveTextContent('The analysis result is inconsistent');
