@@ -102,6 +102,7 @@ def build_graph(config: ParsedConfig) -> nx.DiGraph:
     roles = config.of_type("aws_iam_role")
     profiles = config.of_type("aws_iam_instance_profile")
     buckets = config.of_type("aws_s3_bucket")
+    index = rules.ResourceIndex.build(config.resources)
 
     # --- Nodes -------------------------------------------------------------
     for sg in security_groups:
@@ -229,7 +230,7 @@ def build_graph(config: ParsedConfig) -> nx.DiGraph:
     # --- IAM_ROLE -> S3_BUCKET --------------------------------------------
     bucket_addresses = [b.address for b in buckets]
     for role in roles:
-        for policy_address, document in rules.role_policy_sources(role.address, config.resources):
+        for policy_address, document in rules.role_policy_sources(role.address, config.resources, index):
             for access in rules.s3_access_findings(document):
                 targets = (
                     bucket_addresses if access.targets_all_buckets else [
@@ -259,7 +260,7 @@ def build_graph(config: ParsedConfig) -> nx.DiGraph:
 
     # --- INTERNET -> S3_BUCKET (directly public bucket) -------------------
     for bucket in buckets:
-        for public_access in rules.public_bucket_findings(bucket, config.resources):
+        for public_access in rules.public_bucket_findings(bucket, config.resources, index):
             _add_edge(
                 graph,
                 GraphEdge(

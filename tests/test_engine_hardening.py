@@ -14,6 +14,7 @@ from blastradius.parser.models import (
     TerraformResource,
 )
 from blastradius.parser.plan_parser import parse_plan
+from blastradius.security import rules
 from blastradius.security.decision import Decision, decide
 from blastradius.security.rules import aws_pattern_matches, public_bucket_findings, public_ingress_findings
 from tests.conftest import SAFE_DIR, VULNERABLE_DIR
@@ -294,3 +295,19 @@ def test_graph_edge_budget_truncates_with_explicit_diagnostic():
     assert result.graph.number_of_edges() == 20_000
     assert not result.complete
     assert "GRAPH_TRUNCATED" in {d.code for d in result.diagnostics}
+
+
+def test_role_policy_sources_keep_resource_order_across_inline_and_attached_policies():
+    resources = [
+        TerraformResource("aws_iam_role_policy_attachment", "first", {
+            "role": "aws_iam_role.app.name", "policy_arn": "aws_iam_policy.managed.arn",
+        }),
+        TerraformResource("aws_iam_role_policy", "inline", {"role": "aws_iam_role.app.id", "policy": "inline"}),
+        TerraformResource("aws_iam_policy", "managed", {"policy": "managed"}),
+        TerraformResource("aws_iam_policy", "managed", {"policy": "shadowed"}),
+        TerraformResource("aws_iam_role_policy", "other", {"role": "aws_iam_role.other.id", "policy": "other"}),
+    ]
+    expected = [("aws_iam_policy.managed", "managed"), ("aws_iam_role_policy.inline", "inline")]
+    assert rules.role_policy_sources("aws_iam_role.app", resources) == expected
+    index = rules.ResourceIndex.build(resources)
+    assert rules.role_policy_sources("aws_iam_role.app", [], index) == expected
