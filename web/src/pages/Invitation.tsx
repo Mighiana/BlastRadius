@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { acceptedInvitationSchema, request } from '../api';
+import { acceptedInvitationSchema, request, signInLabel } from '../api';
 import { useAction } from '../hooks';
 import { useSession } from '../session';
 import { ErrorNotice, Loading, PageHeading } from '../components/UI';
@@ -30,7 +30,7 @@ export default function Invitation() {
     <ErrorNotice error={action.error} />
     {accepted ? <><h2>Invitation accepted</h2><Link className="button primary" to="/dashboard">Open workspace</Link></> : sessionError ? <ErrorNotice error={sessionError} retry={() => { void refresh(); }} /> : loading && !session ? <Loading>Checking your session…</Loading> : <>
       {!valid && <p className="notice">No valid invitation token was found. Reopen the original invitation link or request a new one.</p>}
-      {!session?.authenticated ? <><p>Sign in first, then reopen the original invitation link. The token was removed from this address and is never stored in browser storage.</p>{session?.auth.mode === 'oidc' && session.auth.enabled && !originMismatch ? <a className="button primary" href="/api/auth/login">Sign in with your identity provider</a> : <p className="notice">A configured identity provider is required. Local demo identities cannot accept invitations.</p>}</>
+      {!session?.authenticated ? <><p>Sign in first, then reopen the original invitation link. The token was removed from this address and is never stored in browser storage.</p>{session?.auth.mode === 'oidc' && session.auth.enabled && !originMismatch ? <a className="button primary" href="/api/auth/login">{signInLabel(session.auth)}</a> : <p className="notice">A configured identity provider is required. Local demo identities cannot accept invitations.</p>}</>
         : <><p>Signed in as <strong>{session.user?.email}</strong>. The server verifies that this address matches the invitation.</p>
           {!session.user?.email_verified && <p className="notice">Verify your email with your identity provider and sign in again before accepting.</p>}
           {session.auth.mode === 'demo' && <p className="notice">Demo identities cannot accept invitations.</p>}

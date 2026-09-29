@@ -74,7 +74,7 @@ export const sessionSchema = z.object({
   capabilities: z.object({ platform_admin: z.boolean() }).optional(),
   user: z.object({ id: z.string(), name: z.string(), email: z.string(), email_verified: z.boolean(), created_at: z.number() }).nullable(),
   organizations: z.array(organization), csrf_token: z.string(),
-  auth: z.object({ enabled: z.boolean(), mode: z.enum(['disabled', 'demo', 'oidc']), public_url: z.string().url(), login_url: z.string().nullable() }),
+  auth: z.object({ enabled: z.boolean(), mode: z.enum(['disabled', 'demo', 'oidc']), public_url: z.string().url(), login_url: z.string().nullable(), provider_name: z.string().nullable().optional() }),
   billing: z.object({ enabled: z.literal(false), mode: z.literal('commercial_beta') }),
 });
 export const projectSchema = z.object({
@@ -172,6 +172,9 @@ export type Policy = z.infer<typeof policySchema>;
 export type Role = z.infer<typeof roleSchema>;
 export function canManage(role?: Role) { return role === 'owner' || role === 'admin'; }
 export function canAnalyze(role?: Role) { return canManage(role) || role === 'developer'; }
+export function signInLabel(auth: Session['auth']) {
+  return `Sign in with ${auth.provider_name ?? 'your identity provider'}`;
+}
 export type Stage = 'safe' | 'risky' | 'remediated';
 export type AnalysisInput = {
   project_id: string; base_label: string; candidate_label: string;

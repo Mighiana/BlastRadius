@@ -4,6 +4,29 @@ import { download, exportReport, type Report } from '../api';
 import { Decision, ErrorNotice } from './UI';
 import { Graph } from './Graph';
 
+const CODE_LABEL: Record<string, string> = {
+  UNSUPPORTED_RESOURCE: 'Resource types outside coverage',
+  UNEXPANDED_MODULE: 'Modules not expanded',
+  UNEXPANDED_RESOURCE: 'count / for_each / dynamic not expanded',
+  UNRESOLVED_EXPRESSION: 'Values computed at plan time',
+  UNRESOLVED_RELATIONSHIP: 'References to unmodeled resources',
+  EXTERNAL_POLICY: 'Managed IAM policy content unavailable',
+  INVALID_POLICY: 'IAM policy not evaluable',
+  IAM_POLICY_EXPRESSION_UNRESOLVED: 'IAM policy not evaluable',
+  UNMODELED_SG_HOP: 'Security-group-to-security-group traffic',
+};
+const CODE_HELP: Record<string, string> = {
+  UNSUPPORTED_RESOURCE: 'These types are not in the reachability model. They cannot create a modeled path, but they can hide one.',
+  UNEXPANDED_MODULE: 'module blocks are not downloaded or expanded. Point BlastRadius at the root that declares the resources.',
+  UNEXPANDED_RESOURCE: 'Resources built from loops are not enumerated, so their rules and links are unknown.',
+  UNRESOLVED_EXPRESSION: 'Security-relevant attributes (tags, CIDRs, policies) use variables, locals or functions. Use plan JSON to analyze resolved values.',
+  UNRESOLVED_RELATIONSHIP: 'A modeled resource links to something outside coverage, so the link cannot be followed.',
+  EXTERNAL_POLICY: "Attached policy ARNs are not resolved, so the role's permissions are unknown.",
+  INVALID_POLICY: 'The policy document is templated or not literal JSON.',
+  IAM_POLICY_EXPRESSION_UNRESOLVED: 'The policy document is templated or not literal JSON.',
+  UNMODELED_SG_HOP: 'SG-to-SG ingress is not modeled.',
+};
+
 export function ReportView({ report, jobId }: { report: Report; jobId?: string }) {
   const [side, setSide] = useState<'before' | 'after'>('after');
   const [error, setError] = useState<Error | null>(null);
@@ -33,6 +56,22 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
     ['report-coverage', 'Coverage'],
     ['report-export', 'Export'],
   ];
+  const blockingDiagnostics = report.diagnostics.filter(diagnostic => diagnostic.blocks_analysis !== false);
+  const diagnosticGroups = Array.from(
+    blockingDiagnostics.reduce((groups, diagnostic) => {
+      const group = groups.get(diagnostic.code) ?? [];
+      group.push(diagnostic);
+      groups.set(diagnostic.code, group);
+      return groups;
+    }, new Map<string, typeof blockingDiagnostics>()),
+  ).sort(([codeA, diagnosticsA], [codeB, diagnosticsB]) =>
+    diagnosticsB.length - diagnosticsA.length || codeA.localeCompare(codeB));
+  function unsupportedSummary(diagnostics: typeof blockingDiagnostics) {
+    const types = [...new Set(diagnostics.map(diagnostic => diagnostic.message.split(': ').at(-1) ?? diagnostic.message))];
+    const shown = types.slice(0, 8).join(', ');
+    const remaining = types.length - Math.min(types.length, 8);
+    return `${types.length} resource types outside coverage: ${shown}${remaining ? ` +${remaining} more` : ''}`;
+  }
   return <div className="report-stack">
     <section id="report-verdict" className={`verdict-panel ${report.decision === 'BLOCK CHANGE' ? 'blocked' : ''}`} aria-label="Analysis decision">
       <div><Decision decision={report.decision} /><h2>{report.headline}</h2>
@@ -95,6 +134,16 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
       <p className="score-line"><span>Heuristic score</span><span>{report.score.before}</span><ArrowRight size={16} aria-hidden="true" /><strong>{report.score.after}<small>/100</small></strong><small><span className={report.score.delta < 0 ? 'danger-text' : ''}>{report.score.delta > 0 ? '+' : ''}{report.score.delta} points</span> · Heuristic · not a risk probability</small></p>
       <h3>Recommended next step</h3><p>{report.decision === 'BLOCK CHANGE' ? 'Review the responsible change and supporting paths, validate suggested edits, then upload the updated candidate for another comparison.' : 'Review existing exposure and coverage gaps with your team before deciding to merge. If you change the candidate, run a new comparison.'} Export evidence when you need a record for the review.</p>
       {report.limitations.map(text => <p key={text}>{text}</p>)}
+      {report.analysis_complete === false && <div className="why-review">
+        <p className="muted">The decision is REVIEW REQUIRED because the model could not fully evaluate this change. Counts are lower bounds.</p>
+        <h3>Why this needs review</h3>
+        <ul>
+          {diagnosticGroups.map(([code, diagnostics]) => <li key={code}>
+            <strong>{code === 'UNSUPPORTED_RESOURCE' ? unsupportedSummary(diagnostics) : `${diagnostics.length}× ${CODE_LABEL[code] ?? code}`}</strong>
+            <p>{CODE_HELP[code] ?? diagnostics[0]?.message ?? code}</p>
+          </li>)}
+        </ul>
+      </div>}
       <details open={report.analysis_complete === false}><summary>Coverage diagnostics ({report.diagnostics.length})</summary><ul className="findings">{report.diagnostics.map((d, i) => <li key={i}><strong>{d.code}</strong><p>{d.message}</p>{d.phase && <p>{d.phase}: <code>{d.resource}</code>{d.attribute && ` · ${d.attribute}`}{d.source_file && ` · ${d.source_file}`}</p>}</li>)}</ul></details>
       <details><summary>How the heuristic score was calculated</summary><div className="code-pair">{(['before', 'after'] as const).map(key => <div key={key}><h3>{key === 'before' ? 'Before' : 'After'}: {report[key].score}/100</h3><ul className="findings">{report[key].score_breakdown.map(item => <li key={item.finding}>{item.finding}: {item.points} points ({item.count})</li>)}</ul>{!report[key].score_breakdown.length && <p>No score penalties in this model.</p>}</div>)}</div><p className="muted">Scores start at 100 and subtract capped findings. The score is not a calibrated measure of real-world risk.</p></details>
     </section>
