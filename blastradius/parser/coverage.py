@@ -25,6 +25,7 @@ SECURITY_ATTRIBUTES = {
     ),
 }
 _REFERENCE = re.compile(r"aws_[a-z0-9_]+\.[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?")
+_TRAVERSAL = re.compile(r"\b([a-z][a-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_-]*)\.[A-Za-z_]")
 _EXPRESSION = re.compile(r"\$\{|(?:var|local|module|data|each|count)\.|\b\w+\s*\(")
 INERT_TYPES = frozenset({
     "aws_vpc",
@@ -76,6 +77,7 @@ _LINK_ATTRIBUTES = {
     "aws_s3_bucket_policy": ("bucket",),
     "aws_s3_bucket_public_access_block": ("bucket",),
 }
+_MODELED_TYPES = frozenset(SECURITY_ATTRIBUTES) | frozenset(_LINK_ATTRIBUTES)
 
 
 def safe_source(source: str | None) -> str:
@@ -188,10 +190,29 @@ def config_diagnostics(config: ParsedConfig) -> list[Diagnostic]:
             value = resource.attributes[name]
             if name == "policy":
                 findings.extend(policy_diagnostics(resource, value))
-            elif any(_EXPRESSION.search(text) and not _REFERENCE.fullmatch(text) for text in _strings(value)):
-                findings.append(diagnostic(resource, "UNRESOLVED_EXPRESSION", "Security-relevant expression is not resolved.", name))
-            elif value is None:
-                findings.append(diagnostic(resource, "UNKNOWN_VALUE", "Security-relevant value is null or unknown.", name))
+            else:
+                unmodeled = next((
+                    match for text in _strings(value)
+                    for match in _TRAVERSAL.finditer(text)
+                    if match.group(1) not in _MODELED_TYPES
+                ), None)
+                if unmodeled is not None:
+                    findings.append(diagnostic(
+                        resource,
+                        "UNRESOLVED_EXPRESSION",
+                        f"Value depends on an unmodeled resource attribute ({unmodeled.group(1)}.{unmodeled.group(2)}).",
+                        name,
+                    ))
+                elif any(_EXPRESSION.search(text) and not _REFERENCE.fullmatch(text) for text in _strings(value)):
+                    findings.append(diagnostic(
+                        resource, "UNRESOLVED_EXPRESSION",
+                        "Security-relevant expression is not resolved.", name,
+                    ))
+                elif value is None:
+                    findings.append(diagnostic(
+                        resource, "UNKNOWN_VALUE",
+                        "Security-relevant value is null or unknown.", name,
+                    ))
             for ref in references(value):
                 if ref not in addresses:
                     findings.append(diagnostic(resource, "UNRESOLVED_REFERENCE", "Referenced resource is absent from the model.", name))

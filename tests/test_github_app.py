@@ -637,6 +637,16 @@ def test_quota_failure_publishes_review_and_does_not_charge(harness):
             "unknown_failure",
             "Analysis unavailable. Review manually or use the safe Actions integration.",
         ),
+        (
+            "github_budget_exceeded",
+            "Fetching the Terraform root exhausted the GitHub request budget (too many files/requests or a deadline). "
+            "Reduce the root or use the GitHub Actions integration.",
+        ),
+        (
+            "github_unsupported_terraform",
+            "The Terraform root contains .tf.json files or nested directories that BlastRadius cannot analyze from GitHub. "
+            "Only .tf files in one directory are supported.",
+        ),
     ],
 )
 def test_publisher_failure_details(harness, error, expected):

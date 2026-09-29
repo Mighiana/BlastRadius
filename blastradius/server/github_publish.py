@@ -39,8 +39,8 @@ FAILURE_DETAILS: dict[str, str] = {
         "No .tf files were found at the project's Terraform root. Check the Terraform root in the project settings."
     ),
     "github_unsupported_terraform": (
-        "The Terraform root contains files BlastRadius cannot analyze from GitHub (.tf.json, nested directories "
-        "or non-.tf files). Only simple .tf files in one directory are supported."
+        "The Terraform root contains .tf.json files or nested directories that BlastRadius cannot analyze from GitHub. "
+        "Only .tf files in one directory are supported."
     ),
     "github_unsafe_tree": (
         "The Terraform root contains symlinks, submodules or LFS objects, which BlastRadius does not fetch."
@@ -53,8 +53,8 @@ FAILURE_DETAILS: dict[str, str] = {
         "for large roots."
     ),
     "github_budget_exceeded": (
-        "The Terraform root exceeds the source size limit for hosted analysis. Use the GitHub Actions integration "
-        "for large roots."
+        "Fetching the Terraform root exhausted the GitHub request budget (too many files/requests or a deadline). "
+        "Reduce the root or use the GitHub Actions integration."
     ),
     "github_response_limit": (
         "The Terraform root exceeds the source size limit for hosted analysis. Use the GitHub Actions integration "

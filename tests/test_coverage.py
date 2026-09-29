@@ -111,6 +111,87 @@ def test_unsupported_security_resource_still_requires_review(tmp_path):
     assert decide(compare(result, result)).decision is Decision.REVIEW
 
 
+def test_unmodeled_inert_reference_in_security_attribute_requires_review(tmp_path):
+    (tmp_path / "main.tf").write_text(
+        """
+resource "random_string" "suffix" {
+  length = 8
+}
+
+resource "aws_s3_bucket" "data" {
+  bucket = random_string.suffix.result
+}
+
+resource "aws_iam_policy" "read" {
+  policy = jsonencode({
+    Statement = [{
+      Effect = "Allow"
+      Action = "s3:GetObject"
+      Resource = "arn:aws:s3:::literal-name/*"
+    }]
+  })
+}
+""",
+        encoding="utf-8",
+    )
+    config = parse_directory(tmp_path)
+    assert any(
+        diagnostic.code == "UNRESOLVED_EXPRESSION"
+        and diagnostic.attribute == "bucket"
+        and "random_string.suffix" in diagnostic.message
+        for diagnostic in config_diagnostics(config)
+    )
+    result = analyze(build_graph(config))
+    diff = compare(analyze(build_graph(ParsedConfig())), result)
+    assert not result.complete
+    assert decide(diff).decision is Decision.REVIEW
+
+
+def test_unmodeled_inert_reference_in_security_group_cidr_requires_review(tmp_path):
+    (tmp_path / "main.tf").write_text(
+        """
+resource "aws_vpc" "main" {}
+
+resource "aws_security_group" "web" {
+  ingress {
+    protocol = "tcp"
+    from_port = 443
+    to_port = 443
+    cidr_blocks = [aws_vpc.main.cidr_block]
+  }
+}
+""",
+        encoding="utf-8",
+    )
+    config = parse_directory(tmp_path)
+    assert any(
+        diagnostic.code == "UNRESOLVED_EXPRESSION"
+        and diagnostic.attribute == "ingress"
+        and "aws_vpc.main" in diagnostic.message
+        for diagnostic in config_diagnostics(config)
+    )
+    assert not analyze(build_graph(config)).complete
+
+
+def test_unrelated_inert_resource_does_not_make_literal_bucket_incomplete(tmp_path):
+    (tmp_path / "main.tf").write_text(
+        """
+resource "random_string" "suffix" {
+  length = 8
+}
+
+resource "aws_s3_bucket" "data" {
+  bucket = "literal-name"
+}
+""",
+        encoding="utf-8",
+    )
+    config = parse_directory(tmp_path)
+    result = analyze(build_graph(config))
+    assert result.complete
+    assert not any(diagnostic.code == "UNRESOLVED_EXPRESSION" for diagnostic in result.diagnostics)
+
+
 def test_coverage_lines_cap_diagnostics():
     result = SimpleNamespace(
         diagnostics=[Diagnostic("TEST", f"diagnostic-{index}") for index in range(26)]
