@@ -26,7 +26,47 @@ SECURITY_ATTRIBUTES = {
 }
 _REFERENCE = re.compile(r"aws_[a-z0-9_]+\.[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?")
 _EXPRESSION = re.compile(r"\$\{|(?:var|local|module|data|each|count)\.|\b\w+\s*\(")
-_NON_SECURITY_TYPES = frozenset({"aws_cloudwatch_log_group"})
+INERT_TYPES = frozenset({
+    "aws_vpc",
+    "aws_subnet",
+    "aws_route_table",
+    "aws_route_table_association",
+    "aws_route",
+    "aws_internet_gateway",
+    "aws_nat_gateway",
+    "aws_eip",
+    "aws_vpc_dhcp_options",
+    "aws_vpc_dhcp_options_association",
+    "aws_flow_log",
+    "aws_cloudwatch_log_group",
+    "aws_cloudwatch_metric_alarm",
+    "aws_sns_topic",
+    "aws_kms_key",
+    "aws_kms_alias",
+    "aws_key_pair",
+    "aws_ebs_volume",
+    "aws_ebs_snapshot",
+    "aws_volume_attachment",
+    "aws_placement_group",
+    "aws_db_subnet_group",
+    "aws_db_parameter_group",
+    "aws_db_option_group",
+    "aws_ecr_repository",
+    "aws_ssm_parameter",
+    "aws_acm_certificate",
+    "aws_acm_certificate_validation",
+    "aws_route53_zone",
+    "aws_route53_record",
+    "random_string",
+    "random_id",
+    "random_password",
+    "random_pet",
+    "null_resource",
+    "time_sleep",
+    "local_file",
+    "tls_private_key",
+})
+"""Inert types have no edge in the reachability model, so ignoring them cannot change a result."""
 _LINK_ATTRIBUTES = {
     "aws_instance": ("vpc_security_group_ids", "security_groups", "iam_instance_profile"),
     "aws_iam_instance_profile": ("role",),
@@ -124,8 +164,16 @@ def config_diagnostics(config: ParsedConfig) -> list[Diagnostic]:
     findings = list(config.diagnostics)
     addresses = Counter(r.address for r in config.resources)
     for unsupported in config.unsupported:
-        findings.append(Diagnostic("UNSUPPORTED_RESOURCE", f"Outside modeled coverage: {unsupported}",
-                                   blocks_analysis=unsupported not in _NON_SECURITY_TYPES))
+        message = (
+            f"Outside modeled coverage (no reachability effect): {unsupported}"
+            if unsupported in INERT_TYPES
+            else f"Outside modeled coverage: {unsupported}"
+        )
+        findings.append(Diagnostic(
+            "UNSUPPORTED_RESOURCE",
+            message,
+            blocks_analysis=unsupported not in INERT_TYPES,
+        ))
     for resource in config.resources:
         if addresses[resource.address] > 1:
             findings.append(diagnostic(resource, "DUPLICATE_ADDRESS", "Duplicate resource address; relationships are ambiguous."))

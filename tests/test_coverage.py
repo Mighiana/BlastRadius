@@ -3,6 +3,7 @@
 import copy
 import io
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -12,9 +13,9 @@ from blastradius.parser import parse_directory, parse_file
 from blastradius.parser import limits
 from blastradius.parser.coverage import config_diagnostics
 from blastradius.parser.limits import InputLimitError
-from blastradius.parser.models import ParsedConfig, TerraformResource
+from blastradius.parser.models import Diagnostic, ParsedConfig, TerraformResource
 from blastradius.parser.plan_parser import PlanParseError, load_plan, parse_plan
-from blastradius.report import build_pr_comment, build_report
+from blastradius.report import build_pr_comment, build_report, coverage_lines
 from blastradius.sarif import build_sarif
 from blastradius.security.decision import Decision, decide
 from tests.conftest import EXAMPLES
@@ -70,6 +71,54 @@ resource "aws_iam_role_policy" "json" {
     assert not config.complete
     result = analyze(build_graph(config))
     assert decide(compare(result, result)).decision is Decision.REVIEW
+
+
+def test_inert_types_keep_diagnostics_without_blocking_analysis(tmp_path):
+    for source in (EXAMPLES / "safe").glob("*.tf"):
+        (tmp_path / source.name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    (tmp_path / "inert.tf").write_text(
+        """
+resource "aws_vpc" "main" {}
+resource "aws_subnet" "main" {}
+resource "random_string" "suffix" {}
+""",
+        encoding="utf-8",
+    )
+    result = analyze(build_graph(parse_directory(tmp_path)))
+    diff = compare(result, result)
+    assert result.complete and diff.complete
+    assert decide(diff).decision is Decision.SAFE
+    inert = [item for item in result.diagnostics if item.code == "UNSUPPORTED_RESOURCE"]
+    assert {item.resource for item in inert} == {""}
+    assert all(not item.blocks_analysis for item in inert)
+    assert all("no reachability effect" in item.message for item in inert)
+
+    output = io.StringIO()
+    assert run(
+        ["--before", str(tmp_path), "--after", str(tmp_path), "--format", "json"],
+        stream=output,
+    ) == 0
+    assert json.loads(output.getvalue())["analysis_complete"] is True
+
+
+def test_unsupported_security_resource_still_requires_review(tmp_path):
+    (tmp_path / "main.tf").write_text(
+        'resource "aws_lambda_function" "external" { count = 1 }\n',
+        encoding="utf-8",
+    )
+    result = analyze(build_graph(parse_directory(tmp_path)))
+    assert not result.complete
+    assert decide(compare(result, result)).decision is Decision.REVIEW
+
+
+def test_coverage_lines_cap_diagnostics():
+    result = SimpleNamespace(
+        diagnostics=[Diagnostic("TEST", f"diagnostic-{index}") for index in range(26)]
+    )
+    diff = SimpleNamespace(complete=True, before=result, after=SimpleNamespace(diagnostics=[]))
+    lines = coverage_lines(diff)
+    assert sum("[TEST]" in line for line in lines) == 25
+    assert "- 1 additional diagnostics; see JSON/SARIF." in lines
 
 
 @pytest.mark.parametrize("raw", [
@@ -213,7 +262,7 @@ def test_plan_expression_attribute_names_are_not_confused_with_plan_schema():
 
 
 @pytest.mark.parametrize("resource_type", [
-    "aws_route_table", "aws_db_instance", "aws_lambda_function", "aws_kms_key",
+    "aws_db_instance", "aws_lambda_function",
     "aws_vpc_security_group_ingress_rule",
 ])
 def test_unsupported_security_resources_require_review(tmp_path, resource_type):

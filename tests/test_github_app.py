@@ -621,6 +621,39 @@ def test_quota_failure_publishes_review_and_does_not_charge(harness):
 
 
 @pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (
+            "analysis_quota_exceeded",
+            "This workspace has used its monthly analysis quota. Ask the operator for a higher plan "
+            "or wait for the next period; the PR was not analyzed.",
+        ),
+        (
+            "github_no_terraform",
+            "No .tf files were found at the project's Terraform root. Check the Terraform root in the project settings. "
+            "Configured root: `.`.",
+        ),
+        (
+            "unknown_failure",
+            "Analysis unavailable. Review manually or use the safe Actions integration.",
+        ),
+    ],
+)
+def test_publisher_failure_details(harness, error, expected):
+    app, _, _, _, _ = harness
+    send(harness)
+    drain(app)
+    with app.state.db.session(write=True) as session:
+        run = session.scalar(select(GitHubRun))
+        run.analysis_id = None
+        run.error = error
+    title, conclusion, text, _ = summary(app.state.db, run_record(app), app.state.settings)
+    assert title == "REVIEW REQUIRED"
+    assert conclusion == "failure"
+    assert expected in text
+
+
+@pytest.mark.parametrize(
     "fault",
     [
         "truncated",
