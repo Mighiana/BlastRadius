@@ -399,6 +399,7 @@ def create_app(
     def ready():
         if (
             starting.is_set()
+            or jobs.draining.is_set()
             or not lease.healthy()
             or not db.ready()
             or len(demos) != 9

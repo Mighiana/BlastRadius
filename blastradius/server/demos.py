@@ -18,6 +18,7 @@ LOGGER = logging.getLogger(__name__)
 
 def build_demos(settings: Settings) -> dict[tuple[str, str], dict]:
     demos: dict[tuple[str, str], dict] = {}
+    work_dir = settings.data_dir.resolve() / "demos"
     for scenario_id, scenario in FIXTURES.items():
         baseline, risky = scenario["before_files"], scenario["after_files"]
         for stage in ("safe", "risky", "remediated"):
@@ -35,7 +36,7 @@ def build_demos(settings: Settings) -> dict[tuple[str, str], dict]:
                 base_label="risky" if stage == "remediated" else "baseline",
                 candidate_label=stage,
             )
-            result = execute(payload, settings)
+            result = execute(payload, settings, work_dir=work_dir)
             if "error" in result:
                 raise RuntimeError("Bundled demo failed to analyze")
             result["result"]["demo"] = {

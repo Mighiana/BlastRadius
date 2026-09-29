@@ -1048,6 +1048,46 @@ def test_redelivery_of_retryable_row_preserves_backoff(harness):
         assert delivery.next_attempt_at == pytest.approx(next_attempt_at, abs=0.01)
 
 
+def test_rejected_redelivery_respects_backlog_cap(harness, monkeypatch):
+    app, _, provider, _, _ = harness
+    raw = json.dumps(provider.event()).encode()
+    digest = hashlib.sha256(b"pull_request\0" + raw).hexdigest()
+    with app.state.db.session(write=True) as session:
+        session.add(
+            GitHubDelivery(
+                id="rejected",
+                body_hash=digest,
+                event="pull_request",
+                status="rejected",
+                attempts=MAX_ATTEMPTS,
+                error="github_attempts_exhausted",
+            )
+        )
+        session.add(
+            GitHubDelivery(
+                id="pending",
+                body_hash="f" * 64,
+                event="pull_request",
+                status="pending",
+                payload=PullEvent.model_validate(provider.event()).model_dump_json(),
+            )
+        )
+    monkeypatch.setattr("blastradius.server.github_service.MAX_PENDING_DELIVERIES", 1)
+
+    response = send(harness, raw=raw, delivery="redelivery")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "github_backlog_full"
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "rejected")
+        assert (delivery.status, delivery.attempts, delivery.error, delivery.payload) == (
+            "rejected",
+            MAX_ATTEMPTS,
+            "github_attempts_exhausted",
+            None,
+        )
+
+
 def test_interrupted_third_attempt_resumes_after_restart(harness, monkeypatch):
     app, _, provider, _, _ = harness
     raw = json.dumps(provider.event()).encode()

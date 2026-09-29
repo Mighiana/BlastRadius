@@ -33,8 +33,10 @@ def execute(
     policy_snapshot: dict | None = None,
     lease_healthy: Callable[[], bool] | None = None,
     stopping: threading.Event | None = None,
+    work_dir: Path | None = None,
 ) -> dict:
-    jobs_dir = settings.data_dir.resolve() / "jobs"
+    jobs_dir = work_dir or settings.data_dir.resolve() / "jobs"
+    jobs_dir = jobs_dir.resolve()
     jobs_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     with tempfile.TemporaryDirectory(prefix="job-", dir=jobs_dir) as directory:
         workdir = Path(directory)

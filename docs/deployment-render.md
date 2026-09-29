@@ -68,8 +68,10 @@ The image demo cache is built with the default `BR_JOB_TIMEOUT`,
 `BR_MAX_BODY_BYTES`, and `BR_MAX_RESOURCES`. Overriding any of these at runtime
 logs `demo.cache_miss` with reason `settings` and rebuilds the demos in the
 background; the service continues serving and accepting webhooks while this
-happens, but `/health/ready` remains 503 until all demos are built. Rebuild the
-image with matching settings to avoid the warm-up.
+happens, but `/health/ready` remains 503 until all demos are built. The cache
+generator (`python -m blastradius.server.demos`) uses the default limits and
+has no build-time override, so either keep the runtime defaults for these three
+settings or accept the background rebuild on each cold start.
 If the background build fails, `demo.build_failed` is logged and readiness
 remains 503; redeploy with a rebuilt image after correcting the failure.
 

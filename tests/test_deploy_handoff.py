@@ -252,21 +252,33 @@ def test_successor_defers_webhook_until_startup_completes(
     logger = logging.getLogger("blastradius.server.github_service")
     logger.addHandler(caplog.handler)
     caplog.handler.setLevel(logging.INFO)
+    old_client = TestClient(old)
+    successor_client = TestClient(successor)
+    old_open = False
+    successor_open = False
     try:
-        with TestClient(old) as old_client:
-            connect(old_client, old, db_settings)
-            with TestClient(successor) as successor_client:
-                assert entered.wait(10)
-                response = send(successor_client, provider, "starting")
-                assert response.status_code == 202
-                assert response.json() == {"status": "deferred"}
-                with observer(db_settings).session() as session:
-                    assert session.scalar(select(func.count()).select_from(Analysis)) == 0
-                release.set()
-                assert wait_ready(successor_client) < 10
-                assert settled(successor)["starting"] == "handled"
+        old_client.__enter__()
+        old_open = True
+        connect(old_client, old, db_settings)
+        successor_client.__enter__()
+        successor_open = True
+        old_client.__exit__(None, None, None)
+        old_open = False
+        assert entered.wait(10)
+        response = send(successor_client, provider, "starting")
+        assert response.status_code == 202
+        assert response.json() == {"status": "deferred"}
+        with observer(db_settings).session() as session:
+            assert session.scalar(select(func.count()).select_from(Analysis)) == 0
+        release.set()
+        assert wait_ready(successor_client) < 10
+        assert settled(successor)["starting"] == "handled"
     finally:
         release.set()
+        if old_open:
+            old_client.__exit__(None, None, None)
+        if successor_open:
+            successor_client.__exit__(None, None, None)
         logger.removeHandler(caplog.handler)
     events = [
         json.loads(record.getMessage())
@@ -429,6 +441,16 @@ def test_demo_cache_fallback_warms_in_background(
             time.sleep(0.05)
         assert client.get("/health/ready").status_code == 200
         assert client.get("/api/demo/public_ssh").status_code == 200
+
+
+@pytest.mark.parametrize("migration_database", ["postgres"], indirect=True)
+def test_draining_service_is_not_ready(db_settings, provider):
+    app = instance(db_settings, provider)
+    with TestClient(app) as client:
+        connect(client, app, db_settings)
+        assert wait_ready(client) < 10
+        app.state.jobs.draining.set()
+        assert client.get("/health/ready").status_code == 503
 
 
 @pytest.mark.parametrize("migration_database", ["postgres"], indirect=True)

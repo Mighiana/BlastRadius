@@ -5,6 +5,7 @@ import logging
 
 from blastradius.server.config import Settings
 from blastradius.server.demos import (
+    build_demos,
     demo_fingerprint,
     load_demo_cache,
     write_demo_cache,
@@ -85,3 +86,26 @@ def test_demo_cache_miss_reasons_are_logged(tmp_path, demo_results, monkeypatch,
         }
     finally:
         logger.removeHandler(caplog.handler)
+
+
+def test_build_demos_uses_a_separate_work_directory(tmp_path, monkeypatch):
+    settings = Settings(data_dir=tmp_path / "data")
+    work_dirs = []
+
+    def fake_execute(_payload, _settings, work_dir=None):
+        work_dirs.append(work_dir)
+        return {
+            "result": {
+                "decision": "SAFE TO MERGE",
+                "score": {"before": 100, "after": 100},
+                "verdict": "NO_REGRESSION",
+                "remediation": {"patched_files": {"main.tf": "patched"}},
+            }
+        }
+
+    monkeypatch.setattr("blastradius.server.demos.execute", fake_execute)
+    build_demos(settings)
+
+    assert work_dirs
+    assert {path for path in work_dirs} == {settings.data_dir / "demos"}
+    assert not (settings.data_dir / "jobs").exists()

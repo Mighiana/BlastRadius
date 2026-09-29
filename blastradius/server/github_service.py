@@ -173,6 +173,25 @@ class GitHubService:
         The caller answers 2xx only after this returns, i.e. after the commit.
         """
         _log("github.webhook_received", delivery_id=delivery_id, github_event=event)
+
+        def admit_redelivery(session: Session, delivery: GitHubDelivery) -> None:
+            _admission_lock(session)
+            backlog = (
+                session.scalar(
+                    select(func.count())
+                    .select_from(GitHubDelivery)
+                    .where(GitHubDelivery.status.in_(("pending", "retryable", "queued")))
+                )
+                or 0
+            )
+            if backlog >= MAX_PENDING_DELIVERIES:
+                _log(
+                    "github.webhook_failed",
+                    delivery_id=delivery_id,
+                    error="github_backlog_full",
+                )
+                raise HTTPException(503, "github_backlog_full")
+
         if payload is None:
             try:
                 with self.db.intake() as session:
@@ -195,6 +214,7 @@ class GitHubService:
                     )
                 if delivery:
                     if delivery.status == "rejected" and payload is not None:
+                        admit_redelivery(session, delivery)
                         delivery.status = "pending"
                         delivery.error = None
                         delivery.next_attempt_at = None
@@ -203,6 +223,7 @@ class GitHubService:
                         delivery_id = delivery.id
                     elif delivery.status == "retryable":
                         if delivery.payload is None and payload is not None:
+                            admit_redelivery(session, delivery)
                             delivery.status, delivery.error, delivery.next_attempt_at = (
                                 "pending",
                                 None,
