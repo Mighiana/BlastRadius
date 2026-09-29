@@ -68,10 +68,13 @@ class GitHubService:
                 )
             )
             for delivery in deliveries:
+                # One interruption per attempt is free; consecutive interruptions
+                # consume the attempt so a crash loop still terminates.
+                if delivery.error != "server_restarted":
+                    delivery.attempts = max(delivery.attempts - 1, 0)
                 delivery.status = "pending"
                 delivery.error = "server_restarted"
                 delivery.next_attempt_at = None
-                delivery.attempts = max(delivery.attempts - 1, 0)
             session.execute(
                 update(GitHubRun)
                 .where(GitHubRun.status == "pending")

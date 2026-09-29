@@ -33,6 +33,7 @@ from blastradius.server.github_api import (
     READ_PERMISSIONS,
     WRITE_PERMISSIONS,
 )
+from blastradius.server.github_service import MAX_ATTEMPTS
 from blastradius.server.github_publish import MARKER, publish, summary
 from blastradius.server.github_routes import register_installation
 from blastradius.server.github_types import PullEvent, Repository
@@ -988,6 +989,70 @@ def test_interrupted_third_attempt_resumes_after_restart(harness, monkeypatch):
     with app.state.db.session() as session:
         delivery = session.get(GitHubDelivery, "delivery-1")
         assert (delivery.status, delivery.attempts) == ("handled", 3)
+
+
+def test_consecutive_interruptions_consume_attempts(harness, monkeypatch):
+    app, _, provider, _, _ = harness
+    raw = json.dumps(provider.event()).encode()
+    payload = PullEvent.model_validate(provider.event())
+    with app.state.db.session(write=True) as session:
+        session.add(
+            GitHubDelivery(
+                id="delivery-1",
+                body_hash=hashlib.sha256(b"pull_request\0" + raw).hexdigest(),
+                event="pull_request",
+                status="retryable",
+                attempts=MAX_ATTEMPTS - 1,
+                payload=payload.model_dump_json(),
+                next_attempt_at=0,
+            )
+        )
+    pending = Future()
+    submit = app.state.github.executor.submit
+    monkeypatch.setattr(app.state.github.executor, "submit", lambda *_args, **_kwargs: pending)
+
+    assert app.state.github.dispatch_pending() == 1
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, delivery.attempts, delivery.error) == ("queued", 3, None)
+    app.state.github.recover()
+    pending.cancel()
+    app.state.jobs.slots.release()
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, delivery.attempts, delivery.error) == (
+            "pending",
+            MAX_ATTEMPTS - 1,
+            "server_restarted",
+        )
+
+    assert app.state.github.dispatch_pending() == 1
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, delivery.attempts, delivery.error) == (
+            "queued",
+            MAX_ATTEMPTS,
+            "server_restarted",
+        )
+    app.state.github.recover()
+    app.state.jobs.slots.release()
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, delivery.attempts, delivery.error) == (
+            "pending",
+            MAX_ATTEMPTS,
+            "server_restarted",
+        )
+
+    assert app.state.github.dispatch_pending() == 1
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, delivery.attempts, delivery.error, delivery.payload) == (
+            "rejected",
+            MAX_ATTEMPTS + 1,
+            "github_attempts_exhausted",
+            None,
+        )
 
 
 def test_redelivery_rearms_rejected_payload_unavailable_row(harness):
