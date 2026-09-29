@@ -40,7 +40,7 @@ export default function Guide() {
         <CodeBlock code={planCommand} label="plan command" />
         <table className="exit-codes" aria-label="CLI exit codes"><thead><tr><th>Exit code</th><th>Meaning</th></tr></thead><tbody>
           <tr><td><code>0</code></td><td><span className="decision safe">NO NEW PATHS</span> or REVIEW — passes the gate</td></tr>
-          <tr><td><code>1</code></td><td><span className="decision block">BLOCK CHANGE</span> — new path to sensitive data</td></tr>
+          <tr><td><code>1</code></td><td><span className="decision block">BLOCK CHANGE</span> — new sensitive path or policy violation</td></tr>
           <tr><td><code>2</code></td><td>Invalid input or usage</td></tr>
         </tbody></table>
         <p className="muted">Add <code>--fail-on-review</code> to make REVIEW exit 1 too.</p></section>
@@ -50,7 +50,7 @@ export default function Guide() {
         <div className="button-row"><a className="button primary" href={`${repository}#github-actions`} target="_blank" rel="noreferrer">Actions workflow<ExternalLink size={16} aria-hidden="true" /></a><Link className="button secondary" to="/integrations">GitHub App (operator-enabled)</Link></div>
         <p className="muted">The GitHub App additionally stores PR analyses in a workspace. It needs operator-configured credentials and a verified installation before a repository can be connected.</p></section>
       <section className="panel" id="workspace"><span className="eyebrow guide-kind"><UploadCloud size={14} aria-hidden="true" />WORKSPACE UPLOAD · STORED EVIDENCE</span><h2>Workspace upload</h2>
-        <ul className="guide-points"><li>Sign in and create a project.</li><li>Upload baseline and candidate <code>.tf</code> files, or one <code>terraform show -json</code> plan.</li><li>Open the report: decision, path, evidence, remediation.</li><li>Fix, re-upload, export JSON / Markdown / SARIF.</li></ul>
+        <ul className="guide-points"><li>Sign in and create a project.</li><li>Upload baseline and candidate <code>.tf</code> files, or one <code>terraform show -json</code> plan.</li><li>Open the report: decision, path, evidence, remediation.</li><li>Fix, re-upload, export JSON / Markdown (SARIF on Pro and above).</li></ul>
         <Link to="/dashboard" className="button primary">Open workspace<ArrowRight size={16} aria-hidden="true" /></Link>
         <p className="muted">No repository connection required. Uploads are read as data; nothing is executed.</p></section>
       <section className="panel" id="model"><span className="eyebrow">REFERENCE</span><h2>What the model covers</h2>

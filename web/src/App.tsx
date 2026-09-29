@@ -27,13 +27,18 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean
   }
 }
 function RouteFocus() {
-  const { pathname } = useLocation();
+  const { pathname, hash } = useLocation();
   useEffect(() => {
     const title = pathname === '/' ? 'Know before you merge' : pathname.slice(1).replace(/^\w/, c => c.toUpperCase());
     document.title = `BlastRadius Beta — ${title}`;
-    window.scrollTo({ top: 0, behavior: 'instant' });
+    const target = hash ? document.getElementById(hash.slice(1)) : null;
+    if (target) {
+      target.scrollIntoView({ behavior: 'instant', block: 'start' });
+    } else {
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    }
     document.getElementById('main')?.focus({ preventScroll: true });
-  }, [pathname]);
+  }, [pathname, hash]);
   return null;
 }
 function Header() {

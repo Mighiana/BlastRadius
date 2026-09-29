@@ -7,8 +7,8 @@ export default function Trust({ kind }: { kind: 'security' | 'privacy' | 'terms'
       {kind === 'security' ? <>
         <section className="panel"><h2>What a decision means</h2>
           <ul className="decision-legend">
-            <li><span className="decision block">BLOCK CHANGE</span><span>The change creates a new modeled path from the internet to sensitive data.</span></li>
-            <li><span className="decision review">REVIEW REQUIRED</span><span>Something the model cannot resolve; a human must look.</span></li>
+            <li><span className="decision block">BLOCK CHANGE</span><span>A new modeled path from the internet to sensitive data, or a change your policy forbids (for example new public SSH).</span></li>
+            <li><span className="decision review">REVIEW REQUIRED</span><span>New exposure that is not blocking, or something the model could not resolve. A human must look.</span></li>
             <li><span className="decision safe">NO NEW PATHS</span><span>No new modeled path under the selected model and policy. Not proof that infrastructure is secure: existing exposure and coverage gaps may remain.</span></li>
           </ul>
           <p>Coverage of AWS networking, IAM and storage is bounded. Read every report’s coverage diagnostics; the score is a heuristic, not a probability of compromise.</p></section>
