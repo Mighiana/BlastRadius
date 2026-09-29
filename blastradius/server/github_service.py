@@ -53,6 +53,27 @@ def _admission_lock(session: Session) -> None:
         session.execute(text("SELECT pg_advisory_xact_lock(481936026)"))
 
 
+def _require_backlog_capacity(session: Session, delivery_id: str) -> None:
+    backlog = (
+        session.scalar(
+            select(func.count())
+            .select_from(GitHubDelivery)
+            .where(GitHubDelivery.status.in_(("pending", "retryable", "queued")))
+        )
+        or 0
+    )
+    if backlog >= MAX_PENDING_DELIVERIES:
+        _log("github.webhook_failed", delivery_id=delivery_id, error="github_backlog_full")
+        raise HTTPException(503, "github_backlog_full")
+
+
+def _matching_delivery(session: Session, delivery_id: str, digest: str) -> GitHubDelivery | None:
+    delivery = session.get(GitHubDelivery, delivery_id)
+    if delivery and delivery.body_hash != digest:
+        raise HTTPException(409, "github_delivery_conflict")
+    return delivery
+
+
 class _Stopping(Exception):
     """Processing interrupted by shutdown; the delivery stays queued for the next owner."""
 
@@ -189,29 +210,13 @@ class GitHubService:
             ):
                 _log("github.webhook_duplicate", delivery_id=delivery_id)
                 return False
-            backlog = (
-                session.scalar(
-                    select(func.count())
-                    .select_from(GitHubDelivery)
-                    .where(GitHubDelivery.status.in_(("pending", "retryable", "queued")))
-                )
-                or 0
-            )
-            if backlog >= MAX_PENDING_DELIVERIES:
-                _log(
-                    "github.webhook_failed",
-                    delivery_id=delivery_id,
-                    error="github_backlog_full",
-                )
-                raise HTTPException(503, "github_backlog_full")
+            _require_backlog_capacity(session, delivery_id)
             return True
 
         if payload is None:
             try:
                 with self.db.intake() as session:
-                    delivery = session.get(GitHubDelivery, delivery_id)
-                    if delivery and delivery.body_hash != digest:
-                        raise HTTPException(409, "github_delivery_conflict")
+                    _matching_delivery(session, delivery_id, digest)
             except SQLAlchemyError:
                 _log("github.webhook_failed", delivery_id=delivery_id, error="intake_unavailable")
                 raise HTTPException(503, "github_intake_unavailable") from None
@@ -219,9 +224,7 @@ class GitHubService:
             return {"status": "ignored"}
         try:
             with self.db.intake() as session:
-                delivery = session.get(GitHubDelivery, delivery_id)
-                if delivery and delivery.body_hash != digest:
-                    raise HTTPException(409, "github_delivery_conflict")
+                delivery = _matching_delivery(session, delivery_id, digest)
                 if not delivery:
                     delivery = session.scalar(
                         select(GitHubDelivery).where(GitHubDelivery.body_hash == digest)
@@ -257,23 +260,7 @@ class GitHubService:
                         return {"status": "duplicate"}
                 else:
                     _admission_lock(session)
-                    backlog = (
-                        session.scalar(
-                            select(func.count())
-                            .select_from(GitHubDelivery)
-                            .where(
-                                GitHubDelivery.status.in_(("pending", "retryable", "queued"))
-                            )
-                        )
-                        or 0
-                    )
-                    if backlog >= MAX_PENDING_DELIVERIES:
-                        _log(
-                            "github.webhook_failed",
-                            delivery_id=delivery_id,
-                            error="github_backlog_full",
-                        )
-                        raise HTTPException(503, "github_backlog_full")
+                    _require_backlog_capacity(session, delivery_id)
                     session.add(
                         GitHubDelivery(
                             id=delivery_id,
@@ -287,9 +274,7 @@ class GitHubService:
         except IntegrityError:
             try:
                 with self.db.intake() as session:
-                    delivery = session.get(GitHubDelivery, delivery_id)
-                    if delivery and delivery.body_hash != digest:
-                        raise HTTPException(409, "github_delivery_conflict")
+                    _matching_delivery(session, delivery_id, digest)
             except SQLAlchemyError:
                 _log("github.webhook_failed", delivery_id=delivery_id, error="intake_unavailable")
                 raise HTTPException(503, "github_intake_unavailable") from None
