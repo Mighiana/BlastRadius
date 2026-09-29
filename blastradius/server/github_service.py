@@ -8,6 +8,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
+from enum import StrEnum
 
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -26,11 +27,16 @@ from blastradius.server.jobs import JobManager, execute
 from blastradius.server.db import LeaseLost
 from blastradius.server.models import (
     Analysis,
+    AnalysisStatus,
+    ConnectionStatus,
+    DeliveryStatus,
     GitHubDelivery,
     GitHubInstallation,
     GitHubRun,
+    InstallationStatus,
     Project,
     RepositoryConnection,
+    RunStatus,
 )
 from blastradius.server.persistence import audit, effective_policy
 from blastradius.server.quotas import lock_org, period, quota
@@ -41,6 +47,23 @@ MAX_ATTEMPTS = 3
 MAX_PENDING_DELIVERIES = 1000
 RETRY_SECONDS = 30
 DISPATCH_POLL_SECONDS = 2.0
+BACKLOG_STATUSES = (DeliveryStatus.PENDING, DeliveryStatus.RETRYABLE, DeliveryStatus.QUEUED)
+TERMINAL_DELIVERY_STATUSES = (
+    DeliveryStatus.HANDLED,
+    DeliveryStatus.IGNORED,
+    DeliveryStatus.REJECTED,
+)
+
+
+class DispatchStatus(StrEnum):
+    """Outcome returned by receive()/dispatch(); distinct from the persisted DeliveryStatus."""
+
+    QUEUED = "queued"
+    HANDLED = "handled"
+    IGNORED = "ignored"
+    REJECTED = "rejected"
+    DEFERRED = "deferred"
+    DUPLICATE = "duplicate"
 
 
 def _log(event: str, **fields: str | int) -> None:
@@ -75,7 +98,7 @@ class GitHubService:
         with self.db.session(write=True) as session:
             deliveries = list(
                 session.scalars(
-                    select(GitHubDelivery).where(GitHubDelivery.status == "queued")
+                    select(GitHubDelivery).where(GitHubDelivery.status == DeliveryStatus.QUEUED)
                 )
             )
             for delivery in deliveries:
@@ -83,29 +106,31 @@ class GitHubService:
                 # consume the attempt so a crash loop still terminates.
                 if delivery.error != "server_restarted":
                     delivery.attempts = max(delivery.attempts - 1, 0)
-                delivery.status = "pending"
+                delivery.status = DeliveryStatus.PENDING
                 delivery.error = "server_restarted"
                 delivery.next_attempt_at = None
             for delivery in session.scalars(
                 select(GitHubDelivery).where(
-                    GitHubDelivery.status == "retryable",
+                    GitHubDelivery.status == DeliveryStatus.RETRYABLE,
                     GitHubDelivery.attempts >= MAX_ATTEMPTS,
                 )
             ):
-                delivery.status = "rejected"
+                delivery.status = DeliveryStatus.REJECTED
                 delivery.error = "github_attempts_exhausted"
                 delivery.payload = None
                 delivery.next_attempt_at = None
             for delivery in session.scalars(
                 select(GitHubDelivery).where(
-                    GitHubDelivery.status.in_(("retryable", "pending")),
+                    GitHubDelivery.status.in_((DeliveryStatus.RETRYABLE, DeliveryStatus.PENDING)),
                     GitHubDelivery.payload.is_(None),
                 )
             ):
-                delivery.status = "rejected"
+                delivery.status = DeliveryStatus.REJECTED
                 delivery.error = "github_payload_unavailable"
                 delivery.next_attempt_at = None
-            runs = list(session.scalars(select(GitHubRun).where(GitHubRun.status == "pending")))
+            runs = list(
+                session.scalars(select(GitHubRun).where(GitHubRun.status == RunStatus.PENDING))
+            )
             analysis_ids = {run.analysis_id for run in runs if run.analysis_id}
             analyses = (
                 {
@@ -121,8 +146,11 @@ class GitHubService:
                 analysis = analyses.get(run.analysis_id) if run.analysis_id else None
                 if (
                     analysis is None
-                    or analysis.status in ("queued", "running")
-                    or (analysis.status == "failed" and analysis.error == "server_restarted")
+                    or analysis.status in (AnalysisStatus.QUEUED, AnalysisStatus.RUNNING)
+                    or (
+                        analysis.status == AnalysisStatus.FAILED
+                        and analysis.error == "server_restarted"
+                    )
                 ):
                     run.analysis_id = None
                     analysis_period = (
@@ -136,7 +164,7 @@ class GitHubService:
                         else "server_restarted_rebill"
                     )
                 else:
-                    run.status, run.error = "ready", "server_restarted"
+                    run.status, run.error = RunStatus.READY, "server_restarted"
 
     def start(self, stop: threading.Event) -> None:
         """Dispatch persisted deliveries while this process holds the service lease."""
@@ -192,10 +220,10 @@ class GitHubService:
             _admission_lock(session)
             session.refresh(delivery)
             if (
-                delivery.status != "rejected"
+                delivery.status != DeliveryStatus.REJECTED
                 and not (
                     payloadless_retryable
-                    and delivery.status == "retryable"
+                    and delivery.status == DeliveryStatus.RETRYABLE
                     and delivery.payload is None
                 )
             ):
@@ -205,7 +233,7 @@ class GitHubService:
                 session.scalar(
                     select(func.count())
                     .select_from(GitHubDelivery)
-                    .where(GitHubDelivery.status.in_(("pending", "retryable", "queued")))
+                    .where(GitHubDelivery.status.in_(BACKLOG_STATUSES))
                 )
                 or 0
             )
@@ -227,8 +255,10 @@ class GitHubService:
             except SQLAlchemyError:
                 _log("github.webhook_failed", delivery_id=delivery_id, error="intake_unavailable")
                 raise HTTPException(503, "github_intake_unavailable") from None
-            _log("github.webhook_processed", delivery_id=delivery_id, status="ignored")
-            return {"status": "ignored"}
+            _log(
+                "github.webhook_processed", delivery_id=delivery_id, status=DispatchStatus.IGNORED
+            )
+            return {"status": DispatchStatus.IGNORED}
         try:
             with self.db.intake() as session:
                 delivery = session.get(GitHubDelivery, delivery_id)
@@ -239,23 +269,23 @@ class GitHubService:
                         select(GitHubDelivery).where(GitHubDelivery.body_hash == digest)
                     )
                 if delivery:
-                    if delivery.status == "rejected" and payload is not None:
+                    if delivery.status == DeliveryStatus.REJECTED and payload is not None:
                         if not admit_redelivery(session, delivery):
-                            return {"status": "duplicate"}
-                        delivery.status = "pending"
+                            return {"status": DispatchStatus.DUPLICATE}
+                        delivery.status = DeliveryStatus.PENDING
                         delivery.error = None
                         delivery.next_attempt_at = None
                         delivery.payload = payload.model_dump_json()
                         delivery.attempts = 0
                         delivery_id = delivery.id
-                    elif delivery.status == "retryable":
+                    elif delivery.status == DeliveryStatus.RETRYABLE:
                         if delivery.payload is None and payload is not None:
                             if not admit_redelivery(
                                 session, delivery, payloadless_retryable=True
                             ):
-                                return {"status": "duplicate"}
+                                return {"status": DispatchStatus.DUPLICATE}
                             delivery.status, delivery.error, delivery.next_attempt_at = (
-                                "pending",
+                                DeliveryStatus.PENDING,
                                 None,
                                 None,
                             )
@@ -263,19 +293,17 @@ class GitHubService:
                             delivery_id = delivery.id
                         else:
                             _log("github.webhook_duplicate", delivery_id=delivery_id)
-                            return {"status": "duplicate"}
+                            return {"status": DispatchStatus.DUPLICATE}
                     else:
                         _log("github.webhook_duplicate", delivery_id=delivery_id)
-                        return {"status": "duplicate"}
+                        return {"status": DispatchStatus.DUPLICATE}
                 else:
                     _admission_lock(session)
                     backlog = (
                         session.scalar(
                             select(func.count())
                             .select_from(GitHubDelivery)
-                            .where(
-                                GitHubDelivery.status.in_(("pending", "retryable", "queued"))
-                            )
+                            .where(GitHubDelivery.status.in_(BACKLOG_STATUSES))
                         )
                         or 0
                     )
@@ -291,7 +319,7 @@ class GitHubService:
                             id=delivery_id,
                             body_hash=digest,
                             event=event,
-                            status="pending",
+                            status=DeliveryStatus.PENDING,
                             attempts=0,
                             payload=payload.model_dump_json() if payload is not None else None,
                         )
@@ -306,7 +334,7 @@ class GitHubService:
                 _log("github.webhook_failed", delivery_id=delivery_id, error="intake_unavailable")
                 raise HTTPException(503, "github_intake_unavailable") from None
             _log("github.webhook_duplicate", delivery_id=delivery_id)
-            return {"status": "duplicate"}
+            return {"status": DispatchStatus.DUPLICATE}
         except SQLAlchemyError:
             _log("github.webhook_failed", delivery_id=delivery_id, error="intake_unavailable")
             raise HTTPException(503, "github_intake_unavailable") from None
@@ -325,10 +353,12 @@ class GitHubService:
             try:
                 with self.lock, self.db.session(write=True) as session:
                     for orphan in session.scalars(
-                        select(GitHubDelivery).where(GitHubDelivery.status == "queued")
+                        select(GitHubDelivery).where(
+                            GitHubDelivery.status == DeliveryStatus.QUEUED
+                        )
                     ):
                         if orphan.id not in self.active:
-                            orphan.status = "pending"
+                            orphan.status = DeliveryStatus.PENDING
                             orphan.next_attempt_at = None
                             _log(
                                 "github.webhook_deferred",
@@ -340,8 +370,8 @@ class GitHubService:
                         select(GitHubDelivery)
                         .where(
                             or_(
-                                GitHubDelivery.status == "pending",
-                                (GitHubDelivery.status == "retryable")
+                                GitHubDelivery.status == DeliveryStatus.PENDING,
+                                (GitHubDelivery.status == DeliveryStatus.RETRYABLE)
                                 & (GitHubDelivery.attempts < MAX_ATTEMPTS)
                                 & (GitHubDelivery.next_attempt_at <= now),
                             )
@@ -352,12 +382,12 @@ class GitHubService:
                     )
                     if delivery is None:
                         return dispatched
-                    if delivery.status == "retryable":
-                        delivery.status, delivery.next_attempt_at = "pending", None
+                    if delivery.status == DeliveryStatus.RETRYABLE:
+                        delivery.status, delivery.next_attempt_at = DeliveryStatus.PENDING, None
                     delivery_id = delivery.id
             except LeaseLost:
                 return dispatched
-            if self.dispatch(delivery_id)["status"] == "deferred":
+            if self.dispatch(delivery_id)["status"] == DispatchStatus.DEFERRED:
                 return dispatched
             dispatched += 1
         return dispatched
@@ -379,13 +409,13 @@ class GitHubService:
                     )
                     if delivery is None:
                         self.active.discard(delivery_id)
-                        return {"status": "queued"}
-                    if delivery.status != "pending":
+                        return {"status": DispatchStatus.QUEUED}
+                    if delivery.status != DeliveryStatus.PENDING:
                         self.active.discard(delivery_id)
                         return {
-                            "status": delivery.status
-                            if delivery.status in ("handled", "ignored", "rejected")
-                            else "queued"
+                            "status": DispatchStatus(delivery.status)
+                            if delivery.status in TERMINAL_DELIVERY_STATUSES
+                            else DispatchStatus.QUEUED
                         }
                     try:
                         payload = (
@@ -395,23 +425,24 @@ class GitHubService:
                         )
                     except ValidationError:
                         # Recorded before payloads were persisted; only a redelivery can help.
-                        delivery.status, delivery.error = "rejected", "github_payload_unavailable"
+                        delivery.status = DeliveryStatus.REJECTED
+                        delivery.error = "github_payload_unavailable"
                         delivery.payload = None
                         self.active.discard(delivery_id)
                         return self._failed(delivery_id, "github_payload_unavailable")
                     claim: dict = {}
                     if isinstance(payload, LifecycleEvent):
                         self._lifecycle(session, delivery.event, payload)
-                        delivery.status, delivery.payload = "handled", None
-                        status = "handled"
+                        delivery.status, delivery.payload = DeliveryStatus.HANDLED, None
+                        status = DispatchStatus.HANDLED
                     else:
                         claim = self._claim(session, delivery, payload)
                         status = claim["status"]
-                        reserved = status == "queued"
-                        if status == "deferred":
+                        reserved = status == DispatchStatus.QUEUED
+                        if status == DispatchStatus.DEFERRED:
                             self.active.discard(delivery_id)
                             return self._deferred(delivery_id, "analysis_queue_full")
-                        if status == "rejected":
+                        if status == DispatchStatus.REJECTED:
                             self.active.discard(delivery_id)
                             return self._failed(delivery_id, "github_attempts_exhausted")
             except LeaseLost:
@@ -457,8 +488,8 @@ class GitHubService:
                 try:
                     with self.db.session(write=True) as session:
                         delivery = session.get(GitHubDelivery, delivery_id)
-                        if delivery and delivery.status == "queued":
-                            delivery.status = "pending"
+                        if delivery and delivery.status == DeliveryStatus.QUEUED:
+                            delivery.status = DeliveryStatus.PENDING
                             delivery.attempts = max(delivery.attempts - 1, 0)
                 except LeaseLost:
                     pass
@@ -466,26 +497,35 @@ class GitHubService:
                     pass
                 self.wake.set()
                 return self._deferred(delivery_id, "service_stopping")
-            return {"status": "queued"}
+            return {"status": DispatchStatus.QUEUED}
 
     def _failed(self, delivery_id: str, error: str) -> dict[str, str]:
-        _log("github.webhook_failed", delivery_id=delivery_id, status="rejected", error=error)
-        return {"status": "rejected"}
+        _log(
+            "github.webhook_failed",
+            delivery_id=delivery_id,
+            status=DispatchStatus.REJECTED,
+            error=error,
+        )
+        return {"status": DispatchStatus.REJECTED}
 
     def _deferred(self, delivery_id: str, reason: str) -> dict[str, str]:
         _log("github.webhook_deferred", delivery_id=delivery_id, reason=reason)
-        return {"status": "deferred"}
+        return {"status": DispatchStatus.DEFERRED}
 
     def _lifecycle(self, session: Session, event: str, payload: LifecycleEvent) -> None:
         installation = session.get(GitHubInstallation, payload.installation.id)
         if not installation:
             return
         if event == "installation" and payload.action in ("deleted", "suspend"):
-            installation.status = "deleted" if payload.action == "deleted" else "suspended"
+            installation.status = (
+                InstallationStatus.DELETED
+                if payload.action == "deleted"
+                else InstallationStatus.SUSPENDED
+            )
             session.execute(
                 update(RepositoryConnection)
                 .where(RepositoryConnection.installation_id == installation.id)
-                .values(status="revoked")
+                .values(status=ConnectionStatus.REVOKED)
             )
         elif event == "installation_repositories" and payload.action == "removed":
             session.execute(
@@ -496,7 +536,7 @@ class GitHubService:
                         [repo.id for repo in payload.repositories_removed]
                     ),
                 )
-                .values(status="revoked")
+                .values(status=ConnectionStatus.REVOKED)
             )
 
     def _claim(self, session: Session, delivery: GitHubDelivery, payload: PullEvent) -> dict:
@@ -506,28 +546,28 @@ class GitHubService:
             .where(
                 RepositoryConnection.repository_id == payload.repository.id,
                 RepositoryConnection.installation_id == payload.installation.id,
-                RepositoryConnection.status == "active",
-                GitHubInstallation.status == "active",
+                RepositoryConnection.status == ConnectionStatus.ACTIVE,
+                GitHubInstallation.status == InstallationStatus.ACTIVE,
             )
         )
         project = session.get(Project, connection.project_id) if connection else None
         if not connection or not project or project.archived_at is not None:
-            delivery.status, delivery.payload = "ignored", None
-            return {"status": "ignored"}
+            delivery.status, delivery.payload = DeliveryStatus.IGNORED, None
+            return {"status": DispatchStatus.IGNORED}
         org = lock_org(session, project.organization_id)
         policy = effective_policy(org, project)
         if not self.jobs.reserve():
-            return {"status": "deferred"}
+            return {"status": DispatchStatus.DEFERRED}
         delivery.attempts += 1
         if delivery.attempts > MAX_ATTEMPTS:
             self.jobs.slots.release()
-            delivery.status = "rejected"
+            delivery.status = DeliveryStatus.REJECTED
             delivery.error = "github_attempts_exhausted"
             delivery.payload = None
-            return {"status": "rejected"}
-        delivery.status = "queued"
+            return {"status": DispatchStatus.REJECTED}
+        delivery.status = DeliveryStatus.QUEUED
         return {
-            "status": "queued",
+            "status": DispatchStatus.QUEUED,
             "connection_id": connection.id,
             "root": project.terraform_root,
             "policy": policy,
@@ -541,7 +581,7 @@ class GitHubService:
         root: str,
         policy: dict,
     ) -> None:
-        status: str | None = "handled"
+        status: DeliveryStatus | None = DeliveryStatus.HANDLED
         error: str | None = None
         try:
             self.process(connection_id, payload, root, policy, delivery_id)
@@ -551,15 +591,19 @@ class GitHubService:
             if exc.code == "service_stopping":
                 status = None
             else:
-                status = "retryable" if exc.retryable or exc.uncertain else "rejected"
+                status = (
+                    DeliveryStatus.RETRYABLE
+                    if exc.retryable or exc.uncertain
+                    else DeliveryStatus.REJECTED
+                )
                 error = exc.code
                 if exc.code == "github_installation_unavailable":
                     with self.db.session(write=True) as session:
                         connection = session.get(RepositoryConnection, connection_id)
                         if connection:
-                            connection.status = "revoked"
+                            connection.status = ConnectionStatus.REVOKED
         except Exception:
-            status, error = "retryable", "github_processing_failed"
+            status, error = DeliveryStatus.RETRYABLE, "github_processing_failed"
         finally:
             try:
                 if status is None:
@@ -573,10 +617,10 @@ class GitHubService:
                                 delivery = session.get(GitHubDelivery, delivery_id)
                                 if delivery:
                                     delivery.status, delivery.error = status, error
-                                    if status == "retryable":
+                                    if status == DeliveryStatus.RETRYABLE:
                                         if delivery.attempts >= MAX_ATTEMPTS:
-                                            delivery.status = "rejected"
-                                            status = "rejected"
+                                            delivery.status = DeliveryStatus.REJECTED
+                                            status = DeliveryStatus.REJECTED
                                             delivery.next_attempt_at = None
                                             delivery.payload = None
                                         else:
@@ -593,7 +637,7 @@ class GitHubService:
                     if finalized:
                         _log(
                             "github.webhook_processed"
-                            if status == "handled"
+                            if status == DeliveryStatus.HANDLED
                             else "github.webhook_failed",
                             delivery_id=delivery_id,
                             status=status,
@@ -641,7 +685,7 @@ class GitHubService:
             ).hexdigest()
             with self.db.session(write=True) as session:
                 run = session.get(GitHubRun, run_id)
-                if run and run.status in ("published", "expired"):
+                if run and run.status in (RunStatus.PUBLISHED, RunStatus.EXPIRED):
                     return
                 if not run:
                     run = GitHubRun(
@@ -653,17 +697,17 @@ class GitHubService:
                         base_ref=pull.base.ref,
                         head_ref=pull.head.ref,
                         head_repository_id=pull.head.repo.id,
-                        status="pending",
+                        status=RunStatus.PENDING,
                     )
                     session.add(run)
-                if run.status == "pending" and run.analysis_id is None:
+                if run.status == RunStatus.PENDING and run.analysis_id is None:
                     org = lock_org(session, project.organization_id)
                     if run.error != "server_restarted":
                         try:
                             quota(session, org, "analyses_per_month")
                         except HTTPException:
-                            run.status, run.error = "ready", "analysis_quota_exceeded"
-                    if run.status == "pending":
+                            run.status, run.error = RunStatus.READY, "analysis_quota_exceeded"
+                    if run.status == RunStatus.PENDING:
                         job = Analysis(
                             project_id=project.id,
                             organization_id=project.organization_id,
@@ -675,7 +719,7 @@ class GitHubService:
                             candidate_ref=pull.head.ref,
                             base_sha=pull.base.sha,
                             candidate_sha=pull.head.sha,
-                            status="running",
+                            status=AnalysisStatus.RUNNING,
                             started_at=time.time(),
                             policy_snapshot=policy,
                         )
@@ -686,7 +730,7 @@ class GitHubService:
                         analysis_event(session, job, "analysis_started")
                         audit(session, org.id, "github", "github.analysis", job.id)
                 analysis_id, run_status = run.analysis_id, run.status
-            if run_status == "pending" and analysis_id:
+            if run_status == RunStatus.PENDING and analysis_id:
                 response: dict
                 try:
                     before = api.snapshot(token, repository, pull.base.sha, root)
@@ -731,6 +775,6 @@ class GitHubService:
                     if run:
                         run.error = exc.code
                         if exc.code == "github_analysis_expired":
-                            run.status = "expired"
+                            run.status = RunStatus.EXPIRED
                 if attempt or not (exc.retryable or exc.uncertain):
                     raise

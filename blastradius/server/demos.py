@@ -89,11 +89,7 @@ def write_demo_cache(path: Path, settings: Settings) -> None:
 
 
 def demo_settings(settings: Settings) -> dict[str, int]:
-    return {
-        "job_timeout_seconds": settings.job_timeout_seconds,
-        "max_body_bytes": settings.max_body_bytes,
-        "max_resources": settings.max_resources,
-    }
+    return {"max_resources": settings.max_resources}
 
 
 def load_demo_cache(

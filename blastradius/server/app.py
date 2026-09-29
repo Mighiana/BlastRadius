@@ -42,11 +42,18 @@ from blastradius.server.github_service import GitHubService
 from blastradius.server.jobs import JobManager
 from blastradius.server.lease import ServiceLease
 from blastradius.server.middleware import GuardMiddleware
-from blastradius.server.models import Analysis, Membership, Organization, Project, User
+from blastradius.server.models import (
+    Analysis,
+    AnalysisStatus,
+    Membership,
+    Organization,
+    Project,
+    User,
+)
 from blastradius.server.observability import configure_logging
 from blastradius.server.operator import is_platform_admin, operator_router
 from blastradius.server.plans import catalog, entitlements, require_feature
-from blastradius.server.quotas import lock_org, quota, usage_payload, usage_row
+from blastradius.server.quotas import lock_org, quota, usage_payload, usage_payloads, usage_row
 from blastradius.server.lifecycle import authorized_org, lifecycle_router
 from blastradius.server.persistence import cutoff, effective_policy, public_result, visible_analysis
 from blastradius.server.retention import run_retention_sweep
@@ -87,7 +94,7 @@ def project_payload(project: Project) -> dict:
 def analysis_payload(
     job: Analysis, detail: bool = True, sarif: bool = False, available: bool = True
 ) -> dict:
-    if not available and job.status in ("queued", "running"):
+    if not available and job.status in (AnalysisStatus.QUEUED, AnalysisStatus.RUNNING):
         raise HTTPException(503, "analysis_persistence_failed")
     data = {
         "id": job.id,
@@ -415,18 +422,20 @@ def create_app(
             user = session.get(User, login.user_id) if login.user_id else None
             organizations = []
             if user:
-                for org, member in session.execute(
+                memberships = session.execute(
                     select(Organization, Membership)
                     .join(Membership, Organization.id == Membership.organization_id)
                     .where(Membership.user_id == user.id)
-                ):
+                ).all()
+                usage = usage_payloads(session, [org for org, _ in memberships])
+                for org, member in memberships:
                     organizations.append(
                         {
                             "id": org.id,
                             "name": org.name,
                             "role": member.role,
                             "plan": org.plan,
-                            "usage": usage_payload(session, org),
+                            "usage": usage[org.id],
                         }
                     )
             return {
@@ -506,7 +515,12 @@ def create_app(
                     session.delete(old)
                 create_session(response, session, settings, user.id, oidc_authenticated=True)
             return response
-        except Exception:
+        except Exception as error:
+            LOGGER.warning(
+                json.dumps(
+                    {"event": "auth.oidc_callback_failed", "exception": type(error).__name__}
+                )
+            )
             raise HTTPException(400, "authentication_failed") from None
         finally:
             request.session.clear()
@@ -649,7 +663,7 @@ def create_app(
         request: Request,
         limit: int = Query(50, ge=1, le=100),
         offset: int = Query(0, ge=0),
-        status: Literal["queued", "running", "succeeded", "failed"] | None = None,
+        status: AnalysisStatus | None = None,
         decision: str | None = None,
         input_type: Literal["hcl", "plan", "github"] | None = None,
         branch: str | None = None,
@@ -772,7 +786,7 @@ def create_app(
             job, org = visible_analysis(session, user, analysis_id)
             org = lock_org(session, org.id)
             job, org = visible_analysis(session, user, analysis_id)
-            if job.status != "succeeded" or not job.result:
+            if job.status != AnalysisStatus.SUCCEEDED or not job.result:
                 raise HTTPException(409, "report_not_ready")
             if format == "sarif":
                 require_feature(org, "sarif")

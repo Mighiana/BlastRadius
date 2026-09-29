@@ -13,10 +13,13 @@ export function ErrorNotice({ error, retry }: { error: Error | null; retry?: () 
 export function Loading({ children = 'Loading analysis…' }: { children?: ReactNode }) {
   return <div role="status" className="loading"><LoaderCircle className="spin" size={20} aria-hidden="true" />{children}</div>;
 }
+export function decisionLabel(decision: string): string {
+  return decision === 'SAFE TO MERGE' ? 'NO NEW PATHS' : decision;
+}
 export function Decision({ decision }: { decision: string }) {
   const kind = decision === 'SAFE TO MERGE' ? 'safe' : decision === 'BLOCK CHANGE' ? 'block' : 'review';
   const Icon = kind === 'safe' ? ShieldCheck : kind === 'block' ? ShieldAlert : ShieldQuestion;
-  return <span className={`decision ${kind}`}><Icon size={16} aria-hidden="true" />{decision}</span>;
+  return <span className={`decision ${kind}`} title={decision === 'SAFE TO MERGE' ? 'Decision: SAFE TO MERGE — no new modeled path; existing exposure may remain' : undefined}><Icon size={16} aria-hidden="true" />{decisionLabel(decision)}</span>;
 }
 export function Empty({ title, children }: { title: string; children: ReactNode }) {
   return <div className="empty"><ShieldQuestion size={28} aria-hidden="true" /><h3>{title}</h3>{children}</div>;

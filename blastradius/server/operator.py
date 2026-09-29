@@ -14,6 +14,7 @@ from blastradius.server.events import RETENTION_DAYS, event_summary
 from blastradius.server.models import (
     Analysis,
     AnalysisFeedback,
+    AnalysisStatus,
     BetaInterest,
     LoginSession,
     Organization,
@@ -22,7 +23,7 @@ from blastradius.server.models import (
 )
 from blastradius.server.persistence import audit
 from blastradius.server.plans import catalog
-from blastradius.server.quotas import usage_payload
+from blastradius.server.quotas import usage_payloads
 
 RESOURCES = (
     "users",
@@ -94,15 +95,19 @@ def inspect_resource(
             for row in session.scalars(select(User).order_by(User.id).limit(limit).offset(offset))
         ]
     if resource in ("organizations", "usage"):
+        orgs = list(
+            session.scalars(
+                select(Organization).order_by(Organization.id).limit(limit).offset(offset)
+            )
+        )
+        usage = usage_payloads(session, orgs)
         return [
             {
                 "id": row.id,
-                **usage_payload(session, row),
+                **usage[row.id],
                 **({"name": row.name} if trusted_cli else {"created_at": row.created_at}),
             }
-            for row in session.scalars(
-                select(Organization).order_by(Organization.id).limit(limit).offset(offset)
-            )
+            for row in orgs
         ]
     if resource == "projects":
         return [
@@ -127,7 +132,7 @@ def inspect_resource(
                     {}
                     if trusted_cli
                     else {
-                        "status": "failed",
+                        "status": AnalysisStatus.FAILED,
                         "created_at": row.created_at,
                         "completed_at": row.completed_at,
                     }
@@ -135,7 +140,7 @@ def inspect_resource(
             }
             for row in session.scalars(
                 select(Analysis)
-                .where(Analysis.status == "failed")
+                .where(Analysis.status == AnalysisStatus.FAILED)
                 .order_by(Analysis.created_at.desc(), Analysis.id)
                 .limit(limit)
                 .offset(offset)
