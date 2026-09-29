@@ -491,10 +491,11 @@ def create_app(
                 create_session(response, session, settings, user.id, oidc_authenticated=True)
             return response
         except Exception as error:
-            LOGGER.warning(
-                json.dumps(
-                    {"event": "auth.oidc_callback_failed", "exception": type(error).__name__}
-                )
+            log_event(
+                LOGGER,
+                logging.WARNING,
+                "auth.oidc_callback_failed",
+                exception=type(error).__name__,
             )
             raise HTTPException(400, "authentication_failed") from None
         finally:
