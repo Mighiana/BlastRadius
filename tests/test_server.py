@@ -1189,6 +1189,7 @@ def test_shutdown_drain_finishes_ordinary_analysis(settings, demo_results, monke
         response = submit(client, proj["id"])
         assert response.status_code == 202
         assert started.wait(3)
+    # Unfenced read: shutdown released the service lease, so db.session() raises LeaseLost.
     with app.state.db.sessions() as session:
         job = session.get(Analysis, response.json()["id"])
         assert job.status == "succeeded"
