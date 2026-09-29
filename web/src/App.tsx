@@ -26,12 +26,19 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean
     return this.props.children;
   }
 }
+function decodeFragment(fragment: string): string {
+  try {
+    return decodeURIComponent(fragment);
+  } catch {
+    return fragment;
+  }
+}
 function RouteFocus() {
   const { pathname, hash } = useLocation();
   useEffect(() => {
     const title = pathname === '/' ? 'Know before you merge' : pathname.slice(1).replace(/^\w/, c => c.toUpperCase());
     document.title = `BlastRadius Beta — ${title}`;
-    const target = hash ? document.getElementById(hash.slice(1)) : null;
+    const target = hash ? document.getElementById(decodeFragment(hash.slice(1))) : null;
     if (target) {
       target.scrollIntoView({ behavior: 'instant', block: 'start' });
     } else {
