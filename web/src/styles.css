@@ -106,8 +106,8 @@ details>code{display:block;padding-top:12px}
 .story{margin:0}
 .story .code-change code{white-space:nowrap;overflow-x:auto}.story .line-number{flex-shrink:0}
 .story .preview-body{padding:20px;display:flex;flex-direction:column;gap:16px}
-.story .code-change code:nth-child(2){background:#3c212133}
-.story .code-change code:nth-child(3){background:#1e3a2a33}
+.story .code-change code:nth-child(3){background:#3c212133}
+.story .code-change code:nth-child(4){background:#1e3a2a33}
 .story-compare{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:stretch}
 .story-arrow{align-self:center;color:#6f8090}
 .story-state{border:1px solid;border-radius:9px;padding:13px 15px;display:flex;flex-direction:column;gap:6px}

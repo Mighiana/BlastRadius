@@ -21,7 +21,7 @@ export default function Landing() {
       <figure className="product-preview story" aria-label="Example: a one-line Terraform change opens a path from the internet to customer data">
         <div className="preview-top"><span className="preview-brand"><GitCompareArrows size={16} aria-hidden="true" /> main.tf · pull request #42</span><span className="tag">BUNDLED DEMO</span></div>
         <div className="preview-body">
-          <div className="code-change"><code><span className="line-number">27</span><span>  resource "aws_security_group" "web" {'{'}</span></code><code><span className="line-number">28</span><span className="minus">−   cidr_blocks = ["10.0.0.0/24"]</span></code><code><span className="line-number">28</span><span className="plus">+   cidr_blocks = ["0.0.0.0/0"]</span></code></div>
+          <div className="code-change"><code><span className="line-number">19</span><span>  resource "aws_security_group" "web" {'{'}</span></code><code><span className="line-number">25</span><span className="muted">    from_port   = 22</span></code><code><span className="line-number">28</span><span className="minus">−   cidr_blocks = ["10.0.0.0/24"]</span></code><code><span className="line-number">28</span><span className="plus">+   cidr_blocks = ["0.0.0.0/0"]</span></code></div>
           <div className="story-compare">
             <div className="story-state safe"><span><CheckCircle2 size={16} aria-hidden="true" />Before</span><strong><Lock size={15} aria-hidden="true" />SSH from 10.0.0.0/24</strong><small>Private network only</small></div>
             <ArrowRight className="story-arrow" size={20} aria-hidden="true" />
