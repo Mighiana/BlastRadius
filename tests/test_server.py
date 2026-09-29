@@ -2038,3 +2038,35 @@ def test_retention_sweep_worker_logs_failures_and_continues(
             )
     finally:
         logger.removeHandler(caplog.handler)
+
+
+def test_oidc_callback_failure_is_logged_without_changing_the_response(
+    settings, demo_results, monkeypatch, caplog
+):
+    monkeypatch.setattr("blastradius.server.app.build_demos", lambda _: demo_results)
+    settings = replace(
+        settings,
+        auth_mode="oidc",
+        oidc_issuer="https://issuer.example",
+        oidc_client_id="client",
+        oidc_client_secret="test",
+    )
+    app = create_app(settings)
+    logger = logging.getLogger("blastradius")
+    caplog.handler.setLevel(logging.WARNING)
+    logger.addHandler(caplog.handler)
+    try:
+        with TestClient(app) as client:
+            response = client.get("/api/auth/callback?code=private-code&state=private-state")
+    finally:
+        logger.removeHandler(caplog.handler)
+    assert response.status_code == 400
+    assert response.json() == {"detail": "authentication_failed"}
+    events = [
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if record.getMessage().startswith("{")
+    ]
+    failures = [event for event in events if event.get("event") == "auth.oidc_callback_failed"]
+    assert len(failures) == 1 and failures[0]["exception"]
+    assert "private-code" not in caplog.text and "private-state" not in caplog.text
