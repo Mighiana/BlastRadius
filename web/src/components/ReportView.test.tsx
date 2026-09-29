@@ -47,7 +47,8 @@ describe('report evidence and graph', () => {
   });
   it('does not infer score 100 from SAFE or claim no existing exposure', () => {
     render(<ReportView report={{ ...safe, score: { before: 85, after: 85, delta: 0 } }} />);
-    expect(screen.getByText('SAFE TO MERGE')).toBeVisible();
+    expect(screen.getByText('NO NEW PATHS')).toBeVisible();
+    expect(screen.queryByText('SAFE TO MERGE')).not.toBeInTheDocument();
     expect(screen.getAllByText('85')).toHaveLength(2);
     expect(screen.getByText(/does not prove safety/)).toBeVisible();
   });

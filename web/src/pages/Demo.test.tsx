@@ -14,11 +14,11 @@ describe('real API demo transitions', () => {
     }));
     const user = userEvent.setup();
     render(<Demo />);
-    expect(await screen.findByText('SAFE TO MERGE')).toBeVisible();
+    expect(await screen.findByText('NO NEW PATHS')).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Simulate risky change' }));
     expect(await screen.findByText('BLOCK CHANGE')).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Remediate & re-analyze' }));
-    expect(await screen.findByText('SAFE TO MERGE')).toBeVisible();
+    expect(await screen.findByText('NO NEW PATHS')).toBeVisible();
     expect(urls).toContain('/api/demo/public_ssh?stage=safe');
     expect(urls).toContain('/api/demo/public_ssh?stage=risky');
     expect(urls).toContain('/api/demo/public_ssh?stage=remediated');
