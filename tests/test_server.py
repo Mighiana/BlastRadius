@@ -986,6 +986,8 @@ def test_lifespan_logs_start_ready_and_stop(app, caplog):
             json.loads(record.message).get("event")
             for record in caplog.records
             if record.name == "blastradius.server.app"
+            and json.loads(record.message).get("event")
+            in {"service.starting", "service.ready", "service.stopping"}
         ]
         assert events[:2] == ["service.starting", "service.ready"]
     events = [

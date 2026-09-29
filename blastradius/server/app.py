@@ -146,7 +146,20 @@ def create_app(
 
     def load_demos() -> None:
         if not demos:
-            demos.update(load_demo_cache(settings.demo_cache) or build_demos(settings))
+            cached = load_demo_cache(settings.demo_cache)
+            if cached is not None:
+                demos.update(cached)
+                return
+            started = time.perf_counter()
+            demos.update(build_demos(settings))
+            LOGGER.warning(
+                json.dumps(
+                    {
+                        "event": "demo.build_fallback",
+                        "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                    }
+                )
+            )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):

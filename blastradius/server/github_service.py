@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import HTTPException
 from pydantic import ValidationError
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -37,6 +37,7 @@ from blastradius.server.schemas import AnalysisInput
 
 LOGGER = logging.getLogger(__name__)
 MAX_ATTEMPTS = 3
+MAX_PENDING_DELIVERIES = 1000
 RETRY_SECONDS = 30
 DISPATCH_POLL_SECONDS = 2.0
 
@@ -61,11 +62,16 @@ class GitHubService:
 
     def recover(self) -> None:
         with self.db.session(write=True) as session:
-            session.execute(
-                update(GitHubDelivery)
-                .where(GitHubDelivery.status == "queued")
-                .values(status="retryable", error="server_restarted", next_attempt_at=time.time())
+            deliveries = list(
+                session.scalars(
+                    select(GitHubDelivery).where(GitHubDelivery.status == "queued")
+                )
             )
+            for delivery in deliveries:
+                delivery.status = "pending"
+                delivery.error = "server_restarted"
+                delivery.next_attempt_at = None
+                delivery.attempts = max(delivery.attempts - 1, 0)
             session.execute(
                 update(GitHubRun)
                 .where(GitHubRun.status == "pending")
@@ -98,7 +104,13 @@ class GitHubService:
         self.wake.set()
         if self.dispatcher is not None:
             self.dispatcher.join(timeout=5)
-        self.jobs.drain(self.executor, self.jobs.running, deadline)
+        self.jobs.drain(
+            self.executor,
+            self.jobs.running,
+            deadline,
+            cancel_unstarted=True,
+            wait_running=False,
+        )
 
     def receive(
         self,
@@ -108,6 +120,11 @@ class GitHubService:
         payload: PullEvent | LifecycleEvent | None,
     ) -> dict[str, str]:
         """Durably record a verified delivery, then dispatch it if this process may.
+
+        For supported pull_request and installation events, an identical body has
+        the same action, head/base SHAs, and updated_at, so it is a GitHub
+        redelivery of the same event and yields the same deterministic GitHubRun.
+        Deduplicating it cannot drop a distinct event.
 
         The caller answers 2xx only after this returns, i.e. after the commit.
         """
@@ -122,23 +139,54 @@ class GitHubService:
                         select(GitHubDelivery).where(GitHubDelivery.body_hash == digest)
                     )
                 if delivery:
-                    if delivery.status != "retryable" or delivery.attempts >= MAX_ATTEMPTS:
+                    if (
+                        delivery.status == "rejected"
+                        and delivery.error == "github_payload_unavailable"
+                        and payload is not None
+                    ):
+                        delivery.status = "pending"
+                        delivery.error = None
+                        delivery.next_attempt_at = None
+                        delivery.payload = payload.model_dump_json()
+                        delivery.attempts = 0
+                        delivery_id = delivery.id
+                    elif delivery.status != "retryable" or delivery.attempts >= MAX_ATTEMPTS:
                         _log("github.webhook_duplicate", delivery_id=delivery_id)
                         return {"status": "duplicate"}
-                    delivery.attempts += 1
-                    delivery.status, delivery.error, delivery.next_attempt_at = (
-                        "pending",
-                        None,
-                        None,
-                    )
-                    delivery_id = delivery.id
+                    else:
+                        delivery.status, delivery.error, delivery.next_attempt_at = (
+                            "pending",
+                            None,
+                            None,
+                        )
+                        if delivery.payload is None and payload is not None:
+                            delivery.payload = payload.model_dump_json()
+                        delivery_id = delivery.id
                 else:
+                    backlog = (
+                        session.scalar(
+                            select(func.count())
+                            .select_from(GitHubDelivery)
+                            .where(
+                                GitHubDelivery.status.in_(("pending", "retryable", "queued"))
+                            )
+                        )
+                        or 0
+                    )
+                    if backlog >= MAX_PENDING_DELIVERIES:
+                        _log(
+                            "github.webhook_failed",
+                            delivery_id=delivery_id,
+                            error="github_backlog_full",
+                        )
+                        raise HTTPException(503, "github_backlog_full")
                     session.add(
                         GitHubDelivery(
                             id=delivery_id,
                             body_hash=digest,
                             event=event,
                             status="pending" if payload is not None else "ignored",
+                            attempts=0,
                             payload=payload.model_dump_json() if payload is not None else None,
                         )
                     )
@@ -178,7 +226,6 @@ class GitHubService:
                     if delivery is None:
                         return dispatched
                     if delivery.status == "retryable":
-                        delivery.attempts += 1
                         delivery.status, delivery.next_attempt_at = "pending", None
                     delivery_id = delivery.id
             except LeaseLost:
@@ -230,6 +277,8 @@ class GitHubService:
                         reserved = status == "queued"
                         if status == "deferred":
                             return self._deferred(delivery_id, "analysis_queue_full")
+                        if status == "rejected":
+                            return self._failed(delivery_id, "github_attempts_exhausted")
             except LeaseLost:
                 if reserved:
                     self.jobs.slots.release()
@@ -307,6 +356,13 @@ class GitHubService:
         policy = effective_policy(org, project)
         if not self.jobs.reserve():
             return {"status": "deferred"}
+        delivery.attempts += 1
+        if delivery.attempts > MAX_ATTEMPTS:
+            self.jobs.slots.release()
+            delivery.status = "rejected"
+            delivery.error = "github_attempts_exhausted"
+            delivery.payload = None
+            return {"status": "rejected"}
         delivery.status = "queued"
         return {
             "status": "queued",
@@ -350,7 +406,15 @@ class GitHubService:
                         if delivery:
                             delivery.status, delivery.error = status, error
                             if status == "retryable":
-                                delivery.next_attempt_at = time.time() + RETRY_SECONDS * delivery.attempts
+                                if delivery.attempts >= MAX_ATTEMPTS:
+                                    delivery.status = "rejected"
+                                    status = "rejected"
+                                    delivery.next_attempt_at = None
+                                    delivery.payload = None
+                                else:
+                                    delivery.next_attempt_at = (
+                                        time.time() + RETRY_SECONDS * delivery.attempts
+                                    )
                             else:
                                 delivery.payload = None
                     _log(

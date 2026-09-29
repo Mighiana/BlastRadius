@@ -217,8 +217,12 @@ class JobManager:
                         "project_id": job.project_id,
                     }
                 )
-            response = execute(
-                payload, self.settings, policy_snapshot, self.db.lease_healthy, self.stopping
+            response = (
+                {"error": "server_restarted"}
+                if self.stopping.is_set()
+                else execute(
+                    payload, self.settings, policy_snapshot, self.db.lease_healthy, self.stopping
+                )
             )
             context["outcome"] = self.finish(analysis_id, response)
         except LeaseLost:
@@ -236,19 +240,26 @@ class JobManager:
         self.running.add(future)
         future.add_done_callback(self.running.discard)
 
-    def drain(self, executor: ThreadPoolExecutor, futures: set[Future], deadline: float) -> None:
+    def drain(
+        self,
+        executor: ThreadPoolExecutor,
+        futures: set[Future],
+        deadline: float,
+        cancel_unstarted: bool,
+        wait_running: bool = True,
+    ) -> None:
         """Let running work finish until ``deadline``, then stop it; never wait unbounded.
 
-        Unstarted work is cancelled and stays queued in the database for the
-        next lease holder, so the lease is not held for its runtime.
+        Durable work can cancel unstarted futures, while analysis work lets
+        queued futures run inside the drain window before stopping.
         """
         self.draining.set()
-        executor.shutdown(wait=False, cancel_futures=True)
+        executor.shutdown(wait=False, cancel_futures=cancel_unstarted)
         wait(set(futures), timeout=max(0.0, deadline - time.monotonic()))
         self.stopping.set()
-        executor.shutdown(wait=True)
+        executor.shutdown(wait=wait_running)
 
     def shutdown(self, deadline: float | None = None) -> None:
         if deadline is None:
             deadline = time.monotonic() + self.settings.shutdown_drain_seconds
-        self.drain(self.executor, self.running, deadline)
+        self.drain(self.executor, self.running, deadline, cancel_unstarted=False)

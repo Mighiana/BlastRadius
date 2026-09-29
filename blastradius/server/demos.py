@@ -1,14 +1,19 @@
 import hashlib
+import importlib.metadata
 import json
+import logging
 import sys
 import tempfile
 from pathlib import Path
 
 import blastradius
+from importlib.metadata import PackageNotFoundError
 from blastradius.server.config import Settings
 from blastradius.server.fixtures import FIXTURES
 from blastradius.server.jobs import execute
 from blastradius.server.schemas import AnalysisInput
+
+LOGGER = logging.getLogger(__name__)
 
 
 def build_demos(settings: Settings) -> dict[tuple[str, str], dict]:
@@ -52,6 +57,13 @@ def demo_fingerprint() -> str:
     for path in sorted(package.rglob("*.py")):
         digest.update(path.relative_to(package).as_posix().encode() + b"\0")
         digest.update(path.read_bytes() + b"\0")
+    digest.update(sys.version.encode() + b"\0")
+    for name in ("python-hcl2", "lark", "networkx"):
+        try:
+            version = importlib.metadata.version(name)
+        except PackageNotFoundError:
+            version = "missing"
+        digest.update(name.encode() + b"\0" + version.encode() + b"\0")
     return digest.hexdigest()
 
 
@@ -71,17 +83,27 @@ def write_demo_cache(path: Path, settings: Settings) -> None:
 
 def load_demo_cache(path: Path | None) -> dict[tuple[str, str], dict] | None:
     """Demos precomputed at image build time, or ``None`` when absent or stale."""
-    if path is None or not path.is_file():
+    if path is None:
+        LOGGER.info(json.dumps({"event": "demo.cache_miss", "reason": "unconfigured"}))
+        return None
+    if not path.is_file():
+        LOGGER.warning(json.dumps({"event": "demo.cache_miss", "reason": "missing"}))
         return None
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
         if document["fingerprint"] != demo_fingerprint():
+            LOGGER.warning(json.dumps({"event": "demo.cache_miss", "reason": "stale"}))
             return None
         demos = {(scenario, stage): result for scenario, stage, result in document["demos"]}
     except (OSError, ValueError, KeyError, TypeError):
+        LOGGER.warning(json.dumps({"event": "demo.cache_miss", "reason": "corrupt"}))
         return None
     expected = {(scenario, stage) for scenario in FIXTURES for stage in ("safe", "risky", "remediated")}
-    return demos if set(demos) == expected else None
+    if set(demos) != expected:
+        LOGGER.warning(json.dumps({"event": "demo.cache_miss", "reason": "incomplete"}))
+        return None
+    LOGGER.info(json.dumps({"event": "demo.cache_loaded", "count": len(demos)}))
+    return demos
 
 
 if __name__ == "__main__":
