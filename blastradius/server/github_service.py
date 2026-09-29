@@ -228,8 +228,8 @@ class GitHubService:
         dispatched = 0
         while self.db.lease_healthy() and not self.jobs.draining.is_set():
             now = time.time()
-            with self.lock:
-                with self.db.session(write=True) as session:
+            try:
+                with self.lock, self.db.session(write=True) as session:
                     for orphan in session.scalars(
                         select(GitHubDelivery).where(GitHubDelivery.status == "queued")
                     ):
@@ -241,7 +241,6 @@ class GitHubService:
                                 delivery_id=orphan.id,
                                 reason="orphaned_queued",
                             )
-            try:
                 with self.db.session(write=True) as session:
                     delivery = session.scalar(
                         select(GitHubDelivery)
