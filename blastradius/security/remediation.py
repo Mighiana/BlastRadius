@@ -68,8 +68,9 @@ def recommend(config: ParsedConfig, graph=None) -> List[Recommendation]:
                 )
             )
 
+    index = rules.ResourceIndex.build(config.resources)
     for bucket in config.of_type("aws_s3_bucket"):
-        for public_bucket in rules.public_bucket_findings(bucket, config.resources):
+        for public_bucket in rules.public_bucket_findings(bucket, config.resources, index):
             sensitive = " It is also tagged as holding sensitive data." if rules.is_sensitive_bucket(bucket) else ""
             recommendations.append(
                 Recommendation(
