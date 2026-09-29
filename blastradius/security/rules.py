@@ -211,13 +211,16 @@ def arn_bucket_reference(resource: object) -> Optional[Tuple[str, bool]]:
 
     References elsewhere in the string (object keys, prefixes) name no grant target.
     """
-    if not policy_references(resource) or not isinstance(resource, str):
+    if not isinstance(resource, str):
+        return None
+    references = policy_references(resource)
+    if not references:
         return None
     match = _ARN_POSITION_BUCKET.match(resource)
     if not match:
         return None
     address = match[1] or match[2]
-    if address not in policy_references(resource):
+    if address not in references:
         return None
     return address, bool(match[3] and len(match[3]) > 1)
 
