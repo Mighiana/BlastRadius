@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import replace
+from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -42,7 +44,8 @@ from blastradius.server.models import (
     Project,
     User,
 )
-from blastradius.server.operator import RESOURCES
+from blastradius.server.failures import FailureCode
+from blastradius.server.operator import FAILURE_CODES, RESOURCES
 from test_server import identity_client, login, project, submit, terminal
 
 backend_client = test_server.backend_client
@@ -753,6 +756,39 @@ def test_cli_inspection_and_cleanup_are_bounded(operator_client, monkeypatch, ca
     assert not limits["payments_enabled"]
 
 
+def test_failure_codes_are_the_shared_vocabulary():
+    assert FAILURE_CODES == {code.value for code in FailureCode}
+    schema = (Path(__file__).parents[1] / "web/src/operator-api.ts").read_text(encoding="utf-8")
+    web_codes = re.search(r"error: z\.enum\(\[(.*?)\]\)", schema, re.S)
+    assert web_codes
+    assert set(re.findall(r"'([a-z_]+)'", web_codes.group(1))) == FAILURE_CODES
+
+
+def test_admin_failures_log_unknown_codes_without_leaking_them(operator_client, caplog):
+    client, app, _ = operator_client
+    me = client.get("/api/me").json()
+    known_id = seed_analysis(app, me, "failed")
+    unknown_id = seed_analysis(app, me, "failed")
+    with app.state.db.session(write=True) as session:
+        session.get(Analysis, known_id).error = FailureCode.RESULT_TOO_LARGE
+        session.get(Analysis, unknown_id).error = "PRIVATE-TOKEN-unregistered-code"
+    logger = logging.getLogger("blastradius.server.operator")
+    caplog.set_level(logging.WARNING, logger=logger.name)
+    logger.addHandler(caplog.handler)
+    try:
+        failures = {
+            item["id"]: item["error"]
+            for item in client.get("/api/admin/failures").json()["items"]
+        }
+    finally:
+        logger.removeHandler(caplog.handler)
+    assert failures[known_id] == "result_too_large"
+    assert failures[unknown_id] == "analysis_failed"
+    logged = [json.loads(record.getMessage()) for record in caplog.records]
+    assert logged == [{"event": "operator.unknown_failure_code", "analysis_id": unknown_id}]
+    assert "PRIVATE-TOKEN" not in caplog.text
+
+
 def test_admin_failure_redaction_retention_and_pagination(operator_client):
     client, app, _ = operator_client
     me = client.get("/api/me").json()
@@ -810,6 +846,74 @@ def test_commercial_foreign_keys_cascade_without_touching_leads(backend_client, 
         assert session.scalar(select(func.count()).select_from(BetaInterest)) == 1
         if model is User:
             assert session.get(Analysis, analysis_id)
+
+
+def stored_event_counts(session):
+    return (
+        session.scalar(select(CommercialLock.event_count).where(CommercialLock.id == 1)),
+        session.scalar(select(func.count()).select_from(ProductEvent)),
+    )
+
+
+def test_event_counter_tracks_inserts_trims_and_cascades(backend_client, monkeypatch):
+    client, app = backend_client
+    me = login(client)
+    bootstrap(client)
+    analysis_id = seed_analysis(app, me)
+    org_id = me["organizations"][0]["id"]
+    monkeypatch.setattr("blastradius.server.events.EVENT_LIMIT", 5)
+    with app.state.db.session(write=True) as session:
+        session.execute(delete(ProductEvent))
+        assert stored_event_counts(session) == (0, 0)
+        for _ in range(3):
+            record_event(session, "report_exported", organization_id=org_id, analysis_id=analysis_id)
+        assert stored_event_counts(session) == (3, 3)
+        for _ in range(4):
+            record_event(session, "project_created", user_id=me["user"]["id"])
+        assert stored_event_counts(session) == (5, 5)
+    with app.state.db.session() as session:
+        assert stored_event_counts(session) == (5, 5)
+    with app.state.db.session(write=True) as session:
+        session.execute(delete(Analysis).where(Analysis.id == analysis_id))
+        assert stored_event_counts(session) == (4, 4)
+    monkeypatch.setattr("blastradius.server.events.EVENT_LIMIT", 2)
+    with app.state.db.session(write=True) as session:
+        record_event(session, "project_created", user_id=me["user"]["id"])
+        assert stored_event_counts(session) == (2, 2)
+    with app.state.db.session(write=True) as session:
+        for row in session.scalars(select(ProductEvent)):
+            row.created_at = time.time() - 91 * 86400
+    assert cleanup_commercial(app.state.db, 1)["product_events"] == 1
+    with app.state.db.session() as session:
+        assert stored_event_counts(session) == (1, 1)
+
+
+def test_event_counter_upgrade_backfills_and_downgrade_removes(migration_database):
+    database = migration_database
+    config = migration_config()
+    with database.engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.upgrade(config, "0005")
+        for _ in range(3):
+            connection.execute(
+                text(
+                    "INSERT INTO product_events (id,name,created_at)"
+                    " VALUES (:id,'safe_result',:now)"
+                ),
+                {"id": str(uuid.uuid4()), "now": time.time()},
+            )
+    database.migrate()
+    with database.session(write=True) as session:
+        assert stored_event_counts(session) == (3, 3)
+        record_event(session, "safe_result")
+        assert stored_event_counts(session) == (4, 4)
+    with database.engine.begin() as connection:
+        config.attributes["connection"] = connection
+        command.downgrade(config, "0005")
+        connection.execute(delete(ProductEvent))
+    database.migrate()
+    with database.session() as session:
+        assert stored_event_counts(session) == (0, 0)
 
 
 def test_populated_legacy_session_upgrade_and_downgrade(migration_database):

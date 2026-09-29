@@ -1,27 +1,14 @@
 """Attack-path explanations.
 
 The MVP explainer is deterministic and rule-based, which is exactly what a live
-demo needs. It is written behind a tiny provider interface so an LLM-backed
-explainer can be dropped in later without touching the analysis code:
-
-    from blastradius.security import explain
-    explain.set_provider(MyLLMExplainer())
+demo needs.
 """
 
 from __future__ import annotations
 
-from typing import List, Protocol, Sequence
+from typing import List, Sequence
 
 from blastradius.parser.models import GraphEdge, NodeType, Relationship, ResourceNode, Risk
-
-
-class ExplanationProvider(Protocol):
-    """Anything that can turn an attack path into prose."""
-
-    def explain_path(
-        self, nodes: Sequence[ResourceNode], edges: Sequence[GraphEdge]
-    ) -> str:  # pragma: no cover - interface
-        ...
 
 
 class RuleBasedExplainer:
@@ -80,23 +67,6 @@ class RuleBasedExplainer:
             f"{target} is tagged as sensitive, so this is a complete path from the "
             "internet to a sensitive resource under this model, not proof of data exfiltration."
         )
-
-
-_provider: ExplanationProvider = RuleBasedExplainer()
-
-
-def set_provider(provider: ExplanationProvider) -> None:
-    """Swap in a different explanation backend (e.g. an LLM agent)."""
-    global _provider
-    _provider = provider
-
-
-def get_provider() -> ExplanationProvider:
-    return _provider
-
-
-def explain_path(nodes: Sequence[ResourceNode], edges: Sequence[GraphEdge]) -> str:
-    return _provider.explain_path(nodes, edges)
 
 
 def summarize_regression(

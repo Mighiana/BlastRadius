@@ -15,6 +15,8 @@ from blastradius.server.jobs import execute
 from blastradius.server.schemas import AnalysisInput
 
 LOGGER = logging.getLogger(__name__)
+DEMO_STAGES = ("safe", "risky", "remediated")
+DEMO_COUNT = len(FIXTURES) * len(DEMO_STAGES)
 
 
 def build_demos(settings: Settings) -> dict[tuple[str, str], dict]:
@@ -26,7 +28,7 @@ def build_demos(settings: Settings) -> dict[tuple[str, str], dict]:
             shutil.rmtree(path, ignore_errors=True)
     for scenario_id, scenario in FIXTURES.items():
         baseline, risky = scenario["before_files"], scenario["after_files"]
-        for stage in ("safe", "risky", "remediated"):
+        for stage in DEMO_STAGES:
             before = risky if stage == "remediated" else baseline
             after = risky if stage == "risky" else baseline
             if stage == "remediated" and scenario_id != "broad_iam":
@@ -89,11 +91,7 @@ def write_demo_cache(path: Path, settings: Settings) -> None:
 
 
 def demo_settings(settings: Settings) -> dict[str, int]:
-    return {
-        "job_timeout_seconds": settings.job_timeout_seconds,
-        "max_body_bytes": settings.max_body_bytes,
-        "max_resources": settings.max_resources,
-    }
+    return {"max_resources": settings.max_resources}
 
 
 def load_demo_cache(
@@ -125,7 +123,7 @@ def load_demo_cache(
     except (OSError, ValueError, KeyError, TypeError):
         LOGGER.warning(json.dumps({"event": "demo.cache_miss", "reason": "corrupt"}))
         return None
-    expected = {(scenario, stage) for scenario in FIXTURES for stage in ("safe", "risky", "remediated")}
+    expected = {(scenario, stage) for scenario in FIXTURES for stage in DEMO_STAGES}
     if set(demos) != expected:
         LOGGER.warning(json.dumps({"event": "demo.cache_miss", "reason": "incomplete"}))
         return None

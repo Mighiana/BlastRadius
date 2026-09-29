@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+import logging
 import threading
 import subprocess
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
@@ -9,6 +12,7 @@ import pytest
 import test_server
 from fastapi.testclient import TestClient
 from sqlalchemy import select, text
+from sqlalchemy.exc import OperationalError
 
 from blastradius.server.app import create_app
 from blastradius.server.db import Database, LeaseLost
@@ -134,3 +138,74 @@ def test_postgres_successor_waits_for_old_transaction_rollback(migration_databas
         successor.release()
         lease.release()
         successor_db.engine.dispose()
+
+
+class FailingConnection:
+    closed = False
+    invalidated = False
+
+    def __init__(self):
+        self.close_calls = 0
+
+    def execute(self, *_args, **_kwargs):
+        raise OperationalError("probe", {}, Exception("disposable fault"))
+
+    def exec_driver_sql(self, *_args, **_kwargs):
+        raise OperationalError("unlock", {}, Exception("disposable fault"))
+
+    def close(self):
+        self.close_calls += 1
+
+
+def lease_events(caplog):
+    return [
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if record.name == "blastradius.server.lease"
+    ]
+
+
+@contextmanager
+def lease_log(caplog):
+    logger = logging.getLogger("blastradius.server.lease")
+    caplog.handler.setLevel(logging.WARNING)
+    logger.addHandler(caplog.handler)
+    try:
+        yield
+    finally:
+        logger.removeHandler(caplog.handler)
+
+
+def test_health_probe_failure_is_logged_and_fails_closed(settings, caplog):
+    lease = ServiceLease(Database(settings), settings.data_dir)
+    lease.connection = FailingConnection()
+    lease.pid = 1
+    with lease_log(caplog):
+        assert lease.healthy() is False
+        assert lease.healthy() is False
+    assert lease.lost.is_set()
+    assert lease_events(caplog) == [
+        {"event": "service.lease_lost", "reason": "probe_failed", "exception": "OperationalError"}
+    ]
+
+
+def test_closed_lease_connection_is_logged_as_lost(settings, caplog):
+    lease = ServiceLease(Database(settings), settings.data_dir)
+    connection = FailingConnection()
+    connection.closed = True
+    lease.connection = connection
+    with lease_log(caplog):
+        assert lease.healthy() is False
+    assert lease_events(caplog) == [{"event": "service.lease_lost", "reason": "connection_closed"}]
+
+
+def test_release_failure_is_logged_and_still_closes_the_connection(settings, caplog):
+    lease = ServiceLease(Database(settings), settings.data_dir)
+    connection = FailingConnection()
+    lease.connection = connection
+    with lease_log(caplog):
+        assert lease.release() is False
+    assert lease.lost.is_set() and lease.connection is None and connection.close_calls == 1
+    assert lease_events(caplog) == [
+        {"event": "service.lease_release_failed", "exception": "OperationalError"}
+    ]

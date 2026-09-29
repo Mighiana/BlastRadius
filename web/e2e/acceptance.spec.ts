@@ -77,7 +77,9 @@ for (const width of widths) {
       await expect(page.getByRole('group', { name: 'Demo scenario' }).getByRole('button')).toHaveCount(3);
       for (const scenario of ['Public SSH exposure', 'Overly broad IAM permission', 'Public sensitive S3 bucket']) {
         await page.getByRole('group', { name: 'Demo scenario' }).getByRole('button', { name: new RegExp(scenario) }).click();
-        await expect(page.getByLabel('Analysis decision').getByText('SAFE TO MERGE', { exact: true })).toBeVisible();
+        await expect(page.getByLabel('Analysis decision').getByText('BLOCK CHANGE', { exact: true })).toBeVisible();
+        await page.getByRole('button', { name: 'Reset baseline' }).click();
+        await expect(page.getByLabel('Analysis decision').getByText('NO NEW PATHS', { exact: true })).toBeVisible();
         await page.getByRole('button', { name: 'Simulate risky change' }).click();
         await expect(page.getByLabel('Analysis decision').getByText('BLOCK CHANGE', { exact: true })).toBeVisible();
         await contained(page);
@@ -100,10 +102,10 @@ for (const width of widths) {
       }
       await exports(page, 'blastradius-demo');
       await navigate(page, 'Pricing'); await contained(page);
-      await expect(page.getByRole('button', { name: 'Coming soon' })).toHaveCount(3);
+      await expect(page.getByText(/self-service checkout is coming later/)).toBeVisible();
       for (const route of ['/security', '/privacy', '/terms']) {
         await page.goto(route);
-        await expect(page.getByText('LEGAL REVIEW REQUIRED BEFORE COMMERCIAL LAUNCH')).toBeVisible();
+        await expect(page.getByText('LEGAL REVIEW REQUIRED BEFORE COMMERCIAL LAUNCH')).toHaveCount(0);
         await contained(page);
       }
       await navigate(page, 'Documentation'); await contained(page);
@@ -148,7 +150,7 @@ for (const width of widths) {
       await page.getByLabel('Candidate Terraform files').setInputFiles(new URL('../../examples/safe/main.tf', import.meta.url).pathname);
       await page.getByLabel('Candidate label').fill('remediated-candidate');
       await page.getByRole('button', { name: 'Analyze change' }).click();
-      await expect(page.getByLabel('Analysis decision').getByText('SAFE TO MERGE', { exact: true })).toBeVisible();
+      await expect(page.getByLabel('Analysis decision').getByText('NO NEW PATHS', { exact: true })).toBeVisible();
       await contained(page);
       await exports(page, 'blastradius', false);
       await expect(page.getByText(/Saved SARIF exports require/)).toBeVisible();

@@ -140,3 +140,27 @@ def test_product_tabs_and_demo_mode_transition():
     at.toggle(key='demo_mode').set_value(False).run()
     assert not at.exception
     assert 'SAFE TO MERGE' in _text(at)
+
+
+def test_reruns_reuse_the_remediation_plan_and_report(monkeypatch):
+    from blastradius import report
+    from blastradius.security import remediation
+
+    calls = {"plan": 0, "report": 0}
+    generate, build = remediation.generate_safer_config, report.build_report
+
+    def counting_generate(*args, **kwargs):
+        calls["plan"] += 1
+        return generate(*args, **kwargs)
+
+    def counting_build(*args, **kwargs):
+        calls["report"] += 1
+        return build(*args, **kwargs)
+
+    monkeypatch.setattr(remediation, "generate_safer_config", counting_generate)
+    monkeypatch.setattr(report, "build_report", counting_build)
+    at = _app()
+    at.run()
+    at.run()
+    assert not at.exception
+    assert calls == {"plan": 1, "report": 1}

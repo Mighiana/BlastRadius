@@ -6,7 +6,8 @@ from uuid import UUID
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from blastradius.server.models import Analysis, CommercialLock, ProductEvent
+from blastradius.security.decision import Decision
+from blastradius.server.models import Analysis, AnalysisStatus, CommercialLock, ProductEvent
 
 EVENT_NAMES = (
     "account_created",
@@ -27,9 +28,14 @@ EVENT_LIMIT = 100_000
 RETENTION_DAYS = 90
 
 
-def lock_commercial(db: Session) -> None:
-    if db.scalar(select(CommercialLock).where(CommercialLock.id == 1).with_for_update()) is None:
+def lock_commercial(db: Session) -> int:
+    """Lock the commercial row and return the trigger-maintained product event count."""
+    count = db.scalar(
+        select(CommercialLock.event_count).where(CommercialLock.id == 1).with_for_update()
+    )
+    if count is None:
         raise RuntimeError("commercial_storage_not_ready")
+    return count
 
 
 def opaque_id(value: str | None) -> str | None:
@@ -50,8 +56,7 @@ def record_event(
 ) -> None:
     if name not in EVENT_NAMES:
         raise ValueError("unknown_product_event")
-    lock_commercial(db)
-    count = db.scalar(select(func.count()).select_from(ProductEvent)) or 0
+    count = lock_commercial(db)
     if count >= EVENT_LIMIT:
         oldest = (
             select(ProductEvent.id)
@@ -83,14 +88,14 @@ def analysis_event(db: Session, job: Analysis, name: str) -> None:
 
 
 def terminal_events(db: Session, job: Analysis) -> None:
-    if job.status == "failed":
+    if job.status == AnalysisStatus.FAILED:
         analysis_event(db, job, "analysis_failed")
-    elif job.status == "succeeded":
+    elif job.status == AnalysisStatus.SUCCEEDED:
         analysis_event(db, job, "analysis_completed")
         decision = {
-            "BLOCK CHANGE": "block_result",
-            "REVIEW REQUIRED": "review_result",
-            "SAFE TO MERGE": "safe_result",
+            Decision.BLOCK.value: "block_result",
+            Decision.REVIEW.value: "review_result",
+            Decision.SAFE.value: "safe_result",
         }.get(job.decision or "")
         if decision:
             analysis_event(db, job, decision)
