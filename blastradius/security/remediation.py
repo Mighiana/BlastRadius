@@ -107,13 +107,14 @@ def recommend(config: ParsedConfig, graph=None) -> List[Recommendation]:
             )
 
     if graph is not None:
+        internet_reachable = _descendants(graph)
         for source, target, data in graph.edges(data=True):
             edge = data["edge"]
             if edge.relationship != Relationship.CONTAINS:
                 continue
             if graph.nodes[target]["node"].type != NodeType.SENSITIVE_DATA:
                 continue
-            if INTERNET_ID in graph and source in _descendants(graph):
+            if source in internet_reachable:
                 recommendations.append(
                     Recommendation(
                         title=f"Add defence in depth around {graph.nodes[source]['node'].name}",
