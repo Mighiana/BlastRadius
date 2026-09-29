@@ -46,7 +46,7 @@ from blastradius.server.models import Analysis, Membership, Organization, Projec
 from blastradius.server.observability import configure_logging
 from blastradius.server.operator import is_platform_admin, operator_router
 from blastradius.server.plans import catalog, entitlements, require_feature
-from blastradius.server.quotas import lock_org, quota, usage_payload, usage_row
+from blastradius.server.quotas import lock_org, quota, usage_payload, usage_payloads, usage_row
 from blastradius.server.lifecycle import authorized_org, lifecycle_router
 from blastradius.server.persistence import cutoff, effective_policy, public_result, visible_analysis
 from blastradius.server.retention import run_retention_sweep
@@ -415,18 +415,20 @@ def create_app(
             user = session.get(User, login.user_id) if login.user_id else None
             organizations = []
             if user:
-                for org, member in session.execute(
+                memberships = session.execute(
                     select(Organization, Membership)
                     .join(Membership, Organization.id == Membership.organization_id)
                     .where(Membership.user_id == user.id)
-                ):
+                ).all()
+                usage = usage_payloads(session, [org for org, _ in memberships])
+                for org, member in memberships:
                     organizations.append(
                         {
                             "id": org.id,
                             "name": org.name,
                             "role": member.role,
                             "plan": org.plan,
-                            "usage": usage_payload(session, org),
+                            "usage": usage[org.id],
                         }
                     )
             return {
