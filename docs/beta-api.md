@@ -324,7 +324,8 @@ directly. Existing CLI row shapes are preserved: users include `id`, `name`,
 `email`, `email_verified`; organizations/usage include `id`, `name` plus usage;
 projects include `id`, `organization_id`, `name`, `archived_at`; failures include
 `id`, `organization_id`, `project_id`, `error`. Failure errors in both interfaces
-use fixed categories; unknown/untrusted error strings become `analysis_failed`.
+use the `FailureCode` categories; unknown/untrusted error strings become
+`analysis_failed` and log `operator.unknown_failure_code` with the analysis ID.
 The trusted CLI retains identity fields for existing operator workflows; the web
 API omits them. CLI `limit` is 1–1000 and `offset` 0–1000000.
 Cleanup returns `{"removed":{"beta_interest":0,"analysis_feedback":0,"product_events":0}}`.
