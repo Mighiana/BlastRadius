@@ -355,6 +355,7 @@ class GitHubRun(Base):
 class CommercialLock(Base):
     __tablename__ = "commercial_lock"
     id: Mapped[int] = mapped_column(primary_key=True)
+    event_count: Mapped[int] = mapped_column(default=0, server_default="0")
 
 
 class BetaInterest(Base):

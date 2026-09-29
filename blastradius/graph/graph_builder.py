@@ -128,12 +128,13 @@ def build_graph(config: ParsedConfig) -> nx.DiGraph:
     roles = config.of_type("aws_iam_role")
     profiles = config.of_type("aws_iam_instance_profile")
     buckets = config.of_type("aws_s3_bucket")
+    index = rules.ResourceIndex.build(config.resources)
 
     _add_resource_nodes(graph, security_groups, instances, roles, buckets)
     _add_ingress_edges(graph, security_groups)
     _add_instance_edges(graph, instances, profiles)
-    _add_role_bucket_edges(graph, roles, buckets, config.resources)
-    _add_public_bucket_edges(graph, buckets, config.resources)
+    _add_role_bucket_edges(graph, roles, buckets, config.resources, index)
+    _add_public_bucket_edges(graph, buckets, config.resources, index)
     _add_sensitive_data_edges(graph, buckets)
     _annotate_edges(graph)
     if graph.graph.get("edge_limit_reached"):
@@ -294,11 +295,12 @@ def _add_role_bucket_edges(
     roles: List[TerraformResource],
     buckets: List[TerraformResource],
     resources: List[TerraformResource],
+    index: rules.ResourceIndex,
 ) -> None:
     """IAM_ROLE -> S3_BUCKET."""
     bucket_addresses = [b.address for b in buckets]
     for role in roles:
-        for policy_address, document in rules.role_policy_sources(role.address, resources):
+        for policy_address, document in rules.role_policy_sources(role.address, resources, index):
             for access in rules.s3_access_findings(document):
                 targets = (
                     bucket_addresses if access.targets_all_buckets else [
@@ -328,11 +330,14 @@ def _add_role_bucket_edges(
 
 
 def _add_public_bucket_edges(
-    graph: nx.DiGraph, buckets: List[TerraformResource], resources: List[TerraformResource]
+    graph: nx.DiGraph,
+    buckets: List[TerraformResource],
+    resources: List[TerraformResource],
+    index: rules.ResourceIndex,
 ) -> None:
     """INTERNET -> S3_BUCKET (directly public bucket)."""
     for bucket in buckets:
-        for public_access in rules.public_bucket_findings(bucket, resources):
+        for public_access in rules.public_bucket_findings(bucket, resources, index):
             _add_edge(
                 graph,
                 GraphEdge(

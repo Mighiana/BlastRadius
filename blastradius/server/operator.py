@@ -26,7 +26,7 @@ from blastradius.server.models import (
 )
 from blastradius.server.persistence import audit
 from blastradius.server.plans import catalog
-from blastradius.server.quotas import usage_payload
+from blastradius.server.quotas import usage_payloads
 
 RESOURCES = (
     "users",
@@ -92,15 +92,19 @@ def inspect_resource(
             for row in session.scalars(select(User).order_by(User.id).limit(limit).offset(offset))
         ]
     if resource in ("organizations", "usage"):
+        orgs = list(
+            session.scalars(
+                select(Organization).order_by(Organization.id).limit(limit).offset(offset)
+            )
+        )
+        usage = usage_payloads(session, orgs)
         return [
             {
                 "id": row.id,
-                **usage_payload(session, row),
+                **usage[row.id],
                 **({"name": row.name} if trusted_cli else {"created_at": row.created_at}),
             }
-            for row in session.scalars(
-                select(Organization).order_by(Organization.id).limit(limit).offset(offset)
-            )
+            for row in orgs
         ]
     if resource == "projects":
         return [
