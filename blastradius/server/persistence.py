@@ -17,6 +17,7 @@ from blastradius.server.models import (
     Organization,
     Project,
     User,
+    identifier,
 )
 from blastradius.server.plans import PLANS, entitlements
 from blastradius.server.quotas import lock_org
@@ -99,22 +100,24 @@ def persist_result(db: Session, job: Analysis, result: dict) -> None:
         )
     for phase in ("before", "after"):
         for item in result[phase]["attack_paths"]:
-            path = AttackPath(
-                analysis_id=job.id,
-                phase=phase,
-                severity=item["severity"],
-                path_key=item["id"],
-                nodes=item["nodes"],
-                labels=item["labels"],
-                explanation=item["explanation"],
-                reaches_sensitive=item["reaches_sensitive"],
+            path_id = identifier()
+            db.add(
+                AttackPath(
+                    id=path_id,
+                    analysis_id=job.id,
+                    phase=phase,
+                    severity=item["severity"],
+                    path_key=item["id"],
+                    nodes=item["nodes"],
+                    labels=item["labels"],
+                    explanation=item["explanation"],
+                    reaches_sensitive=item["reaches_sensitive"],
+                )
             )
-            db.add(path)
-            db.flush()
             for index, edge in enumerate(item["edges"]):
                 db.add(
                     AttackPathHop(
-                        path_id=path.id,
+                        path_id=path_id,
                         position=index,
                         source_node=edge["source"],
                         target_node=edge["target"],
