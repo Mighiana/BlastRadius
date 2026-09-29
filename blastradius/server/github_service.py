@@ -6,7 +6,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -58,6 +58,7 @@ class GitHubService:
             settings, stop=self.jobs.stopping.is_set
         )
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="github")
+        self.futures: set[Future] = set()
         self.lock = threading.Lock()
         self.wake = threading.Event()
         self.dispatcher: threading.Thread | None = None
@@ -134,6 +135,14 @@ class GitHubService:
         """
         _log("github.webhook_received", delivery_id=delivery_id, github_event=event)
         if payload is None:
+            try:
+                with self.db.intake() as session:
+                    delivery = session.get(GitHubDelivery, delivery_id)
+                    if delivery and delivery.body_hash != digest:
+                        raise HTTPException(409, "github_delivery_conflict")
+            except SQLAlchemyError:
+                _log("github.webhook_failed", delivery_id=delivery_id, error="intake_unavailable")
+                raise HTTPException(503, "github_intake_unavailable") from None
             _log("github.webhook_processed", delivery_id=delivery_id, status="ignored")
             return {"status": "ignored"}
         try:
@@ -201,6 +210,14 @@ class GitHubService:
                         )
                     )
         except IntegrityError:
+            try:
+                with self.db.intake() as session:
+                    delivery = session.get(GitHubDelivery, delivery_id)
+                    if delivery and delivery.body_hash != digest:
+                        raise HTTPException(409, "github_delivery_conflict")
+            except SQLAlchemyError:
+                _log("github.webhook_failed", delivery_id=delivery_id, error="intake_unavailable")
+                raise HTTPException(503, "github_intake_unavailable") from None
             _log("github.webhook_duplicate", delivery_id=delivery_id)
             return {"status": "duplicate"}
         except SQLAlchemyError:
@@ -303,16 +320,17 @@ class GitHubService:
                 _log("github.webhook_processed", delivery_id=delivery_id, status=status)
                 return {"status": status}
             try:
-                self.jobs.track(
-                    self.executor.submit(
-                        self._run,
-                        delivery_id,
-                        claim["connection_id"],
-                        payload,
-                        claim["root"],
-                        claim["policy"],
-                    )
+                future = self.executor.submit(
+                    self._run,
+                    delivery_id,
+                    claim["connection_id"],
+                    payload,
+                    claim["root"],
+                    claim["policy"],
                 )
+                self.futures.add(future)
+                future.add_done_callback(self.futures.discard)
+                self.jobs.track(future)
             except RuntimeError:
                 self.jobs.slots.release()
                 try:

@@ -7,6 +7,7 @@ import hmac
 import json
 import logging
 import time
+from contextlib import contextmanager
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -21,7 +22,7 @@ pytest.importorskip("sqlalchemy", reason="install .[server,dev] for GitHub App t
 from authlib.jose import JsonWebKey, jwt
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select, update
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from blastradius.server.app import create_app
 from blastradius.server.admin import assign_plan
@@ -462,6 +463,46 @@ def test_raw_body_changes_conflicts_oversize_and_unsupported(harness):
         assert session.scalar(select(func.count()).select_from(GitHubDelivery)) == 0
     assert send(harness, raw=b"[[]]", delivery="bad").status_code == 400
     assert not provider.requests
+
+
+def test_unsupported_event_conflicts_with_existing_delivery_id(harness):
+    app, _, _, _, _ = harness
+    assert send(harness).status_code == 202
+    response = send(harness, raw=b"{}", delivery="delivery-1", name="push")
+    assert response.status_code == 409
+    assert response.json()["detail"] == "github_delivery_conflict"
+
+
+def test_integrity_error_rechecks_delivery_conflict(harness, monkeypatch):
+    app, _, provider, _, _ = harness
+    payload = PullEvent.model_validate(provider.event())
+    original_intake = app.state.db.intake
+    calls = 0
+
+    @contextmanager
+    def raced_intake():
+        nonlocal calls
+        if calls == 0:
+            calls += 1
+            with original_intake() as session:
+                session.add(
+                    GitHubDelivery(
+                        id="delivery-7",
+                        body_hash="aaa",
+                        event="pull_request",
+                        status="pending",
+                        attempts=0,
+                        payload=payload.model_dump_json(),
+                    )
+                )
+            raise IntegrityError("delivery race", {}, RuntimeError("duplicate"))
+        with original_intake() as session:
+            yield session
+
+    monkeypatch.setattr(app.state.db, "intake", raced_intake)
+    response = send(harness, delivery="delivery-7")
+    assert response.status_code == 409
+    assert response.json()["detail"] == "github_delivery_conflict"
 
 
 @pytest.mark.parametrize(
@@ -1168,8 +1209,9 @@ def test_stopped_snapshot_resumes_with_a_fresh_analysis(harness, monkeypatch):
     assert len(provider.checks) == len(provider.comments) == 1
 
 
-def test_failed_submission_requeues_delivery(harness):
+def test_failed_submission_requeues_delivery(harness, monkeypatch):
     app, _, _, _, _ = harness
+    monkeypatch.setattr(app.state.github, "dispatch_pending", lambda: 0)
     app.state.github.executor.shutdown()
     response = send(harness)
     assert response.status_code == 202

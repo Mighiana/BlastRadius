@@ -273,6 +273,31 @@ def test_graceful_shutdown_hands_off_running_and_queued_deliveries(
 
 
 @pytest.mark.parametrize("migration_database", ["postgres"], indirect=True)
+def test_shutdown_drains_queued_github_deliveries(db_settings, provider, monkeypatch):
+    started = threading.Event()
+    calls = 0
+    app = instance(replace(db_settings, shutdown_drain_seconds=5), provider)
+    original = app.state.github.process
+
+    def delayed(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            started.set()
+            time.sleep(0.5)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(app.state.github, "process", delayed)
+    with TestClient(app) as client:
+        connect(client, app, db_settings)
+        assert send(client, provider, "running").json() == {"status": "queued"}
+        assert started.wait(10)
+        assert send(client, provider, "queued", "synchronize").json() == {"status": "queued"}
+    with observer(db_settings).session() as session:
+        assert {delivery.status for delivery in session.scalars(select(GitHubDelivery))} == {"handled"}
+
+
+@pytest.mark.parametrize("migration_database", ["postgres"], indirect=True)
 def test_crash_after_persist_and_after_analysis_creation_recover_once(
     db_settings, provider, monkeypatch
 ):

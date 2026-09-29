@@ -242,14 +242,18 @@ class JobManager:
 
     def drain(
         self,
-        executors: list[tuple[ThreadPoolExecutor, bool]],
+        executors: list[tuple[ThreadPoolExecutor, set[Future] | None]],
         deadline: float,
     ) -> None:
         """Let all work finish until the shared deadline, then stop it."""
         self.draining.set()
-        for executor, cancel_unstarted in executors:
-            executor.shutdown(wait=False, cancel_futures=cancel_unstarted)
+        for executor, _ in executors:
+            executor.shutdown(wait=False, cancel_futures=False)
         wait(set(self.running), timeout=max(0.0, deadline - time.monotonic()))
+        for _, futures in executors:
+            if futures is not None:
+                for future in set(futures):
+                    future.cancel()
         self.stopping.set()
         for executor, _ in executors:
             executor.shutdown(wait=True)
@@ -257,4 +261,4 @@ class JobManager:
     def shutdown(self, deadline: float | None = None) -> None:
         if deadline is None:
             deadline = time.monotonic() + self.settings.shutdown_drain_seconds
-        self.drain([(self.executor, False)], deadline)
+        self.drain([(self.executor, None)], deadline)

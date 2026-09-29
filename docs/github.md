@@ -262,19 +262,19 @@ the populated `0001` upgrade path. Stable GitHub IDs use signed 64-bit columns.
 Workspace/project deletion cascades mapped rows. Analysis deletion/cleanup
 nulls the run's analysis link without deleting replay/publication protection.
 
-The existing single-process service lease is required. Jobs and webhook payloads
-are not a durable broker: on restart accepted pending analyses fail closed and
-queued deliveries become retryable. Redeliver the original event from GitHub's
-delivery UI; GitHub does not automatically retry every failed delivery.
-No webhook payload is retained for autonomous replay. Security deduplication
-hashes and publication tombstones remain stored; there is no automatic age purge
-of GitHub delivery rows or old run metadata. Current retention gates all report
-reads and run status visibility, and normal operator cleanup removes evidence.
-Redelivery retries publication of an existing retryable delivery; an already
-handled body remains a duplicate, even under a new delivery ID. It does not rerun
-an already failed analysis or refund quota. Authenticated pull-request `edited`
-events are revalidated against GitHub and base retargets produce a new analysis,
-including when the head is unchanged. Unchanged edits reuse the existing run.
+The existing single-process service lease is required. Supported webhook payloads
+are retained until the delivery reaches a terminal state. Interrupted deliveries
+are re-armed and replayed by the next lease owner with bounded attempts
+(`MAX_ATTEMPTS=3`) and a `30s × attempt` backoff. Interrupted GitHub analyses
+are rerun from a fresh analysis record. An identical redelivery of a retryable
+row is a duplicate and preserves its backoff; only a payload-less row is re-armed
+by redelivery. Manual redelivery is needed only after terminal `rejected`.
+Security deduplication hashes and publication tombstones remain stored; there is
+no automatic age purge of GitHub delivery rows or old run metadata. Current
+retention gates all report reads and run status visibility, and normal operator
+cleanup removes evidence. Authenticated pull-request `edited` events are
+revalidated against GitHub and base retargets produce a new analysis, including
+when the head is unchanged. Unchanged edits reuse the existing run.
 
 After a workspace policy, Terraform root or model change, require a new head
 commit and its fresh completed check before merging. Changing configuration alone

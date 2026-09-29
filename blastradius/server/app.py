@@ -7,6 +7,7 @@ import secrets
 import signal
 import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import Callable, Literal
 from urllib.parse import urlsplit
@@ -283,9 +284,11 @@ def create_app(
             if retention_thread is not None:
                 retention_thread.join(timeout=5)
             await run_in_threadpool(github.shutdown, deadline)
-            executors = [(jobs.executor, False)]
+            executors: list[tuple[ThreadPoolExecutor, set[Future] | None]] = [
+                (jobs.executor, None)
+            ]
             if settings.github_enabled:
-                executors.insert(0, (github.executor, True))
+                executors.insert(0, (github.executor, github.futures))
             await run_in_threadpool(jobs.drain, executors, deadline)
             release_started = time.monotonic()
             LEASE_LOGGER.info(json.dumps({"event": "service.lease_release_started"}))
