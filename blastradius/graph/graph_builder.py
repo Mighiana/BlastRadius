@@ -11,7 +11,7 @@ the UI can explain itself.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import List
 from collections import Counter
 from copy import deepcopy
 
@@ -315,19 +315,3 @@ def build_graph(config: ParsedConfig) -> nx.DiGraph:
 
 def graph_edges(graph: nx.DiGraph) -> List[GraphEdge]:
     return [data["edge"] for _, _, data in graph.edges(data=True)]
-
-
-def node_summary(graph: nx.DiGraph) -> Dict[str, ResourceNode]:
-    return {n: data["node"] for n, data in graph.nodes(data=True)}
-
-
-def find_instance_for_role(graph: nx.DiGraph, role_id: str) -> Optional[str]:
-    """First EC2 node that can assume `role_id` (used by explanations)."""
-    return next(
-        (
-            predecessor
-            for predecessor in graph.predecessors(role_id)
-            if node_of(graph, predecessor).type == NodeType.EC2
-        ),
-        None,
-    )
