@@ -109,6 +109,13 @@ def load_demo_cache(
             LOGGER.warning(json.dumps({"event": "demo.cache_miss", "reason": "stale"}))
             return None
         demos = {(scenario, stage): result for scenario, stage, result in document["demos"]}
+        if any(
+            not isinstance(result, dict)
+            or not {"decision", "score", "verdict"} <= result.keys()
+            for result in demos.values()
+        ):
+            LOGGER.warning(json.dumps({"event": "demo.cache_miss", "reason": "corrupt"}))
+            return None
     except (OSError, ValueError, KeyError, TypeError):
         LOGGER.warning(json.dumps({"event": "demo.cache_miss", "reason": "corrupt"}))
         return None

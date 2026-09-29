@@ -232,6 +232,54 @@ def rolling_deploy(db_settings, provider):
     assert len(provider.checks) == len(provider.comments) == 1
 
 
+@pytest.mark.parametrize("migration_database", ["postgres"], indirect=True)
+def test_successor_defers_webhook_until_startup_completes(
+    db_settings, provider, monkeypatch, caplog
+):
+    old = instance(db_settings, provider)
+    successor = instance(db_settings, provider)
+    entered = threading.Event()
+    release = threading.Event()
+    original_ready = db_module.Database.ready
+
+    def blocked_ready(database):
+        if database is successor.state.db:
+            entered.set()
+            assert release.wait(10)
+        return original_ready(database)
+
+    monkeypatch.setattr(db_module.Database, "ready", blocked_ready)
+    logger = logging.getLogger("blastradius.server.github_service")
+    logger.addHandler(caplog.handler)
+    caplog.handler.setLevel(logging.INFO)
+    try:
+        with TestClient(old) as old_client:
+            connect(old_client, old, db_settings)
+            with TestClient(successor) as successor_client:
+                assert entered.wait(10)
+                response = send(successor_client, provider, "starting")
+                assert response.status_code == 202
+                assert response.json() == {"status": "deferred"}
+                with observer(db_settings).session() as session:
+                    assert session.scalar(select(func.count()).select_from(Analysis)) == 0
+                release.set()
+                assert wait_ready(successor_client) < 10
+                assert settled(successor)["starting"] == "handled"
+    finally:
+        release.set()
+        logger.removeHandler(caplog.handler)
+    events = [
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if record.getMessage().startswith("{")
+    ]
+    assert {
+        "event": "github.webhook_deferred",
+        "delivery_id": "starting",
+        "reason": "service_starting",
+    } in events
+
+
 @pytest.mark.parametrize("migration_database", ["sqlite", "postgres"], indirect=True)
 def test_graceful_shutdown_hands_off_running_and_queued_deliveries(
     db_settings, provider, monkeypatch

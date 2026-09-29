@@ -45,6 +45,16 @@ def test_demo_cache_miss_reasons_are_logged(tmp_path, demo_results, monkeypatch,
 
         write_demo_cache(cache, settings)
         document = json.loads(cache.read_text(encoding="utf-8"))
+        document["demos"][0][2] = {}
+        cache.write_text(json.dumps(document), encoding="utf-8")
+        assert load_demo_cache(cache, settings) is None
+        assert json.loads(caplog.records[-1].getMessage()) == {
+            "event": "demo.cache_miss",
+            "reason": "corrupt",
+        }
+
+        write_demo_cache(cache, settings)
+        document = json.loads(cache.read_text(encoding="utf-8"))
         document["fingerprint"] = "stale"
         cache.write_text(json.dumps(document), encoding="utf-8")
         assert load_demo_cache(cache, settings) is None

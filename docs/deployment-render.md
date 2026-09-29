@@ -64,7 +64,7 @@ The live endpoint confirms that the process is serving. The ready endpoint
 confirms that migrations, the service lease and demo fixtures are available.
 Then open the service in a browser and complete a real OIDC sign-in.
 
-The image demo cache is built with the default `BR_JOB_TIMEOUT_SECONDS`,
+The image demo cache is built with the default `BR_JOB_TIMEOUT`,
 `BR_MAX_BODY_BYTES`, and `BR_MAX_RESOURCES`. Overriding any of these at runtime
 logs `demo.cache_miss` with reason `settings` and rebuilds the demos in the
 background; the service continues serving and accepting webhooks while this

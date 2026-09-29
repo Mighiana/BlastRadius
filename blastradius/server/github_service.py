@@ -7,6 +7,7 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -32,7 +33,7 @@ from blastradius.server.models import (
     RepositoryConnection,
 )
 from blastradius.server.persistence import audit, effective_policy
-from blastradius.server.quotas import lock_org, quota
+from blastradius.server.quotas import lock_org, period, quota
 from blastradius.server.schemas import AnalysisInput
 
 LOGGER = logging.getLogger(__name__)
@@ -67,6 +68,7 @@ class GitHubService:
         self.active: set[str] = set()
         self.lock = threading.Lock()
         self.wake = threading.Event()
+        self.ready = threading.Event()
         self.dispatcher: threading.Thread | None = None
 
     def recover(self) -> None:
@@ -84,6 +86,25 @@ class GitHubService:
                 delivery.status = "pending"
                 delivery.error = "server_restarted"
                 delivery.next_attempt_at = None
+            for delivery in session.scalars(
+                select(GitHubDelivery).where(
+                    GitHubDelivery.status == "retryable",
+                    GitHubDelivery.attempts >= MAX_ATTEMPTS,
+                )
+            ):
+                delivery.status = "rejected"
+                delivery.error = "github_attempts_exhausted"
+                delivery.payload = None
+                delivery.next_attempt_at = None
+            for delivery in session.scalars(
+                select(GitHubDelivery).where(
+                    GitHubDelivery.status.in_(("retryable", "pending")),
+                    GitHubDelivery.payload.is_(None),
+                )
+            ):
+                delivery.status = "rejected"
+                delivery.error = "github_payload_unavailable"
+                delivery.next_attempt_at = None
             for run in session.scalars(select(GitHubRun).where(GitHubRun.status == "pending")):
                 analysis = session.get(Analysis, run.analysis_id) if run.analysis_id else None
                 if (
@@ -92,13 +113,23 @@ class GitHubService:
                     or (analysis.status == "failed" and analysis.error == "server_restarted")
                 ):
                     run.analysis_id = None
-                    run.error = "server_restarted"
+                    analysis_period = (
+                        datetime.fromtimestamp(analysis.created_at, timezone.utc).strftime("%Y-%m")
+                        if analysis is not None
+                        else period()
+                    )
+                    run.error = (
+                        "server_restarted"
+                        if analysis_period == period()
+                        else "server_restarted_rebill"
+                    )
                 else:
                     run.status, run.error = "ready", "server_restarted"
 
     def start(self, stop: threading.Event) -> None:
         """Dispatch persisted deliveries while this process holds the service lease."""
         if not self.settings.github_enabled or self.dispatcher is not None:
+            self.ready.set()
             return
 
         def loop() -> None:
@@ -114,10 +145,12 @@ class GitHubService:
 
         self.dispatcher = threading.Thread(target=loop, name="github-dispatch", daemon=True)
         self.dispatcher.start()
+        self.ready.set()
         self.wake.set()
 
     def shutdown(self, deadline: float) -> None:
         # Deliveries not yet started stay queued in the database for the next owner.
+        self.ready.clear()
         self.jobs.draining.set()
         self.wake.set()
         if self.dispatcher is not None:
@@ -232,7 +265,11 @@ class GitHubService:
     def dispatch_pending(self) -> int:
         """Claim due deliveries in arrival order; stops at the first one that must wait."""
         dispatched = 0
-        while self.db.lease_healthy() and not self.jobs.draining.is_set():
+        while (
+            self.ready.is_set()
+            and self.db.lease_healthy()
+            and not self.jobs.draining.is_set()
+        ):
             now = time.time()
             try:
                 with self.lock, self.db.session(write=True) as session:
@@ -275,6 +312,8 @@ class GitHubService:
         return dispatched
 
     def dispatch(self, delivery_id: str) -> dict[str, str]:
+        if not self.ready.is_set():
+            return self._deferred(delivery_id, "service_starting")
         if not self.db.lease_healthy() or self.jobs.draining.is_set():
             return self._deferred(delivery_id, "service_lease_unavailable")
         with self.lock:

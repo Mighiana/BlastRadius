@@ -1169,13 +1169,14 @@ def test_service_stopping_keeps_inflight_delivery_queued(harness, monkeypatch):
         assert (delivery.status, delivery.error) == ("pending", "server_restarted")
 
 
-def test_stopped_snapshot_resumes_with_a_fresh_analysis(harness, monkeypatch):
+@pytest.mark.parametrize("previous_period", [False, True])
+def test_stopped_snapshot_resumes_with_a_fresh_analysis(harness, monkeypatch, previous_period):
     app, _, provider, project, _ = harness
     factory = app.state.github.api_factory
     with app.state.db.session(write=True) as session:
         org = session.scalar(select(Organization))
         org.plan = "enterprise"
-        org.plan_limits = {"analyses_per_month": 1}
+        org.plan_limits = {"analyses_per_month": 2 if previous_period else 1}
 
     class StoppingAPI:
         def __init__(self):
@@ -1203,6 +1204,10 @@ def test_stopped_snapshot_resumes_with_a_fresh_analysis(harness, monkeypatch):
         analysis = session.get(Analysis, run.analysis_id)
         delivery = session.get(GitHubDelivery, "delivery-1")
         usage = session.get(Usage, (project["organization_id"], period()))
+        if previous_period:
+            analysis.created_at = (
+                datetime.now(timezone.utc).replace(day=1) - timedelta(days=1)
+            ).timestamp()
         assert (delivery.status, analysis.status, run.status) == ("queued", "running", "pending")
         assert usage.analyses == 1
         assert not provider.writes
@@ -1219,7 +1224,9 @@ def test_stopped_snapshot_resumes_with_a_fresh_analysis(harness, monkeypatch):
         delivery = session.get(GitHubDelivery, "delivery-1")
         assert (delivery.status, analysis.status, run.status) == ("handled", "succeeded", "published")
         assert session.scalar(select(func.count()).select_from(Analysis)) == 2
-        assert session.get(Usage, (project["organization_id"], period())).analyses == 1
+        assert session.get(Usage, (project["organization_id"], period())).analyses == (
+            2 if previous_period else 1
+        )
     assert len(provider.checks) == len(provider.comments) == 1
 
 
@@ -1341,10 +1348,41 @@ def test_legacy_queued_delivery_without_payload_is_rejected_not_retried_forever(
         session.add(
             GitHubDelivery(id="legacy", body_hash="0" * 64, event="pull_request", status="queued")
         )
+        session.add(
+            GitHubDelivery(
+                id="exhausted",
+                body_hash="1" * 64,
+                event="pull_request",
+                status="retryable",
+                attempts=MAX_ATTEMPTS,
+                payload=PullEvent.model_validate(provider.event()).model_dump_json(),
+            )
+        )
+        session.add(
+            GitHubDelivery(
+                id="missing",
+                body_hash="2" * 64,
+                event="pull_request",
+                status="pending",
+            )
+        )
     app.state.github.recover()
-    app.state.github.dispatch_pending()
     with app.state.db.session() as session:
         assert session.get(GitHubDelivery, "legacy").error == "github_payload_unavailable"
+        exhausted = session.get(GitHubDelivery, "exhausted")
+        assert (
+            exhausted.status,
+            exhausted.error,
+            exhausted.payload,
+            exhausted.next_attempt_at,
+        ) == ("rejected", "github_attempts_exhausted", None, None)
+        missing = session.get(GitHubDelivery, "missing")
+        assert (missing.status, missing.error, missing.next_attempt_at) == (
+            "rejected",
+            "github_payload_unavailable",
+            None,
+        )
+    app.state.github.dispatch_pending()
     assert not provider.writes
 
 
