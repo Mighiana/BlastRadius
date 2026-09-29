@@ -1121,7 +1121,6 @@ def test_migrations_and_restart_recovery(settings):
         "projects",
         "analyses",
         "usage",
-        "billing_events",
     } <= set(inspect(db.engine).get_table_names())
     with db.session(write=True) as session:
         user = provision(session, "test", "subject", "Tester", "")
@@ -1290,8 +1289,6 @@ def test_operator_assignment_audit_and_enterprise_limits(client, app, monkeypatc
             "after": "enterprise",
             "limits": limits.model_dump(),
         }
-        org = session.get(Organization, org_id)
-        assert org.customer_id is None and org.subscription_id is None
     monkeypatch.delenv("BR_ADMIN_ENABLED", raising=False)
     with pytest.raises(SystemExit) as error:
         admin_main(["assign-plan", org_id, "pro"])
