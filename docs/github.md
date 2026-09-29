@@ -163,16 +163,23 @@ silently downgraded to successful analysis.
 compared in constant time before JSON parsing. The existing middleware enforces
 `BR_MAX_BODY_BYTES` (default 1 MiB), rejects content encoding, bounds receive time
 to 15 seconds, and rate limits requests. Delivery IDs are limited to 100
-alphanumeric/hyphen characters. No payload body is persisted.
+alphanumeric/hyphen characters. Verified supported webhook metadata is persisted
+after validation and the request returns 202 after commit; pull-request and
+installation payloads contain metadata only, never Terraform source or tokens.
 
 PR `opened`, `synchronize`, `reopened` and relevant base-retarget `edited` actions
 are analyzed. Unsupported events
 or actions return 202 with `status: ignored` after signature validation.
 Lifecycle events return `handled`; accepted PRs return `queued`. A duplicate
 delivery ID or event/body digest returns `duplicate`. Reusing an ID with other
-content returns 409. Invalid signatures return 401; invalid supported payloads
-return 400. When the shared job semaphore is full, return 503 without recording
-acceptance so the event can be redelivered.
+content returns 409 for supported persisted events; unsupported events are not
+recorded, so reusing their IDs is not detected by design. Invalid signatures
+return 401; invalid supported payloads return 400. The backlog cap
+(`MAX_PENDING_DELIVERIES=1000`) returns 503 with
+`github_backlog_full` without persisting the new delivery. Payloads are cleared
+when a delivery reaches a terminal state, and signed redelivery re-arms rejected
+rows. When the job semaphore is full, the persisted delivery is deferred (`202`)
+and dispatched when a slot frees.
 
 Each PR is re-read using a repository-scoped read token. Installation, repository,
 PR number, open state, head/base repository IDs, refs and SHAs must match.
@@ -227,7 +234,7 @@ link and model/retention limitations. New heads update the same comment.
 | GET retries | At most 3 attempts, bounded backoff |
 | Mutation HTTP attempts | One; uncertain POSTs reconcile by reads |
 | Publication passes | At most 2 per delivery attempt |
-| Delivery retries | At most 3 total attempts via signed redelivery |
+| Delivery retries | At most 3 automatic attempts (30 s × attempt backoff); signed redelivery re-arms `rejected` rows |
 | Recursive tree | At most 10,000 entries, never truncated |
 | Source | `BR_MAX_FILES` per snapshot; half `BR_MAX_BODY_BYTES` source bytes per snapshot; combined serialized input at most `BR_MAX_BODY_BYTES` |
 | Check discovery | At most 100 checks at the head |
@@ -245,25 +252,39 @@ endpoint.
 
 ## Storage, recovery and limitations
 
+During lease handoff, webhook intake is intentionally unfenced: a verified request
+is persisted and returns `202` even while the current owner drains. Delivery rows
+move through `pending`, `retryable`, `queued`, `handled`, or terminal `rejected`
+states. `BR_SHUTDOWN_DRAIN_SECONDS` bounds the shared drain window; queued GitHub
+work is cancelled only after that deadline while ordinary analyses continue within
+the same window. Demo startup uses `BR_DEMO_CACHE` when configured, logging
+`demo.cache_loaded` or a `demo.cache_miss` reason; a rebuild logs
+`demo.build_fallback`. Lifecycle logs include `service.starting`, `service.ready`,
+`service.shutdown_started`, `service.stopping`, and lease acquisition/release
+events.
+
 Alembic migration `0003` adds `github_installations`, `repository_connections`,
 `github_deliveries` and `github_runs`; it is additive after `0002` and preserves
 the populated `0001` upgrade path. Stable GitHub IDs use signed 64-bit columns.
 Workspace/project deletion cascades mapped rows. Analysis deletion/cleanup
 nulls the run's analysis link without deleting replay/publication protection.
 
-The existing single-process service lease is required. Jobs and webhook payloads
-are not a durable broker: on restart accepted pending analyses fail closed and
-queued deliveries become retryable. Redeliver the original event from GitHub's
-delivery UI; GitHub does not automatically retry every failed delivery.
-No webhook payload is retained for autonomous replay. Security deduplication
-hashes and publication tombstones remain stored; there is no automatic age purge
-of GitHub delivery rows or old run metadata. Current retention gates all report
-reads and run status visibility, and normal operator cleanup removes evidence.
-Redelivery retries publication of an existing retryable delivery; an already
-handled body remains a duplicate, even under a new delivery ID. It does not rerun
-an already failed analysis or refund quota. Authenticated pull-request `edited`
-events are revalidated against GitHub and base retargets produce a new analysis,
-including when the head is unchanged. Unchanged edits reuse the existing run.
+The existing single-process service lease is required. Supported webhook payloads
+are retained until the delivery reaches a terminal state. Interrupted deliveries
+are re-armed and replayed by the next lease owner with bounded attempts
+(`MAX_ATTEMPTS=3`) and a `30s × attempt` backoff. Interrupted GitHub analyses
+are rerun from a fresh analysis record. An identical redelivery of a retryable
+row is a duplicate and preserves its backoff; only a payload-less row is re-armed
+by redelivery. Manual redelivery is needed only after terminal `rejected`.
+Retention is limited to plaintext webhook metadata, with payloads cleared at
+terminal state; delivery rows are covered by the same database backups and
+retention controls as other service rows.
+Security deduplication hashes and publication tombstones remain stored; there is
+no automatic age purge of GitHub delivery rows or old run metadata. Current
+retention gates all report reads and run status visibility, and normal operator
+cleanup removes evidence. Authenticated pull-request `edited` events are
+revalidated against GitHub and base retargets produce a new analysis, including
+when the head is unchanged. Unchanged edits reuse the existing run.
 
 After a workspace policy, Terraform root or model change, require a new head
 commit and its fresh completed check before merging. Changing configuration alone

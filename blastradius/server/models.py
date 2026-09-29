@@ -277,9 +277,11 @@ class GitHubDelivery(Base):
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
     body_hash: Mapped[str] = mapped_column(String(64), unique=True)
     event: Mapped[str] = mapped_column(String(40))
-    status: Mapped[str] = mapped_column(String(30), default="queued")
-    attempts: Mapped[int] = mapped_column(default=1)
+    status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(default=0)
     error: Mapped[str | None] = mapped_column(String(100))
+    payload: Mapped[str | None] = mapped_column(Text)
+    next_attempt_at: Mapped[float | None]
     created_at: Mapped[float] = mapped_column(default=time.time)
 
 

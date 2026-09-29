@@ -313,6 +313,6 @@ def github_router(db: Database, settings: Settings, service: GitHubService) -> A
         except (ValueError, ValidationError, RecursionError):
             raise HTTPException(400, "github_payload_invalid") from None
         digest = hashlib.sha256(event.encode() + b"\0" + raw).hexdigest()
-        return await run_in_threadpool(service.accept, delivery_id, digest, event, payload)
+        return await run_in_threadpool(service.receive, delivery_id, digest, event, payload)
 
     return router

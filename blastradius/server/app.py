@@ -7,6 +7,7 @@ import secrets
 import signal
 import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import Callable, Literal
 from urllib.parse import urlsplit
@@ -33,7 +34,7 @@ from blastradius.server.auth import (
 from blastradius.server.config import Settings
 from blastradius.server.beta import beta_router
 from blastradius.server.db import Database, LeaseLost
-from blastradius.server.demos import build_demos
+from blastradius.server.demos import build_demos, load_demo_cache
 from blastradius.server.fixtures import FIXTURES
 from blastradius.server.events import record_event
 from blastradius.server.github_routes import github_router
@@ -58,6 +59,7 @@ from blastradius.server.static import FrontendFiles, FrontendMount
 
 
 LOGGER = logging.getLogger(__name__)
+LEASE_LOGGER = logging.getLogger("blastradius.server.lease")
 
 
 def _fatal_startup(reason: str) -> None:
@@ -142,7 +144,36 @@ def create_app(
             raise RuntimeError("Database schema is not ready; run python -m blastradius.server.migrate")
         jobs.recover()
         github.recover()
-        demos.update(build_demos(settings))
+
+    def load_demos() -> None:
+        if not demos:
+            cached = load_demo_cache(settings.demo_cache, settings)
+            if cached is not None:
+                demos.update(cached)
+                return
+            def build_fallback() -> None:
+                started = time.perf_counter()
+                try:
+                    local = build_demos(settings)
+                    demos.update(local)
+                    LOGGER.warning(
+                        json.dumps(
+                            {
+                                "event": "demo.build_fallback",
+                                "duration_ms": round(
+                                    (time.perf_counter() - started) * 1000, 2
+                                ),
+                            }
+                        )
+                    )
+                except Exception as error:
+                    LOGGER.error(
+                        json.dumps(
+                            {"event": "demo.build_failed", "error": type(error).__name__}
+                        )
+                    )
+
+            threading.Thread(target=build_fallback, name="demo-build", daemon=True).start()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -189,12 +220,23 @@ def create_app(
             )
             retention_thread.start()
 
+        await run_in_threadpool(load_demos)
+        wait_started = time.monotonic()
         try:
             lease.acquire()
+            LEASE_LOGGER.info(json.dumps({"event": "service.lease_acquired", "waited_ms": 0}))
         except RuntimeError:
             if settings.lease_wait_seconds <= 0:
                 raise
             starting.set()
+            LEASE_LOGGER.info(
+                json.dumps(
+                    {
+                        "event": "service.lease_acquire_wait",
+                        "wait_limit_seconds": settings.lease_wait_seconds,
+                    }
+                )
+            )
 
             def reject_while_starting(_session: Session) -> None:
                 raise LeaseLost("service_starting")
@@ -212,6 +254,16 @@ def create_app(
                         lease.acquire()
                     except RuntimeError:
                         continue
+                    if stop_wait.is_set():
+                        return
+                    LEASE_LOGGER.info(
+                        json.dumps(
+                            {
+                                "event": "service.lease_acquired",
+                                "waited_ms": round((time.monotonic() - wait_started) * 1000),
+                            }
+                        )
+                    )
                     try:
                         start_components()
                     except RuntimeError as error:
@@ -220,9 +272,12 @@ def create_app(
                     except Exception:
                         fatal("startup_failed")
                         return
+                    if stop_wait.is_set():
+                        return
                     starting.clear()
                     LOGGER.info(json.dumps({"event": "service.ready"}))
                     start_retention_worker()
+                    github.start(stop_wait)
                     return
 
             wait_thread = threading.Thread(
@@ -234,19 +289,55 @@ def create_app(
                 await run_in_threadpool(start_components)
                 LOGGER.info(json.dumps({"event": "service.ready"}))
                 start_retention_worker()
+                github.start(stop_wait)
             yield
         finally:
-            LOGGER.info(json.dumps({"event": "service.stopping"}))
+            LOGGER.info(json.dumps({"event": "service.shutdown_started"}))
             stop_wait.set()
+            jobs.draining.set()
+            deadline = time.monotonic() + settings.shutdown_drain_seconds
+            if wait_thread is not None:
+                startup_join_started = time.monotonic()
+                wait_thread.join()
+                LOGGER.info(
+                    json.dumps(
+                        {
+                            "event": "service.startup_join",
+                            "duration_ms": round(
+                                (time.monotonic() - startup_join_started) * 1000
+                            ),
+                        }
+                    )
+                )
             if retention_thread is not None:
                 retention_thread.join(timeout=5)
-            await run_in_threadpool(github.shutdown)
-            await run_in_threadpool(jobs.shutdown)
-            if starting.is_set():
-                if wait_thread is not None:
-                    wait_thread.join(timeout=2)
-            else:
-                lease.release()
+            try:
+                await run_in_threadpool(github.shutdown, deadline)
+                executors: list[tuple[ThreadPoolExecutor, set[Future] | None]] = [
+                    (jobs.executor, None)
+                ]
+                if settings.github_enabled:
+                    executors.insert(0, (github.executor, github.futures))
+                await run_in_threadpool(jobs.drain, executors, deadline)
+            except Exception as error:
+                LOGGER.error(
+                    json.dumps(
+                        {"event": "service.drain_failed", "error": type(error).__name__}
+                    )
+                )
+            release_started = time.monotonic()
+            LEASE_LOGGER.info(json.dumps({"event": "service.lease_release_started"}))
+            released = lease.release()
+            LEASE_LOGGER.info(
+                json.dumps(
+                    {
+                        "event": "service.lease_released",
+                        "held": released,
+                        "duration_ms": round((time.monotonic() - release_started) * 1000),
+                    }
+                )
+            )
+            LOGGER.info(json.dumps({"event": "service.stopping"}))
             db.engine.dispose()
 
     app = FastAPI(
@@ -308,6 +399,7 @@ def create_app(
     def ready():
         if (
             starting.is_set()
+            or jobs.draining.is_set()
             or not lease.healthy()
             or not db.ready()
             or len(demos) != 9
@@ -457,6 +549,8 @@ def create_app(
 
     @app.get("/api/demo/{scenario_id}")
     def demo(scenario_id: str, stage: Literal["safe", "risky", "remediated"] = "risky"):
+        if len(demos) != 9:
+            raise HTTPException(503, "demos_warming")
         if (scenario_id, stage) not in demos:
             raise HTTPException(404, "not_found")
         return demos[(scenario_id, stage)]

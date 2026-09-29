@@ -11,6 +11,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from types import TracebackType
+from collections.abc import Callable
 from typing import TypeVar
 
 import httpx
@@ -47,8 +48,14 @@ class GitHubError(Exception):
 
 
 class GitHubAPI:
-    def __init__(self, settings: Settings, transport: httpx.BaseTransport | None = None):
+    def __init__(
+        self,
+        settings: Settings,
+        transport: httpx.BaseTransport | None = None,
+        stop: Callable[[], bool] | None = None,
+    ):
         self.settings = settings
+        self.stop = stop
         self.client = httpx.Client(
             base_url="https://api.github.com",
             timeout=httpx.Timeout(5, connect=3),
@@ -76,6 +83,8 @@ class GitHubAPI:
         if not path.startswith("/") or path.startswith("//") or "://" in path:
             raise GitHubError("invalid_api_path")
         for attempt in range(3 if method == "GET" else 1):
+            if self.stop is not None and self.stop():
+                raise GitHubError("service_stopping", retryable=True)
             self.remaining -= 1
             if self.remaining < 0 or time.monotonic() >= self.deadline:
                 raise GitHubError("github_budget_exceeded")
@@ -102,7 +111,14 @@ class GitHubAPI:
                     chunks = bytearray()
                     for chunk in response.iter_bytes():
                         chunks.extend(chunk)
-                        if len(chunks) > MAX_RESPONSE or time.monotonic() >= self.deadline:
+                        stopping = self.stop is not None and self.stop()
+                        if (
+                            len(chunks) > MAX_RESPONSE
+                            or time.monotonic() >= self.deadline
+                            or stopping
+                        ):
+                            if stopping:
+                                raise GitHubError("service_stopping", retryable=True)
                             raise GitHubError("github_response_limit", uncertain=method != "GET")
                     return TypeAdapter(JsonValue).validate_json(bytes(chunks))
             except httpx.HTTPError:

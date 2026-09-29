@@ -5,8 +5,10 @@ import copy
 import hashlib
 import hmac
 import json
+import logging
 import time
-from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -20,6 +22,7 @@ pytest.importorskip("sqlalchemy", reason="install .[server,dev] for GitHub App t
 from authlib.jose import JsonWebKey, jwt
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 from blastradius.server.app import create_app
 from blastradius.server.admin import assign_plan
@@ -31,9 +34,10 @@ from blastradius.server.github_api import (
     READ_PERMISSIONS,
     WRITE_PERMISSIONS,
 )
+from blastradius.server.github_service import MAX_ATTEMPTS
 from blastradius.server.github_publish import MARKER, publish, summary
 from blastradius.server.github_routes import register_installation
-from blastradius.server.github_types import Repository
+from blastradius.server.github_types import PullEvent, Repository
 from blastradius.server.models import (
     Analysis,
     GitHubDelivery,
@@ -453,10 +457,52 @@ def test_raw_body_changes_conflicts_oversize_and_unsupported(harness):
     assert send(harness, raw=raw + b" ", signature=sig).status_code == 401
     assert send(harness, raw=b"x" * (app.state.settings.max_body_bytes + 1)).status_code == 413
     assert send(harness, raw=b"{}", name="push").json() == {"status": "ignored"}
-    assert send(harness, raw=b'{"x": 1}', name="push").status_code == 409
+    assert send(harness, raw=b'{"x": 1}', name="push").json() == {"status": "ignored"}
     assert send(harness, {"action": "closed"}, delivery="closed").json() == {"status": "ignored"}
+    with app.state.db.session() as session:
+        assert session.scalar(select(func.count()).select_from(GitHubDelivery)) == 0
     assert send(harness, raw=b"[[]]", delivery="bad").status_code == 400
     assert not provider.requests
+
+
+def test_unsupported_event_conflicts_with_existing_delivery_id(harness):
+    app, _, _, _, _ = harness
+    assert send(harness).status_code == 202
+    response = send(harness, raw=b"{}", delivery="delivery-1", name="push")
+    assert response.status_code == 409
+    assert response.json()["detail"] == "github_delivery_conflict"
+
+
+def test_integrity_error_rechecks_delivery_conflict(harness, monkeypatch):
+    app, _, provider, _, _ = harness
+    payload = PullEvent.model_validate(provider.event())
+    original_intake = app.state.db.intake
+    calls = 0
+
+    @contextmanager
+    def raced_intake():
+        nonlocal calls
+        if calls == 0:
+            calls += 1
+            with original_intake() as session:
+                session.add(
+                    GitHubDelivery(
+                        id="delivery-7",
+                        body_hash="aaa",
+                        event="pull_request",
+                        status="pending",
+                        attempts=0,
+                        payload=payload.model_dump_json(),
+                    )
+                )
+            raise IntegrityError("delivery race", {}, RuntimeError("duplicate"))
+        with original_intake() as session:
+            yield session
+
+    monkeypatch.setattr(app.state.db, "intake", raced_intake)
+    response = send(harness, delivery="delivery-7")
+    assert response.status_code == 409
+    assert response.json()["detail"] == "github_delivery_conflict"
 
 
 @pytest.mark.parametrize(
@@ -795,6 +841,21 @@ def test_api_response_size_redirect_and_request_budget(settings):
             api.request("GET", "//evil.test/token", TOKEN)
 
 
+def test_api_request_stops_when_stop_callable_changes_during_response(settings):
+    calls = 0
+
+    def stop():
+        nonlocal calls
+        calls += 1
+        return calls > 1
+
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, content=b"{}"))
+    with GitHubAPI(settings, transport, stop=stop) as api:
+        with pytest.raises(GitHubError, match="service_stopping"):
+            api.request("GET", "/resource", TOKEN)
+    assert calls >= 2
+
+
 def test_retention_prevents_late_publication_and_run_visibility(harness):
     app, client, provider, project, _ = harness
     send(harness)
@@ -839,17 +900,467 @@ def test_blob_integrity_and_truncated_tree_validation(settings):
             api.snapshot(TOKEN, repository, HEAD, ".")
 
 
-def test_restart_recovery_and_queue_backpressure_are_redeliverable(harness):
+def test_queue_backpressure_persists_the_delivery_for_later_dispatch(harness):
     app, _, provider, _, _ = harness
     for _ in range(app.state.settings.max_jobs):
         assert app.state.jobs.reserve()
     try:
-        assert send(harness).status_code == 503
+        response = send(harness)
+        assert response.status_code == 202 and response.json() == {"status": "deferred"}
         with app.state.db.session() as session:
-            assert session.get(GitHubDelivery, "delivery-1") is None
+            delivery = session.get(GitHubDelivery, "delivery-1")
+            assert delivery.status == "pending" and delivery.payload
+        assert send(harness).json() == {"status": "duplicate"}
     finally:
         for _ in range(app.state.settings.max_jobs):
             app.state.jobs.slots.release()
+    app.state.github.dispatch_pending()
+    drain(app)
+    assert run_record(app).status == "published"
+    assert len(provider.checks) == len(provider.comments) == 1
+
+
+def test_webhook_backlog_limit_rejects_new_deliveries_but_accepts_duplicates(
+    harness, monkeypatch
+):
+    app, _, provider, _, _ = harness
+    monkeypatch.setattr("blastradius.server.github_service.MAX_PENDING_DELIVERIES", 1)
+    for _ in range(app.state.settings.max_jobs):
+        assert app.state.jobs.reserve()
+    try:
+        assert send(harness, delivery="first").json() == {"status": "deferred"}
+        second = send(harness, delivery="second", event=provider.event("synchronize"))
+        assert second.status_code == 503
+        assert second.json()["detail"] == "github_backlog_full"
+        assert send(harness, delivery="first").json() == {"status": "duplicate"}
+        with app.state.db.session() as session:
+            assert session.scalar(select(func.count()).select_from(GitHubDelivery)) == 1
+    finally:
+        for _ in range(app.state.settings.max_jobs):
+            app.state.jobs.slots.release()
+
+
+def test_intake_failure_returns_503_and_stores_nothing(harness, monkeypatch, caplog):
+    app, client, _, _, _ = harness
+
+    def broken_intake():
+        raise OperationalError("intake unavailable", {}, RuntimeError("database down"))
+
+    monkeypatch.setattr(app.state.db, "intake", broken_intake)
+    caplog.set_level(logging.INFO, logger="blastradius.server.github_service")
+    logger = logging.getLogger("blastradius.server.github_service")
+    logger.addHandler(caplog.handler)
+    try:
+        response = send(harness)
+        assert response.status_code == 503
+        assert response.json()["detail"] == "github_intake_unavailable"
+        with app.state.db.session() as session:
+            assert session.scalar(select(func.count()).select_from(GitHubDelivery)) == 0
+        events = [json.loads(record.getMessage()) for record in caplog.records]
+        assert {
+            "event": "github.webhook_failed",
+            "delivery_id": "delivery-1",
+            "error": "intake_unavailable",
+        } in events
+    finally:
+        logger.removeHandler(caplog.handler)
+
+
+def test_retryable_delivery_becomes_rejected_after_max_attempts(harness, monkeypatch, caplog):
+    app, _, _, _, _ = harness
+    original_process = app.state.github.process
+
+    def unavailable(*_args):
+        raise GitHubError("github_unavailable", retryable=True)
+
+    monkeypatch.setattr(app.state.github, "process", unavailable)
+    caplog.set_level(logging.INFO, logger="blastradius.server.github_service")
+    logger = logging.getLogger("blastradius.server.github_service")
+    logger.addHandler(caplog.handler)
+    try:
+        assert send(harness).json() == {"status": "queued"}
+        drain(app)
+        with app.state.db.session() as session:
+            delivery = session.get(GitHubDelivery, "delivery-1")
+            assert delivery.attempts == 1
+        for expected_attempts in (2, 3):
+            with app.state.db.session(write=True) as session:
+                delivery = session.get(GitHubDelivery, "delivery-1")
+                delivery.next_attempt_at = time.time() - 1
+            assert app.state.github.dispatch_pending() == 1
+            drain(app)
+            with app.state.db.session() as session:
+                delivery = session.get(GitHubDelivery, "delivery-1")
+                assert delivery.attempts == expected_attempts
+                if expected_attempts == 3:
+                    assert (delivery.status, delivery.payload, delivery.error) == (
+                        "rejected",
+                        None,
+                        "github_unavailable",
+                    )
+        with app.state.db.session() as session:
+            delivery = session.get(GitHubDelivery, "delivery-1")
+            assert delivery.attempts == 3
+        assert app.state.github.dispatch_pending() == 0
+        events = [json.loads(record.getMessage()) for record in caplog.records]
+        assert {
+            "event": "github.webhook_failed",
+            "delivery_id": "delivery-1",
+            "status": "rejected",
+            "error": "github_unavailable",
+        } in events
+        monkeypatch.setattr(app.state.github, "process", original_process)
+        assert send(harness, delivery="redelivery").json() == {"status": "queued"}
+        drain(app)
+        with app.state.db.session() as session:
+            delivery = session.get(GitHubDelivery, "delivery-1")
+            assert (delivery.status, delivery.attempts) == ("handled", 1)
+    finally:
+        logger.removeHandler(caplog.handler)
+
+
+def test_redelivery_of_retryable_row_preserves_backoff(harness):
+    app, _, provider, _, _ = harness
+    raw = json.dumps(provider.event()).encode()
+    next_attempt_at = time.time() + 300
+    with app.state.db.session(write=True) as session:
+        session.add(
+            GitHubDelivery(
+                id="retryable",
+                body_hash=hashlib.sha256(b"pull_request\0" + raw).hexdigest(),
+                event="pull_request",
+                status="retryable",
+                attempts=2,
+                payload=PullEvent.model_validate(provider.event()).model_dump_json(),
+                error="github_unavailable",
+                next_attempt_at=next_attempt_at,
+            )
+        )
+    response = send(harness, raw=raw, delivery="redelivery")
+    assert response.json() == {"status": "duplicate"}
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "retryable")
+        assert (delivery.status, delivery.attempts, delivery.error) == (
+            "retryable",
+            2,
+            "github_unavailable",
+        )
+        assert delivery.next_attempt_at == pytest.approx(next_attempt_at, abs=0.01)
+
+
+def test_rejected_redelivery_respects_backlog_cap(harness, monkeypatch):
+    app, _, provider, _, _ = harness
+    raw = json.dumps(provider.event()).encode()
+    digest = hashlib.sha256(b"pull_request\0" + raw).hexdigest()
+    with app.state.db.session(write=True) as session:
+        session.add(
+            GitHubDelivery(
+                id="rejected",
+                body_hash=digest,
+                event="pull_request",
+                status="rejected",
+                attempts=MAX_ATTEMPTS,
+                error="github_attempts_exhausted",
+            )
+        )
+        session.add(
+            GitHubDelivery(
+                id="pending",
+                body_hash="f" * 64,
+                event="pull_request",
+                status="pending",
+                payload=PullEvent.model_validate(provider.event()).model_dump_json(),
+            )
+        )
+    monkeypatch.setattr("blastradius.server.github_service.MAX_PENDING_DELIVERIES", 1)
+
+    response = send(harness, raw=raw, delivery="redelivery")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "github_backlog_full"
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "rejected")
+        assert (delivery.status, delivery.attempts, delivery.error, delivery.payload) == (
+            "rejected",
+            MAX_ATTEMPTS,
+            "github_attempts_exhausted",
+            None,
+        )
+
+
+def test_interrupted_third_attempt_resumes_after_restart(harness, monkeypatch):
+    app, _, provider, _, _ = harness
+    raw = json.dumps(provider.event()).encode()
+    payload = PullEvent.model_validate(provider.event())
+    with app.state.db.session(write=True) as session:
+        session.add(
+            GitHubDelivery(
+                id="delivery-1",
+                body_hash=hashlib.sha256(b"pull_request\0" + raw).hexdigest(),
+                event="pull_request",
+                status="retryable",
+                attempts=2,
+                payload=payload.model_dump_json(),
+                next_attempt_at=0,
+            )
+        )
+    pending = Future()
+    submit = app.state.github.executor.submit
+    monkeypatch.setattr(app.state.github.executor, "submit", lambda *_args, **_kwargs: pending)
+    assert app.state.github.dispatch_pending() == 1
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, delivery.attempts) == ("queued", 3)
+    app.state.github.recover()
+    pending.cancel()
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, delivery.attempts) == ("pending", 2)
+    monkeypatch.setattr(app.state.github.executor, "submit", submit)
+    monkeypatch.setattr(app.state.github, "process", lambda *_args: None)
+    assert app.state.github.dispatch_pending() == 1
+    drain(app)
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, delivery.attempts) == ("handled", 3)
+
+
+def test_consecutive_interruptions_consume_attempts(harness, monkeypatch):
+    app, _, provider, _, _ = harness
+    raw = json.dumps(provider.event()).encode()
+    payload = PullEvent.model_validate(provider.event())
+    with app.state.db.session(write=True) as session:
+        session.add(
+            GitHubDelivery(
+                id="delivery-1",
+                body_hash=hashlib.sha256(b"pull_request\0" + raw).hexdigest(),
+                event="pull_request",
+                status="retryable",
+                attempts=MAX_ATTEMPTS - 1,
+                payload=payload.model_dump_json(),
+                next_attempt_at=0,
+            )
+        )
+    pending = Future()
+    submit = app.state.github.executor.submit
+    monkeypatch.setattr(app.state.github.executor, "submit", lambda *_args, **_kwargs: pending)
+
+    assert app.state.github.dispatch_pending() == 1
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, delivery.attempts, delivery.error) == ("queued", 3, None)
+    app.state.github.recover()
+    pending.cancel()
+    app.state.jobs.slots.release()
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, delivery.attempts, delivery.error) == (
+            "pending",
+            MAX_ATTEMPTS - 1,
+            "server_restarted",
+        )
+
+    assert app.state.github.dispatch_pending() == 1
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, delivery.attempts, delivery.error) == (
+            "queued",
+            MAX_ATTEMPTS,
+            "server_restarted",
+        )
+    app.state.github.recover()
+    app.state.jobs.slots.release()
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, delivery.attempts, delivery.error) == (
+            "pending",
+            MAX_ATTEMPTS,
+            "server_restarted",
+        )
+
+    assert app.state.github.dispatch_pending() == 1
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, delivery.attempts, delivery.error, delivery.payload) == (
+            "rejected",
+            MAX_ATTEMPTS + 1,
+            "github_attempts_exhausted",
+            None,
+        )
+
+
+def test_service_stopping_keeps_inflight_delivery_queued(harness, monkeypatch):
+    app, _, _, _, _ = harness
+
+    def stopping(*_args):
+        assert app.state.jobs.stopping.is_set()
+        raise GitHubError("service_stopping", retryable=True)
+
+    monkeypatch.setattr(app.state.github, "process", stopping)
+    app.state.jobs.stopping.set()
+    assert send(harness).json() == {"status": "queued"}
+    drain(app)
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, delivery.error) == ("queued", None)
+    app.state.github.recover()
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, delivery.error) == ("pending", "server_restarted")
+
+
+@pytest.mark.parametrize("previous_period", [False, True])
+def test_stopped_snapshot_resumes_with_a_fresh_analysis(harness, monkeypatch, previous_period):
+    app, _, provider, project, _ = harness
+    factory = app.state.github.api_factory
+    with app.state.db.session(write=True) as session:
+        org = session.scalar(select(Organization))
+        org.plan = "enterprise"
+        org.plan_limits = {"analyses_per_month": 2 if previous_period else 1}
+
+    class StoppingAPI:
+        def __init__(self):
+            self.inner = factory()
+
+        def __enter__(self):
+            self.inner.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.inner.__exit__(*args)
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+        def snapshot(self, *_args, **_kwargs):
+            app.state.jobs.stopping.set()
+            raise GitHubError("service_stopping", retryable=True)
+
+    monkeypatch.setattr(app.state.github, "api_factory", StoppingAPI)
+    assert send(harness).json() == {"status": "queued"}
+    drain(app)
+    with app.state.db.session() as session:
+        run = session.scalar(select(GitHubRun))
+        analysis = session.get(Analysis, run.analysis_id)
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        usage = session.get(Usage, (project["organization_id"], period()))
+        if previous_period:
+            analysis.created_at = (
+                datetime.now(timezone.utc).replace(day=1) - timedelta(days=1)
+            ).timestamp()
+        assert (delivery.status, analysis.status, run.status) == ("queued", "running", "pending")
+        assert usage.analyses == 1
+        assert not provider.writes
+
+    app.state.jobs.recover()
+    app.state.github.recover()
+    app.state.jobs.stopping.clear()
+    monkeypatch.setattr(app.state.github, "api_factory", factory)
+    assert app.state.github.dispatch_pending() == 1
+    drain(app)
+    with app.state.db.session() as session:
+        run = session.scalar(select(GitHubRun))
+        analysis = session.get(Analysis, run.analysis_id)
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, analysis.status, run.status) == ("handled", "succeeded", "published")
+        assert session.scalar(select(func.count()).select_from(Analysis)) == 2
+        assert session.get(Usage, (project["organization_id"], period())).analyses == (
+            2 if previous_period else 1
+        )
+    assert len(provider.checks) == len(provider.comments) == 1
+
+
+def test_failed_submission_requeues_delivery(harness, monkeypatch):
+    app, _, _, _, _ = harness
+    monkeypatch.setattr(app.state.github, "dispatch_pending", lambda: 0)
+    app.state.github.executor.shutdown()
+    response = send(harness)
+    assert response.status_code == 202
+    assert response.json() == {"status": "deferred"}
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, delivery.attempts) == ("pending", 0)
+
+
+def test_finalize_retries_after_a_database_error(harness, monkeypatch):
+    app, _, _, _, _ = harness
+    original_process = app.state.github.process
+    original_session = app.state.db.session
+    failed = False
+
+    def flaky_session(write=False):
+        nonlocal failed
+        if write and not failed:
+            failed = True
+            raise OperationalError("finalize", {}, RuntimeError("database down"))
+        return original_session(write)
+
+    def process(*args):
+        result = original_process(*args)
+        monkeypatch.setattr(app.state.db, "session", flaky_session)
+        return result
+
+    monkeypatch.setattr(app.state.github, "process", process)
+    assert send(harness).json() == {"status": "queued"}
+    drain(app)
+    with app.state.db.session() as session:
+        assert session.get(GitHubDelivery, "delivery-1").status == "handled"
+
+
+def test_orphaned_queued_delivery_is_rearmed_and_dispatched(harness):
+    app, _, provider, _, _ = harness
+    raw = json.dumps(provider.event()).encode()
+    with app.state.db.session(write=True) as session:
+        session.add(
+            GitHubDelivery(
+                id="orphaned",
+                body_hash=hashlib.sha256(b"pull_request\0" + raw).hexdigest(),
+                event="pull_request",
+                status="queued",
+                attempts=1,
+                payload=PullEvent.model_validate(provider.event()).model_dump_json(),
+            )
+        )
+    assert app.state.github.dispatch_pending() == 1
+    drain(app)
+    with app.state.db.session() as session:
+        assert session.get(GitHubDelivery, "orphaned").status == "handled"
+
+
+def test_redelivery_rearms_rejected_payload_unavailable_row(harness):
+    app, _, provider, _, _ = harness
+    raw = json.dumps(provider.event()).encode()
+    digest = hashlib.sha256(b"pull_request\0" + raw).hexdigest()
+    with app.state.db.session(write=True) as session:
+        session.add(
+            GitHubDelivery(
+                id="legacy",
+                body_hash=digest,
+                event="pull_request",
+                status="queued",
+            )
+        )
+    app.state.github.recover()
+    app.state.github.dispatch_pending()
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "legacy")
+        assert (delivery.status, delivery.error, delivery.payload) == (
+            "rejected",
+            "github_payload_unavailable",
+            None,
+        )
+    response = send(harness, raw=raw, delivery="redelivery")
+    assert response.status_code == 202
+    drain(app)
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "legacy")
+        assert (delivery.status, delivery.attempts, delivery.payload) == ("handled", 1, None)
+        assert session.scalar(select(func.count()).select_from(Analysis)) == 1
+    assert len(provider.checks) == 1
+
+
+def test_restart_recovery_redispatches_a_queued_delivery_from_its_stored_payload(harness):
+    app, _, provider, _, _ = harness
     with app.state.db.session(write=True) as session:
         raw = json.dumps(provider.event()).encode()
         session.add(
@@ -858,12 +1369,61 @@ def test_restart_recovery_and_queue_backpressure_are_redeliverable(harness):
                 body_hash=hashlib.sha256(b"pull_request\0" + raw).hexdigest(),
                 event="pull_request",
                 status="queued",
+                payload=PullEvent.model_validate(provider.event()).model_dump_json(),
             )
         )
     app.state.github.recover()
-    assert send(harness).json() == {"status": "queued"}
+    app.state.github.dispatch_pending()
     drain(app)
     assert run_record(app).status == "published"
+    assert send(harness).json() == {"status": "duplicate"}
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, delivery.attempts, delivery.payload) == ("handled", 1, None)
+
+
+def test_legacy_queued_delivery_without_payload_is_rejected_not_retried_forever(harness):
+    app, _, provider, _, _ = harness
+    with app.state.db.session(write=True) as session:
+        session.add(
+            GitHubDelivery(id="legacy", body_hash="0" * 64, event="pull_request", status="queued")
+        )
+        session.add(
+            GitHubDelivery(
+                id="exhausted",
+                body_hash="1" * 64,
+                event="pull_request",
+                status="retryable",
+                attempts=MAX_ATTEMPTS,
+                payload=PullEvent.model_validate(provider.event()).model_dump_json(),
+            )
+        )
+        session.add(
+            GitHubDelivery(
+                id="missing",
+                body_hash="2" * 64,
+                event="pull_request",
+                status="pending",
+            )
+        )
+    app.state.github.recover()
+    with app.state.db.session() as session:
+        assert session.get(GitHubDelivery, "legacy").error == "github_payload_unavailable"
+        exhausted = session.get(GitHubDelivery, "exhausted")
+        assert (
+            exhausted.status,
+            exhausted.error,
+            exhausted.payload,
+            exhausted.next_attempt_at,
+        ) == ("rejected", "github_attempts_exhausted", None, None)
+        missing = session.get(GitHubDelivery, "missing")
+        assert (missing.status, missing.error, missing.next_attempt_at) == (
+            "rejected",
+            "github_payload_unavailable",
+            None,
+        )
+    app.state.github.dispatch_pending()
+    assert not provider.writes
 
 
 def test_concurrent_deliveries_reserve_one_analysis_and_publish_once(harness):
@@ -1005,7 +1565,7 @@ def test_delivery_id_conflict_takes_precedence_over_body_deduplication(harness):
     second = {"action": "ignored-two"}
     assert send(harness, first, name="ping", delivery="one").status_code == 202
     assert send(harness, second, name="ping", delivery="two").status_code == 202
-    assert send(harness, first, name="ping", delivery="two").status_code == 409
+    assert send(harness, first, name="ping", delivery="two").status_code == 202
 
 
 @pytest.mark.parametrize("complete", [None, False, "true", "false", 1])
