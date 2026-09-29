@@ -151,10 +151,22 @@ class GitHubService:
                 delivery.status = DeliveryStatus.REJECTED
                 delivery.error = "github_payload_unavailable"
                 delivery.next_attempt_at = None
-            for run in session.scalars(
-                select(GitHubRun).where(GitHubRun.status == RunStatus.PENDING)
-            ):
-                analysis = session.get(Analysis, run.analysis_id) if run.analysis_id else None
+            runs = list(
+                session.scalars(select(GitHubRun).where(GitHubRun.status == RunStatus.PENDING))
+            )
+            analysis_ids = {run.analysis_id for run in runs if run.analysis_id}
+            analyses = (
+                {
+                    analysis.id: analysis
+                    for analysis in session.scalars(
+                        select(Analysis).where(Analysis.id.in_(analysis_ids))
+                    )
+                }
+                if analysis_ids
+                else {}
+            )
+            for run in runs:
+                analysis = analyses.get(run.analysis_id) if run.analysis_id else None
                 if (
                     analysis is None
                     or analysis.status in (AnalysisStatus.QUEUED, AnalysisStatus.RUNNING)
