@@ -77,11 +77,17 @@ class GitHubService:
                 delivery.status = "pending"
                 delivery.error = "server_restarted"
                 delivery.next_attempt_at = None
-            session.execute(
-                update(GitHubRun)
-                .where(GitHubRun.status == "pending")
-                .values(status="ready", error="server_restarted")
-            )
+            for run in session.scalars(select(GitHubRun).where(GitHubRun.status == "pending")):
+                analysis = session.get(Analysis, run.analysis_id) if run.analysis_id else None
+                if (
+                    analysis is None
+                    or analysis.status in ("queued", "running")
+                    or (analysis.status == "failed" and analysis.error == "server_restarted")
+                ):
+                    run.analysis_id = None
+                    run.error = "server_restarted"
+                else:
+                    run.status, run.error = "ready", "server_restarted"
 
     def start(self, stop: threading.Event) -> None:
         """Dispatch persisted deliveries while this process holds the service lease."""
@@ -249,7 +255,7 @@ class GitHubService:
                     delivery = session.scalar(
                         select(GitHubDelivery)
                         .where(GitHubDelivery.id == delivery_id)
-                        .with_for_update(skip_locked=True)
+                        .with_for_update()
                     )
                     if delivery is None:
                         return {"status": "queued"}
@@ -287,6 +293,11 @@ class GitHubService:
                 if reserved:
                     self.jobs.slots.release()
                 return self._deferred(delivery_id, "service_lease_lost")
+            except SQLAlchemyError:
+                if reserved:
+                    self.jobs.slots.release()
+                self.wake.set()
+                return self._deferred(delivery_id, "database_unavailable")
             except BaseException:
                 if reserved:
                     self.jobs.slots.release()
@@ -312,7 +323,10 @@ class GitHubService:
                         delivery = session.get(GitHubDelivery, delivery_id)
                         if delivery and delivery.status == "queued":
                             delivery.status = "pending"
+                            delivery.attempts = max(delivery.attempts - 1, 0)
                 except LeaseLost:
+                    pass
+                except SQLAlchemyError:
                     pass
                 self.wake.set()
                 return self._deferred(delivery_id, "service_stopping")
@@ -484,8 +498,10 @@ class GitHubService:
                         base_ref=pull.base.ref,
                         head_ref=pull.head.ref,
                         head_repository_id=pull.head.repo.id,
+                        status="pending",
                     )
                     session.add(run)
+                if run.status == "pending" and run.analysis_id is None:
                     org = lock_org(session, project.organization_id)
                     try:
                         quota(session, org, "analyses_per_month")
@@ -533,9 +549,17 @@ class GitHubService:
                     )
                     active(self.db, connection_id)
                 except GitHubError as exc:
+                    if exc.code == "service_stopping":
+                        raise _Stopping
                     response = {"error": exc.code}
                 except Exception:
                     response = {"error": "github_analysis_failed"}
+                if (
+                    isinstance(response, dict)
+                    and response.get("error") == "server_restarted"
+                    and self.jobs.stopping.is_set()
+                ):
+                    raise _Stopping
                 self.jobs.finish(analysis_id, response, run_id)
         if self.jobs.stopping.is_set():
             raise _Stopping

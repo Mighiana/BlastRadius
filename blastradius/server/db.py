@@ -16,6 +16,9 @@ from sqlalchemy.pool import StaticPool
 from blastradius.server.config import Settings
 from blastradius.server.models import Base
 
+LOCK_TIMEOUT = "10s"
+STATEMENT_TIMEOUT = "60s"
+
 
 class LeaseLost(RuntimeError):
     pass
@@ -49,6 +52,7 @@ class Database:
     def session(self, write: bool = False) -> Iterator[Session]:
         with self.sessions() as session:
             try:
+                _set_transaction_timeouts(session)
                 if self.fence:
                     self.fence(session)
                 if write and self.engine.dialect.name == "sqlite":
@@ -70,6 +74,7 @@ class Database:
         """
         with self.sessions() as session:
             try:
+                _set_transaction_timeouts(session)
                 if self.engine.dialect.name == "sqlite":
                     session.connection().exec_driver_sql("BEGIN IMMEDIATE")
                 yield session
@@ -100,6 +105,13 @@ def _sqlite_options(connection, _record) -> None:
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.close()
+
+
+def _set_transaction_timeouts(session: Session) -> None:
+    if session.bind is not None and session.bind.dialect.name == "postgresql":
+        connection = session.connection()
+        connection.exec_driver_sql(f"SET LOCAL lock_timeout = '{LOCK_TIMEOUT}'")
+        connection.exec_driver_sql(f"SET LOCAL statement_timeout = '{STATEMENT_TIMEOUT}'")
 
 
 def run_migrations(connection: Connection) -> None:

@@ -19,6 +19,7 @@ pytest.importorskip("fastapi", reason="install .[server,dev] for handoff tests")
 
 import test_github_app
 import test_server
+import blastradius.server.db as db_module
 from fastapi.testclient import TestClient
 from authlib.jose import JsonWebKey
 from sqlalchemy import func, select, text
@@ -236,11 +237,17 @@ def test_graceful_shutdown_hands_off_running_and_queued_deliveries(
     """B, C: a running analysis is stopped, queued deliveries stay durable."""
     started = threading.Event()
 
-    def blocked(_inputs, _settings, _policy, lease_healthy, stopping):
+    calls = 0
+
+    def blocked(_inputs, settings, policy, lease_healthy, stopping):
+        nonlocal calls
+        calls += 1
         started.set()
-        while not stopping.is_set() and lease_healthy():
-            time.sleep(0.02)
-        return {"error": "server_restarted"}
+        if calls == 1:
+            while not stopping.is_set() and lease_healthy():
+                time.sleep(0.02)
+            return {"error": "server_restarted"}
+        return execute(_inputs, settings, policy, lease_healthy, stopping)
 
     monkeypatch.setattr("blastradius.server.github_service.execute", blocked)
     old = instance(db_settings, provider)
@@ -254,12 +261,14 @@ def test_graceful_shutdown_hands_off_running_and_queued_deliveries(
         new_client.__enter__()
     try:
         assert wait_ready(new_client) < 5
-        with new.state.db.session() as session:
-            assert session.scalar(select(Analysis)).error == "server_restarted"
         assert set(settled(new).values()) == {"handled"}
+        with new.state.db.session() as session:
+            analyses = list(session.scalars(select(Analysis)))
+            assert {job.status for job in analyses} == {"failed", "succeeded"}
+            assert "server_restarted" in {job.error for job in analyses}
     finally:
         new_client.__exit__(None, None, None)
-    assert counts(db_settings) == (1, 1)
+    assert counts(db_settings) == (2, 1)
     assert len(provider.checks) == 1 and provider.checks[-1]["conclusion"] != "success"
 
 
@@ -270,11 +279,17 @@ def test_crash_after_persist_and_after_analysis_creation_recover_once(
     """H, I: the old owner dies without releasing; the successor recovers exactly once."""
     started = threading.Event()
 
-    def blocked(_inputs, _settings, _policy, lease_healthy, stopping):
+    calls = 0
+
+    def blocked(_inputs, settings, policy, lease_healthy, stopping):
+        nonlocal calls
+        calls += 1
         started.set()
-        while not stopping.is_set() and lease_healthy():
-            time.sleep(0.02)
-        return {"error": "service_lease_lost"}
+        if calls == 1:
+            while not stopping.is_set() and lease_healthy():
+                time.sleep(0.02)
+            return {"error": "service_lease_lost"}
+        return execute(_inputs, settings, policy, lease_healthy, stopping)
 
     monkeypatch.setattr("blastradius.server.github_service.execute", blocked)
     old = instance(db_settings, provider)
@@ -309,9 +324,10 @@ def test_crash_after_persist_and_after_analysis_creation_recover_once(
         new_client.__exit__(None, None, None)
     assert set(statuses.values()) == {"handled"}
     with observer(db_settings).session() as session:
-        job = session.scalar(select(Analysis))
-        assert job.status == "failed" and job.error in ("server_restarted", "service_lease_lost")
-    assert counts(db_settings) == (1, 1)
+        jobs = list(session.scalars(select(Analysis)))
+        assert {job.status for job in jobs} == {"failed", "succeeded"}
+        assert "server_restarted" in {job.error for job in jobs}
+    assert counts(db_settings) == (2, 1)
     assert len(provider.checks) == len(provider.comments) == 1
 
 
@@ -330,6 +346,56 @@ def test_concurrent_duplicate_intake_on_postgres_stores_one_row(db_settings, pro
     assert results.count("deferred") == 1 and results.count("duplicate") == 15
     with observer(db_settings).session() as session:
         assert session.scalar(select(func.count()).select_from(GitHubDelivery)) == 1
+
+
+@pytest.mark.parametrize("migration_database", ["postgres"], indirect=True)
+def test_dispatch_lock_timeout_returns_database_deferred(
+    db_settings, provider, monkeypatch, caplog
+):
+    app = instance(db_settings, provider)
+    logger = logging.getLogger("blastradius.server.github_service")
+    logger.addHandler(caplog.handler)
+    with TestClient(app) as client:
+        try:
+            connect(client, app, db_settings)
+            app.state.github.dispatch_pending = lambda: 0
+            raw = json.dumps(provider.event()).encode()
+            payload = test_github_app.PullEvent.model_validate(provider.event())
+            with app.state.db.intake() as session:
+                session.add(
+                    GitHubDelivery(
+                        id="locked-delivery",
+                        body_hash=hashlib.sha256(b"pull_request\0" + raw).hexdigest(),
+                        event="pull_request",
+                        status="pending",
+                        payload=payload.model_dump_json(),
+                    )
+                )
+            with app.state.db.engine.connect() as connection:
+                transaction = connection.begin()
+                try:
+                    connection.execute(
+                        text(
+                            "SELECT id FROM github_deliveries "
+                            "WHERE id = 'locked-delivery' FOR UPDATE"
+                        )
+                    )
+                    monkeypatch.setattr(db_module, "LOCK_TIMEOUT", "500ms")
+                    started = time.monotonic()
+                    result = app.state.github.dispatch("locked-delivery")
+                    elapsed = time.monotonic() - started
+                finally:
+                    transaction.rollback()
+        finally:
+            logger.removeHandler(caplog.handler)
+    assert result == {"status": "deferred"}
+    assert elapsed < 2
+    events = [json.loads(record.getMessage()) for record in caplog.records]
+    assert {
+        "event": "github.webhook_deferred",
+        "delivery_id": "locked-delivery",
+        "reason": "database_unavailable",
+    } in events
 
 
 def test_stopping_kills_and_reaps_a_running_worker(tmp_path, monkeypatch):

@@ -1090,6 +1090,53 @@ def test_service_stopping_keeps_inflight_delivery_queued(harness, monkeypatch):
         assert (delivery.status, delivery.error) == ("pending", "server_restarted")
 
 
+def test_stopped_snapshot_resumes_with_a_fresh_analysis(harness, monkeypatch):
+    app, _, provider, _, _ = harness
+    factory = app.state.github.api_factory
+
+    class StoppingAPI:
+        def __init__(self):
+            self.inner = factory()
+
+        def __enter__(self):
+            self.inner.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.inner.__exit__(*args)
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+        def snapshot(self, *_args, **_kwargs):
+            app.state.jobs.stopping.set()
+            raise GitHubError("service_stopping", retryable=True)
+
+    monkeypatch.setattr(app.state.github, "api_factory", StoppingAPI)
+    assert send(harness).json() == {"status": "queued"}
+    drain(app)
+    with app.state.db.session() as session:
+        run = session.scalar(select(GitHubRun))
+        analysis = session.get(Analysis, run.analysis_id)
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, analysis.status, run.status) == ("queued", "running", "pending")
+        assert not provider.writes
+
+    app.state.jobs.recover()
+    app.state.github.recover()
+    app.state.jobs.stopping.clear()
+    monkeypatch.setattr(app.state.github, "api_factory", factory)
+    assert app.state.github.dispatch_pending() == 1
+    drain(app)
+    with app.state.db.session() as session:
+        run = session.scalar(select(GitHubRun))
+        analysis = session.get(Analysis, run.analysis_id)
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, analysis.status, run.status) == ("handled", "succeeded", "published")
+        assert session.scalar(select(func.count()).select_from(Analysis)) == 2
+    assert len(provider.checks) == len(provider.comments) == 1
+
+
 def test_failed_submission_requeues_delivery(harness):
     app, _, _, _, _ = harness
     app.state.github.executor.shutdown()
@@ -1097,7 +1144,8 @@ def test_failed_submission_requeues_delivery(harness):
     assert response.status_code == 202
     assert response.json() == {"status": "deferred"}
     with app.state.db.session() as session:
-        assert session.get(GitHubDelivery, "delivery-1").status == "pending"
+        delivery = session.get(GitHubDelivery, "delivery-1")
+        assert (delivery.status, delivery.attempts) == ("pending", 0)
 
 
 def test_redelivery_rearms_rejected_payload_unavailable_row(harness):
