@@ -164,7 +164,7 @@ def test_result_commit_rollback_and_exhaustion_fail_closed(
     job_id = submit(client, proj["id"]).json()["id"]
     app.state.jobs.shutdown()
     assert failures == outage
-    assert client.get("/health/ready").status_code == (503 if outage == 3 else 200)
+    assert client.get("/health/ready").status_code == 503
     with original() as session:
         job = session.get(Analysis, job_id)
         assert job.status == ("running" if outage == 3 else "failed")
