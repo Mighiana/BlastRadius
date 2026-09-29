@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
 import secrets
@@ -34,7 +33,7 @@ from blastradius.server.auth import (
 from blastradius.server.config import Settings
 from blastradius.server.beta import beta_router
 from blastradius.server.db import Database, LeaseLost
-from blastradius.server.demos import build_demos, load_demo_cache
+from blastradius.server.demos import DEMO_COUNT, build_demos, load_demo_cache
 from blastradius.server.fixtures import FIXTURES
 from blastradius.server.events import record_event
 from blastradius.server.github_routes import github_router
@@ -50,7 +49,7 @@ from blastradius.server.models import (
     Project,
     User,
 )
-from blastradius.server.observability import configure_logging
+from blastradius.server.observability import configure_logging, log_event
 from blastradius.server.operator import is_platform_admin, operator_router
 from blastradius.server.plans import catalog, entitlements, require_feature
 from blastradius.server.quotas import lock_org, quota, usage_payload, usage_payloads, usage_row
@@ -70,7 +69,7 @@ LEASE_LOGGER = logging.getLogger("blastradius.server.lease")
 
 
 def _fatal_startup(reason: str) -> None:
-    LOGGER.error(json.dumps({"event": "service.fatal", "reason": reason}))
+    log_event(LOGGER, logging.ERROR, "service.fatal", reason=reason)
     os.kill(os.getpid(), signal.SIGTERM)
 
 
@@ -163,35 +162,27 @@ def create_app(
                 try:
                     local = build_demos(settings)
                     demos.update(local)
-                    LOGGER.warning(
-                        json.dumps(
-                            {
-                                "event": "demo.build_fallback",
-                                "duration_ms": round(
-                                    (time.perf_counter() - started) * 1000, 2
-                                ),
-                            }
-                        )
+                    log_event(
+                        LOGGER,
+                        logging.WARNING,
+                        "demo.build_fallback",
+                        duration_ms=round((time.perf_counter() - started) * 1000, 2),
                     )
                 except Exception as error:
-                    LOGGER.error(
-                        json.dumps(
-                            {"event": "demo.build_failed", "error": type(error).__name__}
-                        )
+                    log_event(
+                        LOGGER, logging.ERROR, "demo.build_failed", error=type(error).__name__
                     )
 
             threading.Thread(target=build_fallback, name="demo-build", daemon=True).start()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        LOGGER.info(
-            json.dumps(
-                {
-                    "event": "service.starting",
-                    "environment": settings.environment,
-                    "auth_mode": settings.auth_mode,
-                }
-            )
+        log_event(
+            LOGGER,
+            logging.INFO,
+            "service.starting",
+            environment=settings.environment,
+            auth_mode=settings.auth_mode,
         )
         starting.clear()
         stop_wait = threading.Event()
@@ -209,15 +200,13 @@ def create_app(
                     if lease.healthy():
                         try:
                             counts = run_retention_sweep(db)
-                            LOGGER.info(json.dumps({"event": "retention.sweep", **counts}))
+                            log_event(LOGGER, logging.INFO, "retention.sweep", **counts)
                         except Exception as error:
-                            LOGGER.error(
-                                json.dumps(
-                                    {
-                                        "event": "retention.sweep_failed",
-                                        "exception": type(error).__name__,
-                                    }
-                                )
+                            log_event(
+                                LOGGER,
+                                logging.ERROR,
+                                "retention.sweep_failed",
+                                exception=type(error).__name__,
                             )
                     if stop_wait.wait(settings.retention_sweep_seconds):
                         return
@@ -231,18 +220,16 @@ def create_app(
         wait_started = time.monotonic()
         try:
             lease.acquire()
-            LEASE_LOGGER.info(json.dumps({"event": "service.lease_acquired", "waited_ms": 0}))
+            log_event(LEASE_LOGGER, logging.INFO, "service.lease_acquired", waited_ms=0)
         except RuntimeError:
             if settings.lease_wait_seconds <= 0:
                 raise
             starting.set()
-            LEASE_LOGGER.info(
-                json.dumps(
-                    {
-                        "event": "service.lease_acquire_wait",
-                        "wait_limit_seconds": settings.lease_wait_seconds,
-                    }
-                )
+            log_event(
+                LEASE_LOGGER,
+                logging.INFO,
+                "service.lease_acquire_wait",
+                wait_limit_seconds=settings.lease_wait_seconds,
             )
 
             def reject_while_starting(_session: Session) -> None:
@@ -263,13 +250,11 @@ def create_app(
                         continue
                     if stop_wait.is_set():
                         return
-                    LEASE_LOGGER.info(
-                        json.dumps(
-                            {
-                                "event": "service.lease_acquired",
-                                "waited_ms": round((time.monotonic() - wait_started) * 1000),
-                            }
-                        )
+                    log_event(
+                        LEASE_LOGGER,
+                        logging.INFO,
+                        "service.lease_acquired",
+                        waited_ms=round((time.monotonic() - wait_started) * 1000),
                     )
                     try:
                         start_components()
@@ -282,7 +267,7 @@ def create_app(
                     if stop_wait.is_set():
                         return
                     starting.clear()
-                    LOGGER.info(json.dumps({"event": "service.ready"}))
+                    log_event(LOGGER, logging.INFO, "service.ready")
                     start_retention_worker()
                     github.start(stop_wait)
                     return
@@ -294,27 +279,23 @@ def create_app(
         try:
             if not starting.is_set():
                 await run_in_threadpool(start_components)
-                LOGGER.info(json.dumps({"event": "service.ready"}))
+                log_event(LOGGER, logging.INFO, "service.ready")
                 start_retention_worker()
                 github.start(stop_wait)
             yield
         finally:
-            LOGGER.info(json.dumps({"event": "service.shutdown_started"}))
+            log_event(LOGGER, logging.INFO, "service.shutdown_started")
             stop_wait.set()
             jobs.draining.set()
             deadline = time.monotonic() + settings.shutdown_drain_seconds
             if wait_thread is not None:
                 startup_join_started = time.monotonic()
                 wait_thread.join()
-                LOGGER.info(
-                    json.dumps(
-                        {
-                            "event": "service.startup_join",
-                            "duration_ms": round(
-                                (time.monotonic() - startup_join_started) * 1000
-                            ),
-                        }
-                    )
+                log_event(
+                    LOGGER,
+                    logging.INFO,
+                    "service.startup_join",
+                    duration_ms=round((time.monotonic() - startup_join_started) * 1000),
                 )
             if retention_thread is not None:
                 retention_thread.join(timeout=5)
@@ -327,24 +308,20 @@ def create_app(
                     executors.insert(0, (github.executor, github.futures))
                 await run_in_threadpool(jobs.drain, executors, deadline)
             except Exception as error:
-                LOGGER.error(
-                    json.dumps(
-                        {"event": "service.drain_failed", "error": type(error).__name__}
-                    )
+                log_event(
+                    LOGGER, logging.ERROR, "service.drain_failed", error=type(error).__name__
                 )
             release_started = time.monotonic()
-            LEASE_LOGGER.info(json.dumps({"event": "service.lease_release_started"}))
+            log_event(LEASE_LOGGER, logging.INFO, "service.lease_release_started")
             released = lease.release()
-            LEASE_LOGGER.info(
-                json.dumps(
-                    {
-                        "event": "service.lease_released",
-                        "held": released,
-                        "duration_ms": round((time.monotonic() - release_started) * 1000),
-                    }
-                )
+            log_event(
+                LEASE_LOGGER,
+                logging.INFO,
+                "service.lease_released",
+                held=released,
+                duration_ms=round((time.monotonic() - release_started) * 1000),
             )
-            LOGGER.info(json.dumps({"event": "service.stopping"}))
+            log_event(LOGGER, logging.INFO, "service.stopping")
             db.engine.dispose()
 
     app = FastAPI(
@@ -409,7 +386,7 @@ def create_app(
             or jobs.draining.is_set()
             or not lease.healthy()
             or not db.ready()
-            or len(demos) != 9
+            or len(demos) != DEMO_COUNT
             or jobs.persistence_failed.is_set()
         ):
             raise HTTPException(503, "not_ready")
@@ -516,10 +493,11 @@ def create_app(
                 create_session(response, session, settings, user.id, oidc_authenticated=True)
             return response
         except Exception as error:
-            LOGGER.warning(
-                json.dumps(
-                    {"event": "auth.oidc_callback_failed", "exception": type(error).__name__}
-                )
+            log_event(
+                LOGGER,
+                logging.WARNING,
+                "auth.oidc_callback_failed",
+                exception=type(error).__name__,
             )
             raise HTTPException(400, "authentication_failed") from None
         finally:
@@ -563,7 +541,7 @@ def create_app(
 
     @app.get("/api/demo/{scenario_id}")
     def demo(scenario_id: str, stage: Literal["safe", "risky", "remediated"] = "risky"):
-        if len(demos) != 9:
+        if len(demos) != DEMO_COUNT:
             raise HTTPException(503, "demos_warming")
         if (scenario_id, stage) not in demos:
             raise HTTPException(404, "not_found")

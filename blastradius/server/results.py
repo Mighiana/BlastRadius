@@ -3,6 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from blastradius.security.decision import Decision
+from blastradius.server.failures import FailureCode
 
 
 class Score(BaseModel):
@@ -107,7 +108,7 @@ def validate_result(result: dict) -> None:
 
 def worker_response(response: object) -> dict:
     if not isinstance(response, dict):
-        return {"error": "invalid_worker_result"}
+        return {"error": FailureCode.INVALID_WORKER_RESULT}
     if set(response) == {"error"} and isinstance(response["error"], str) and response["error"]:
         return response
     try:
@@ -115,5 +116,5 @@ def worker_response(response: object) -> dict:
             raise ValueError("invalid_envelope")
         validate_result(response["result"])
     except (ValueError, ValidationError, KeyError, TypeError, IndexError):
-        return {"error": "invalid_worker_result"}
+        return {"error": FailureCode.INVALID_WORKER_RESULT}
     return response

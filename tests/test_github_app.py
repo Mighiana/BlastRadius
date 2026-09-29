@@ -1282,6 +1282,27 @@ def test_failed_submission_requeues_delivery(harness, monkeypatch):
         assert (delivery.status, delivery.attempts) == ("pending", 0)
 
 
+def test_dispatch_releases_active_delivery_on_every_exit(harness, monkeypatch):
+    app, _, _, _, _ = harness
+    github = app.state.github
+    monkeypatch.setattr(github, "dispatch_pending", lambda: 0)
+    for _ in range(app.state.settings.max_jobs):
+        assert app.state.jobs.reserve()
+    try:
+        assert send(harness).json() == {"status": "deferred"}
+        assert not github.active
+    finally:
+        for _ in range(app.state.settings.max_jobs):
+            app.state.jobs.slots.release()
+    assert github.dispatch("missing") == {"status": "queued"}
+    assert not github.active
+    assert github.dispatch("delivery-1") == {"status": "queued"}
+    drain(app)
+    assert not github.active
+    assert github.dispatch("delivery-1") == {"status": "handled"}
+    assert not github.active
+
+
 def test_finalize_retries_after_a_database_error(harness, monkeypatch):
     app, _, _, _, _ = harness
     original_process = app.state.github.process
