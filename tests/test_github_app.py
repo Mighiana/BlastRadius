@@ -456,8 +456,10 @@ def test_raw_body_changes_conflicts_oversize_and_unsupported(harness):
     assert send(harness, raw=raw + b" ", signature=sig).status_code == 401
     assert send(harness, raw=b"x" * (app.state.settings.max_body_bytes + 1)).status_code == 413
     assert send(harness, raw=b"{}", name="push").json() == {"status": "ignored"}
-    assert send(harness, raw=b'{"x": 1}', name="push").status_code == 409
+    assert send(harness, raw=b'{"x": 1}', name="push").json() == {"status": "ignored"}
     assert send(harness, {"action": "closed"}, delivery="closed").json() == {"status": "ignored"}
+    with app.state.db.session() as session:
+        assert session.scalar(select(func.count()).select_from(GitHubDelivery)) == 0
     assert send(harness, raw=b"[[]]", delivery="bad").status_code == 400
     assert not provider.requests
 
@@ -969,6 +971,35 @@ def test_retryable_delivery_becomes_rejected_after_max_attempts(harness, monkeyp
         logger.removeHandler(caplog.handler)
 
 
+def test_redelivery_of_retryable_row_preserves_backoff(harness):
+    app, _, provider, _, _ = harness
+    raw = json.dumps(provider.event()).encode()
+    next_attempt_at = time.time() + 300
+    with app.state.db.session(write=True) as session:
+        session.add(
+            GitHubDelivery(
+                id="retryable",
+                body_hash=hashlib.sha256(b"pull_request\0" + raw).hexdigest(),
+                event="pull_request",
+                status="retryable",
+                attempts=2,
+                payload=PullEvent.model_validate(provider.event()).model_dump_json(),
+                error="github_unavailable",
+                next_attempt_at=next_attempt_at,
+            )
+        )
+    response = send(harness, raw=raw, delivery="redelivery")
+    assert response.json() == {"status": "duplicate"}
+    with app.state.db.session() as session:
+        delivery = session.get(GitHubDelivery, "retryable")
+        assert (delivery.status, delivery.attempts, delivery.error) == (
+            "retryable",
+            2,
+            "github_unavailable",
+        )
+        assert delivery.next_attempt_at == pytest.approx(next_attempt_at, abs=0.01)
+
+
 def test_interrupted_third_attempt_resumes_after_restart(harness, monkeypatch):
     app, _, provider, _, _ = harness
     raw = json.dumps(provider.event()).encode()
@@ -1355,7 +1386,7 @@ def test_delivery_id_conflict_takes_precedence_over_body_deduplication(harness):
     second = {"action": "ignored-two"}
     assert send(harness, first, name="ping", delivery="one").status_code == 202
     assert send(harness, second, name="ping", delivery="two").status_code == 202
-    assert send(harness, first, name="ping", delivery="two").status_code == 409
+    assert send(harness, first, name="ping", delivery="two").status_code == 202
 
 
 @pytest.mark.parametrize("complete", [None, False, "true", "false", 1])

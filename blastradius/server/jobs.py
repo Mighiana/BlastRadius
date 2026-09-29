@@ -242,23 +242,19 @@ class JobManager:
 
     def drain(
         self,
-        executor: ThreadPoolExecutor,
-        futures: set[Future],
+        executors: list[tuple[ThreadPoolExecutor, bool]],
         deadline: float,
-        cancel_unstarted: bool,
     ) -> None:
-        """Let running work finish until ``deadline``, then stop it; never wait unbounded.
-
-        Durable work can cancel unstarted futures, while analysis work lets
-        queued futures run inside the drain window before stopping.
-        """
+        """Let all work finish until the shared deadline, then stop it."""
         self.draining.set()
-        executor.shutdown(wait=False, cancel_futures=cancel_unstarted)
-        wait(set(futures), timeout=max(0.0, deadline - time.monotonic()))
+        for executor, cancel_unstarted in executors:
+            executor.shutdown(wait=False, cancel_futures=cancel_unstarted)
+        wait(set(self.running), timeout=max(0.0, deadline - time.monotonic()))
         self.stopping.set()
-        executor.shutdown(wait=True)
+        for executor, _ in executors:
+            executor.shutdown(wait=True)
 
     def shutdown(self, deadline: float | None = None) -> None:
         if deadline is None:
             deadline = time.monotonic() + self.settings.shutdown_drain_seconds
-        self.drain(self.executor, self.running, deadline, cancel_unstarted=False)
+        self.drain([(self.executor, False)], deadline)

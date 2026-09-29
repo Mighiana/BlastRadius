@@ -146,7 +146,7 @@ def create_app(
 
     def load_demos() -> None:
         if not demos:
-            cached = load_demo_cache(settings.demo_cache)
+            cached = load_demo_cache(settings.demo_cache, settings)
             if cached is not None:
                 demos.update(cached)
                 return
@@ -283,7 +283,10 @@ def create_app(
             if retention_thread is not None:
                 retention_thread.join(timeout=5)
             await run_in_threadpool(github.shutdown, deadline)
-            await run_in_threadpool(jobs.shutdown, deadline)
+            executors = [(jobs.executor, False)]
+            if settings.github_enabled:
+                executors.insert(0, (github.executor, True))
+            await run_in_threadpool(jobs.drain, executors, deadline)
             release_started = time.monotonic()
             LEASE_LOGGER.info(json.dumps({"event": "service.lease_release_started"}))
             released = lease.release()

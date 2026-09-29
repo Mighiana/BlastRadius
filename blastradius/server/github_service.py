@@ -115,12 +115,6 @@ class GitHubService:
         self.wake.set()
         if self.dispatcher is not None:
             self.dispatcher.join(timeout=5)
-        self.jobs.drain(
-            self.executor,
-            self.jobs.running,
-            deadline,
-            cancel_unstarted=True,
-        )
 
     def receive(
         self,
@@ -139,6 +133,9 @@ class GitHubService:
         The caller answers 2xx only after this returns, i.e. after the commit.
         """
         _log("github.webhook_received", delivery_id=delivery_id, github_event=event)
+        if payload is None:
+            _log("github.webhook_processed", delivery_id=delivery_id, status="ignored")
+            return {"status": "ignored"}
         try:
             with self.db.intake() as session:
                 delivery = session.get(GitHubDelivery, delivery_id)
@@ -160,18 +157,21 @@ class GitHubService:
                         delivery.payload = payload.model_dump_json()
                         delivery.attempts = 0
                         delivery_id = delivery.id
-                    elif delivery.status != "retryable" or delivery.attempts >= MAX_ATTEMPTS:
+                    elif delivery.status == "retryable":
+                        if delivery.payload is None and payload is not None:
+                            delivery.status, delivery.error, delivery.next_attempt_at = (
+                                "pending",
+                                None,
+                                None,
+                            )
+                            delivery.payload = payload.model_dump_json()
+                            delivery_id = delivery.id
+                        else:
+                            _log("github.webhook_duplicate", delivery_id=delivery_id)
+                            return {"status": "duplicate"}
+                    else:
                         _log("github.webhook_duplicate", delivery_id=delivery_id)
                         return {"status": "duplicate"}
-                    else:
-                        delivery.status, delivery.error, delivery.next_attempt_at = (
-                            "pending",
-                            None,
-                            None,
-                        )
-                        if delivery.payload is None and payload is not None:
-                            delivery.payload = payload.model_dump_json()
-                        delivery_id = delivery.id
                 else:
                     backlog = (
                         session.scalar(
@@ -195,7 +195,7 @@ class GitHubService:
                             id=delivery_id,
                             body_hash=digest,
                             event=event,
-                            status="pending" if payload is not None else "ignored",
+                            status="pending",
                             attempts=0,
                             payload=payload.model_dump_json() if payload is not None else None,
                         )
@@ -206,9 +206,6 @@ class GitHubService:
         except SQLAlchemyError:
             _log("github.webhook_failed", delivery_id=delivery_id, error="intake_unavailable")
             raise HTTPException(503, "github_intake_unavailable") from None
-        if payload is None:
-            _log("github.webhook_processed", delivery_id=delivery_id, status="ignored")
-            return {"status": "ignored"}
         _log("github.webhook_persisted", delivery_id=delivery_id, github_event=event)
         return self.dispatch(delivery_id)
 

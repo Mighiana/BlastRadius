@@ -1086,6 +1086,29 @@ def test_quota_capacity_and_deleted_running_jobs(client, app, monkeypatch):
     assert client.get(f"/api/analyses/{response.json()['id']}").status_code == 404
 
 
+def test_shutdown_drain_finishes_ordinary_analysis(settings, demo_results, monkeypatch):
+    monkeypatch.setattr("blastradius.server.app.build_demos", lambda _: demo_results)
+    settings = replace(settings, shutdown_drain_seconds=5)
+    started = threading.Event()
+
+    def delayed(*_args):
+        started.set()
+        time.sleep(1)
+        return {"result": demo_results[("public_ssh", "safe")]}
+
+    monkeypatch.setattr("blastradius.server.jobs.execute", delayed)
+    app = create_app(settings)
+    with TestClient(app) as client:
+        me = login(client)
+        proj = project(client, me)
+        response = submit(client, proj["id"])
+        assert response.status_code == 202
+        assert started.wait(3)
+    with app.state.db.sessions() as session:
+        job = session.get(Analysis, response.json()["id"])
+        assert job.status == "succeeded"
+
+
 def test_migrations_and_restart_recovery(settings):
     db = Database(settings)
     assert not db.ready()

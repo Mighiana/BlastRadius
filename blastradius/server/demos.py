@@ -73,6 +73,7 @@ def write_demo_cache(path: Path, settings: Settings) -> None:
         json.dumps(
             {
                 "fingerprint": demo_fingerprint(),
+                "settings": demo_settings(settings),
                 "demos": [[scenario, stage, result] for (scenario, stage), result in demos.items()],
             },
             sort_keys=True,
@@ -81,7 +82,17 @@ def write_demo_cache(path: Path, settings: Settings) -> None:
     )
 
 
-def load_demo_cache(path: Path | None) -> dict[tuple[str, str], dict] | None:
+def demo_settings(settings: Settings) -> dict[str, int]:
+    return {
+        "job_timeout_seconds": settings.job_timeout_seconds,
+        "max_body_bytes": settings.max_body_bytes,
+        "max_resources": settings.max_resources,
+    }
+
+
+def load_demo_cache(
+    path: Path | None, settings: Settings
+) -> dict[tuple[str, str], dict] | None:
     """Demos precomputed at image build time, or ``None`` when absent or stale."""
     if path is None:
         LOGGER.info(json.dumps({"event": "demo.cache_miss", "reason": "unconfigured"}))
@@ -91,6 +102,9 @@ def load_demo_cache(path: Path | None) -> dict[tuple[str, str], dict] | None:
         return None
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
+        if document["settings"] != demo_settings(settings):
+            LOGGER.warning(json.dumps({"event": "demo.cache_miss", "reason": "settings"}))
+            return None
         if document["fingerprint"] != demo_fingerprint():
             LOGGER.warning(json.dumps({"event": "demo.cache_miss", "reason": "stale"}))
             return None
@@ -108,4 +122,5 @@ def load_demo_cache(path: Path | None) -> dict[tuple[str, str], dict] | None:
 
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as directory:
-        write_demo_cache(Path(sys.argv[1]), Settings(data_dir=Path(directory)))
+        settings = Settings(data_dir=Path(directory))
+        write_demo_cache(Path(sys.argv[1]), settings)

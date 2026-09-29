@@ -245,6 +245,17 @@ endpoint.
 
 ## Storage, recovery and limitations
 
+During lease handoff, webhook intake is intentionally unfenced: a verified request
+is persisted and returns `202` even while the current owner drains. Delivery rows
+move through `pending`, `retryable`, `queued`, `handled`, or terminal `rejected`
+states. `BR_SHUTDOWN_DRAIN_SECONDS` bounds the shared drain window; queued GitHub
+work is cancelled only after that deadline while ordinary analyses continue within
+the same window. Demo startup uses `BR_DEMO_CACHE` when configured, logging
+`demo.cache_loaded` or a `demo.cache_miss` reason; a rebuild logs
+`demo.build_fallback`. Lifecycle logs include `service.starting`, `service.ready`,
+`service.shutdown_started`, `service.stopping`, and lease acquisition/release
+events.
+
 Alembic migration `0003` adds `github_installations`, `repository_connections`,
 `github_deliveries` and `github_runs`; it is additive after `0002` and preserves
 the populated `0001` upgrade path. Stable GitHub IDs use signed 64-bit columns.
