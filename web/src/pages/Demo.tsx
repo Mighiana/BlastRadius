@@ -7,16 +7,16 @@ import { ErrorNotice, Loading, PageHeading } from '../components/UI';
 
 export default function Demo() {
   const [scenario, setScenario] = useState('public_ssh');
-  const [stage, setStage] = useState<Stage>('safe');
+  const [stage, setStage] = useState<Stage>('risky');
   const scenarios = useResource('/api/demo/scenarios', scenariosSchema);
   const result = useResource(`/api/demo/${encodeURIComponent(scenario)}?stage=${stage}`, reportSchema);
   const selected = scenarios.data?.scenarios.find(s => s.id === scenario);
   return <div className="container page">
-    <PageHeading eyebrow="INTERACTIVE PRODUCT DEMO" title="A small diff. A new way in.">Follow a real Terraform change from safe baseline to exposed data, then close the path.</PageHeading>
+    <PageHeading eyebrow="INTERACTIVE PRODUCT DEMO" title="A small diff. A new way in.">Start from the exposed result, close the path, then compare it with the safe baseline.</PageHeading>
     <div className="demo-console panel">
       <div className="scenario-list" role="group" aria-label="Demo scenario">{scenarios.data?.scenarios.map((s, index) =>
         <button className={`scenario ${s.id === scenario ? 'selected' : ''}`} key={s.id} aria-pressed={s.id === scenario}
-          onClick={() => { setScenario(s.id); setStage('safe'); }}>
+          onClick={() => { setScenario(s.id); setStage('risky'); }}>
           <span className="scenario-index">0{index + 1}</span><span><strong>{s.title}</strong><small>{s.root_cause === 'network' ? 'Network exposure' : s.root_cause === 'identity' ? 'Identity & permissions' : 'Sensitive storage'}</small></span>
         </button>)}</div>
       <ErrorNotice error={scenarios.error} retry={scenarios.reload} />
