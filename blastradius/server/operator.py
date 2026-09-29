@@ -17,6 +17,7 @@ from blastradius.server.failures import FailureCode
 from blastradius.server.models import (
     Analysis,
     AnalysisFeedback,
+    AnalysisStatus,
     BetaInterest,
     LoginSession,
     Organization,
@@ -124,7 +125,7 @@ def inspect_resource(
                     {}
                     if trusted_cli
                     else {
-                        "status": "failed",
+                        "status": AnalysisStatus.FAILED,
                         "created_at": row.created_at,
                         "completed_at": row.completed_at,
                     }
@@ -132,7 +133,7 @@ def inspect_resource(
             }
             for row in session.scalars(
                 select(Analysis)
-                .where(Analysis.status == "failed")
+                .where(Analysis.status == AnalysisStatus.FAILED)
                 .order_by(Analysis.created_at.desc(), Analysis.id)
                 .limit(limit)
                 .offset(offset)

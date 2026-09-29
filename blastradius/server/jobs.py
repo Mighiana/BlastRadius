@@ -20,7 +20,7 @@ from blastradius.server.config import Settings
 from blastradius.server.db import Database, LeaseLost
 from blastradius.server.events import analysis_event, terminal_events
 from blastradius.server.failures import FailureCode
-from blastradius.server.models import Analysis, GitHubRun
+from blastradius.server.models import Analysis, AnalysisStatus, GitHubRun, RunStatus
 from blastradius.server.persistence import persist_result
 from blastradius.server.results import worker_response
 from blastradius.server.schemas import AnalysisInput, WorkerInput
@@ -128,7 +128,7 @@ class JobManager:
                 rows = list(
                     session.scalars(
                         select(Analysis)
-                        .where(Analysis.status.in_(("queued", "running")))
+                        .where(Analysis.status.in_((AnalysisStatus.QUEUED, AnalysisStatus.RUNNING)))
                         .order_by(Analysis.id)
                         .limit(100)
                         .with_for_update()
@@ -136,7 +136,7 @@ class JobManager:
                 )
                 for job in rows:
                     job.status, job.error, job.completed_at = (
-                        "failed",
+                        AnalysisStatus.FAILED,
                         FailureCode.SERVER_RESTARTED,
                         time.time(),
                     )
@@ -174,20 +174,20 @@ class JobManager:
                     job = session.scalar(
                         select(Analysis).where(Analysis.id == analysis_id).with_for_update()
                     )
-                    if not job or job.status not in ("queued", "running"):
+                    if not job or job.status not in (AnalysisStatus.QUEUED, AnalysisStatus.RUNNING):
                         return "deleted_or_terminal"
                     job.error = validated.get("error")
                     if not job.error:
                         persist_result(session, job, validated["result"])
                     else:
                         job.result, job.decision = None, None
-                    job.status = "failed" if job.error else "succeeded"
+                    job.status = AnalysisStatus.FAILED if job.error else AnalysisStatus.SUCCEEDED
                     job.completed_at = time.time()
                     terminal_events(session, job)
                     if run_id:
                         run = session.get(GitHubRun, run_id)
                         if run:
-                            run.status, run.error = "ready", job.error
+                            run.status, run.error = RunStatus.READY, job.error
                     outcome = job.status
                 return outcome
             except LeaseLost:
@@ -233,9 +233,9 @@ class JobManager:
         try:
             with self.db.session(write=True) as session:
                 job = session.get(Analysis, analysis_id)
-                if not job or job.status != "queued":
+                if not job or job.status != AnalysisStatus.QUEUED:
                     return
-                job.status, job.started_at = "running", time.time()
+                job.status, job.started_at = AnalysisStatus.RUNNING, time.time()
                 analysis_event(session, job, "analysis_started")
                 policy_snapshot = job.policy_snapshot
                 context.update(

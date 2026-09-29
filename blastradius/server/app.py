@@ -41,7 +41,14 @@ from blastradius.server.github_service import GitHubService
 from blastradius.server.jobs import JobManager
 from blastradius.server.lease import ServiceLease
 from blastradius.server.middleware import GuardMiddleware
-from blastradius.server.models import Analysis, Membership, Organization, Project, User
+from blastradius.server.models import (
+    Analysis,
+    AnalysisStatus,
+    Membership,
+    Organization,
+    Project,
+    User,
+)
 from blastradius.server.observability import configure_logging, log_event
 from blastradius.server.operator import is_platform_admin, operator_router
 from blastradius.server.plans import catalog, entitlements, require_feature
@@ -86,7 +93,7 @@ def project_payload(project: Project) -> dict:
 def analysis_payload(
     job: Analysis, detail: bool = True, sarif: bool = False, available: bool = True
 ) -> dict:
-    if not available and job.status in ("queued", "running"):
+    if not available and job.status in (AnalysisStatus.QUEUED, AnalysisStatus.RUNNING):
         raise HTTPException(503, "analysis_persistence_failed")
     data = {
         "id": job.id,
@@ -631,7 +638,7 @@ def create_app(
         request: Request,
         limit: int = Query(50, ge=1, le=100),
         offset: int = Query(0, ge=0),
-        status: Literal["queued", "running", "succeeded", "failed"] | None = None,
+        status: AnalysisStatus | None = None,
         decision: str | None = None,
         input_type: Literal["hcl", "plan", "github"] | None = None,
         branch: str | None = None,
@@ -754,7 +761,7 @@ def create_app(
             job, org = visible_analysis(session, user, analysis_id)
             org = lock_org(session, org.id)
             job, org = visible_analysis(session, user, analysis_id)
-            if job.status != "succeeded" or not job.result:
+            if job.status != AnalysisStatus.SUCCEEDED or not job.result:
                 raise HTTPException(409, "report_not_ready")
             if format == "sarif":
                 require_feature(org, "sarif")
