@@ -1,6 +1,7 @@
 """Local Git pull-request analysis (Phase 2)."""
 
 import io
+import json
 import subprocess
 
 import pytest
@@ -236,3 +237,59 @@ def test_cli_git_mode_pr_format(repo):
     )
     assert "BlastRadius Security Check" in stream.getvalue()
     assert "FAILED" in stream.getvalue()
+
+
+def test_cli_git_mode_diagnostics_match_folder_mode(repo, tmp_path):
+    coverage = """
+module "external" {
+  source = "./module"
+}
+
+resource "aws_lambda_function" "external" {
+  count = 1
+}
+
+resource "aws_security_group" "counted" {
+  count = 1
+  ingress {
+    protocol = "tcp"
+    from_port = 22
+    to_port = 22
+    cidr_blocks = ["10.0.0.0/8"]
+  }
+}
+"""
+    _git(repo, "checkout", "-q", "main")
+    (repo / "infra" / "coverage.tf").write_text(coverage, encoding="utf-8")
+    _git(repo, "add", "infra/coverage.tf")
+    _git(repo, "commit", "-qm", "add coverage diagnostics")
+    _git(repo, "checkout", "-q", "feature")
+    _git(repo, "merge", "-q", "main")
+    _git(repo, "checkout", "-q", "main")
+
+    git_stream = io.StringIO()
+    assert run(
+        ["--repo", str(repo), "--base", "main", "--head", "feature", "--format", "json"],
+        stream=git_stream,
+    ) == 1
+    git_payload = json.loads(git_stream.getvalue())
+
+    comparison = gitsource.prepare_comparison(repo, "main", "feature", tmp_path / "work")
+    folder_stream = io.StringIO()
+    assert run(
+        ["--before", str(comparison.before_dir), "--after", str(comparison.after_dir), "--format", "json"],
+        stream=folder_stream,
+    ) == 1
+    folder_payload = json.loads(folder_stream.getvalue())
+
+    diagnostics = git_payload["coverage_diagnostics"]
+    keys = [
+        tuple(item[field] for field in ("phase", "code", "resource", "attribute", "message"))
+        for item in diagnostics
+    ]
+    assert len(keys) == len(set(keys))
+    assert all(
+        not item["source_file"] or item["source_file"].startswith("infra/")
+        for item in diagnostics
+    )
+    assert len(diagnostics) == len(folder_payload["coverage_diagnostics"])

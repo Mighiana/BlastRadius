@@ -38,8 +38,9 @@ If that is not you, you are still welcome — tell us what you expected instead.
    - **BLOCK CHANGE** — the change creates a new modeled path or violation.
    - **REVIEW REQUIRED** — the analysis could not see everything; a human
      must look. This is *not* a pass.
-   - **SAFE TO MERGE** — read it as "no new modeled blocking findings detected".
-     It is not a certificate that your infrastructure is secure.
+   - **NO NEW PATHS** (API/CLI: `SAFE TO MERGE`) — no new modeled path under
+     the selected model and policy. It is not a certificate that your
+     infrastructure is secure.
 7. **Try your own change.** Paste the baseline (current) and candidate
    (proposed) `.tf` files of a *small* root, or upload a `terraform show -json`
    plan produced in your own environment. See "Before you upload" below.
@@ -68,6 +69,20 @@ Results, projects and workspaces are still there when you sign out and back in.
   values — these produce **REVIEW REQUIRED**, by design
 - SARIF download in the web app (CLI SARIF works; web SARIF needs an entitlement)
 - Payments, SAML, mobile apps
+
+## What to expect on a real repository
+
+Most real repositories return **REVIEW REQUIRED** on the first analysis. That is expected and is the feedback we want. The usual causes, in order:
+
+| Cause | What you will see | What helps |
+| --- | --- | --- |
+| `module` blocks | `UNEXPANDED_MODULE` | Point the project's Terraform root at the directory that *declares* the `aws_*` resources |
+| `count` / `for_each` / `dynamic` | `UNEXPANDED_RESOURCE` | Nothing yet — tell us which resources use them |
+| Tags or CIDRs built from `var.` / `local.` / `merge()` | `UNRESOLVED_EXPRESSION` | Upload a `terraform show -json` plan instead of HCL |
+| Resource types outside the model (Lambda, RDS, EKS…) | `UNSUPPORTED_RESOURCE` | Nothing yet — the list of types is the most useful thing you can send us |
+| Managed IAM policy ARNs | `EXTERNAL_POLICY` | Nothing yet |
+
+The report's **Why this needs review** box summarises these for each analysis. The one number we track for every tester is: *did any analysis of your real repository reach NO NEW PATHS or BLOCK CHANGE?*
 
 ## Before you upload
 

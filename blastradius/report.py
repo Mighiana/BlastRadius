@@ -65,11 +65,11 @@ def _terraform_text(directory: Path) -> str:
 def coverage_lines(diff: "GraphDiff") -> list[str]:
     lines = ["", "Analysis coverage: " + ("complete within documented model" if diff.complete else "INCOMPLETE")]
     for phase, result in (("before", diff.before), ("after", diff.after)):
-        for item in result.diagnostics[:100]:
+        for item in result.diagnostics[:25]:
             location = ": ".join(part for part in (item.source_file, item.resource, item.attribute) if part)
             lines.append(f"- {_safe_markdown(phase)} [{item.code}] {_safe_markdown(location)}: {_safe_markdown(item.message)}")
-        if len(result.diagnostics) > 100:
-            lines.append(f"- {len(result.diagnostics) - 100} additional diagnostics; see JSON/SARIF.")
+        if len(result.diagnostics) > 25:
+            lines.append(f"- {len(result.diagnostics) - 25} additional diagnostics; see JSON/SARIF.")
     return lines
 
 

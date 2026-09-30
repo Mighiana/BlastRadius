@@ -1,6 +1,6 @@
 import { Component, useEffect, useState, type ReactNode } from 'react';
 import { Link, NavLink, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowUpRight, GitBranch, Menu, Radar, X } from 'lucide-react';
+import { ArrowUpRight, GitBranch, Menu, Moon, Radar, Sun, X } from 'lucide-react';
 import Landing from './pages/Landing';
 import Demo from './pages/Demo';
 import Workspace from './pages/Workspace';
@@ -48,6 +48,40 @@ function RouteFocus() {
   }, [pathname, hash]);
   return null;
 }
+function savedTheme(): string | null {
+  try {
+    return localStorage.getItem('br-theme');
+  } catch {
+    return null;
+  }
+}
+function ThemeToggle() {
+  const [explicit, setExplicit] = useState(() => savedTheme() !== null);
+  const [dark, setDark] = useState(() => {
+    const saved = savedTheme();
+    return saved ? saved === 'dark' : window.matchMedia?.('(prefers-color-scheme: light)').matches !== true;
+  });
+  useEffect(() => {
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#0b1018' : '#e7ecf4');
+  }, [dark]);
+  useEffect(() => {
+    if (explicit) return;
+    const mq = window.matchMedia?.('(prefers-color-scheme: light)');
+    if (!mq || !mq.addEventListener) return;
+    const onChange = (e: MediaQueryListEvent) => setDark(!e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, [explicit]);
+  return <button type="button" className="icon-button" aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'} aria-pressed={!dark} title={dark ? 'Light theme' : 'Dark theme'} onClick={() => {
+    const next = !dark;
+    setExplicit(true);
+    setDark(next);
+    try {
+      localStorage.setItem('br-theme', next ? 'dark' : 'light');
+    } catch { /* persistence is optional; the in-memory theme still applies */ }
+  }}>{dark ? <Sun size={16} aria-hidden="true" /> : <Moon size={16} aria-hidden="true" />}</button>;
+}
 function Header() {
   const { session, originMismatch, refresh } = useSession();
   const { organization } = useOrganization();
@@ -93,6 +127,7 @@ function Header() {
       {session?.authenticated && <NavLink to={`/history${search}`}>History</NavLink>}
       {session?.authenticated && session.capabilities?.platform_admin === true && <NavLink to="/operator">Operator</NavLink>}
       {!session?.authenticated && <NavLink to="/account">Sign in</NavLink>}
+      <ThemeToggle />
       <NavLink className="nav-cta" to={`/dashboard${search}`}>{session?.authenticated ? 'Workspace' : 'Get started'}<ArrowUpRight size={15} aria-hidden="true" /></NavLink>
       {session?.authenticated && <button className="text-button" disabled={busy || originMismatch} title={originMismatch ? 'Sign-out requires the configured application origin.' : undefined} onClick={() => { void logout(); }}>{busy ? 'Signing out…' : 'Sign out'}</button>}
     </nav>

@@ -621,6 +621,49 @@ def test_quota_failure_publishes_review_and_does_not_charge(harness):
 
 
 @pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (
+            "analysis_quota_exceeded",
+            "This workspace has used its monthly analysis quota. Ask the operator for a higher plan "
+            "or wait for the next period; the PR was not analyzed.",
+        ),
+        (
+            "github_no_terraform",
+            "No .tf files were found at the project's Terraform root. Check the Terraform root in the project settings. "
+            "Configured root: `.`.",
+        ),
+        (
+            "unknown_failure",
+            "Analysis unavailable. Review manually or use the safe Actions integration.",
+        ),
+        (
+            "github_budget_exceeded",
+            "Fetching the Terraform root exhausted the GitHub request budget (too many files/requests or a deadline). "
+            "Reduce the root or use the GitHub Actions integration.",
+        ),
+        (
+            "github_unsupported_terraform",
+            "The Terraform root contains .tf.json files or nested directories that BlastRadius cannot analyze from GitHub. "
+            "Only .tf files in one directory are supported.",
+        ),
+    ],
+)
+def test_publisher_failure_details(harness, error, expected):
+    app, _, _, _, _ = harness
+    send(harness)
+    drain(app)
+    with app.state.db.session(write=True) as session:
+        run = session.scalar(select(GitHubRun))
+        run.analysis_id = None
+        run.error = error
+    title, conclusion, text, _ = summary(app.state.db, run_record(app), app.state.settings)
+    assert title == "REVIEW REQUIRED"
+    assert conclusion == "failure"
+    assert expected in text
+
+
+@pytest.mark.parametrize(
     "fault",
     [
         "truncated",
@@ -1280,6 +1323,27 @@ def test_failed_submission_requeues_delivery(harness, monkeypatch):
     with app.state.db.session() as session:
         delivery = session.get(GitHubDelivery, "delivery-1")
         assert (delivery.status, delivery.attempts) == ("pending", 0)
+
+
+def test_dispatch_releases_active_delivery_on_every_exit(harness, monkeypatch):
+    app, _, _, _, _ = harness
+    github = app.state.github
+    monkeypatch.setattr(github, "dispatch_pending", lambda: 0)
+    for _ in range(app.state.settings.max_jobs):
+        assert app.state.jobs.reserve()
+    try:
+        assert send(harness).json() == {"status": "deferred"}
+        assert not github.active
+    finally:
+        for _ in range(app.state.settings.max_jobs):
+            app.state.jobs.slots.release()
+    assert github.dispatch("missing") == {"status": "queued"}
+    assert not github.active
+    assert github.dispatch("delivery-1") == {"status": "queued"}
+    drain(app)
+    assert not github.active
+    assert github.dispatch("delivery-1") == {"status": "handled"}
+    assert not github.active
 
 
 def test_finalize_retries_after_a_database_error(harness, monkeypatch):

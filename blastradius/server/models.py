@@ -84,10 +84,6 @@ class Organization(Base):
     policy: Mapped[dict | None] = mapped_column(JSON)
     policy_version: Mapped[int] = mapped_column(default=0, server_default="0")
     updated_at: Mapped[float | None]
-    customer_id: Mapped[str | None] = mapped_column(String(255), unique=True)
-    subscription_id: Mapped[str | None] = mapped_column(String(255), unique=True)
-    subscription_status: Mapped[str] = mapped_column(String(50), default="none")
-    billing_event_created: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[float] = mapped_column(default=time.time)
 
 
@@ -274,12 +270,6 @@ class AnalysisArtifact(Base):
     format: Mapped[str] = mapped_column(String(20))
     media_type: Mapped[str] = mapped_column(String(100))
     content: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[float] = mapped_column(default=time.time)
-
-
-class BillingEvent(Base):
-    __tablename__ = "billing_events"
-    id: Mapped[str] = mapped_column(String(255), primary_key=True)
     created_at: Mapped[float] = mapped_column(default=time.time)
 
 

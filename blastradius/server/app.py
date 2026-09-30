@@ -30,10 +30,10 @@ from blastradius.server.auth import (
     require_csrf,
     require_user,
 )
-from blastradius.server.config import Settings
+from blastradius.server.config import Settings, provider_name
 from blastradius.server.beta import beta_router
 from blastradius.server.db import Database, LeaseLost
-from blastradius.server.demos import build_demos, load_demo_cache
+from blastradius.server.demos import DEMO_COUNT, build_demos, load_demo_cache
 from blastradius.server.fixtures import FIXTURES
 from blastradius.server.events import record_event
 from blastradius.server.github_routes import github_router
@@ -386,7 +386,7 @@ def create_app(
             or jobs.draining.is_set()
             or not lease.healthy()
             or not db.ready()
-            or len(demos) != 9
+            or len(demos) != DEMO_COUNT
             or jobs.persistence_failed.is_set()
         ):
             raise HTTPException(503, "not_ready")
@@ -433,6 +433,7 @@ def create_app(
                     "mode": settings.auth_mode,
                     "public_url": settings.public_url.rstrip("/"),
                     "login_url": "/api/auth/login" if settings.auth_mode == "oidc" else None,
+                    "provider_name": provider_name(settings) if settings.auth_mode == "oidc" else None,
                 },
                 "billing": {"enabled": False, "mode": "commercial_beta"},
                 "capabilities": {"platform_admin": is_platform_admin(user, login, settings)},
@@ -541,7 +542,7 @@ def create_app(
 
     @app.get("/api/demo/{scenario_id}")
     def demo(scenario_id: str, stage: Literal["safe", "risky", "remediated"] = "risky"):
-        if len(demos) != 9:
+        if len(demos) != DEMO_COUNT:
             raise HTTPException(503, "demos_warming")
         if (scenario_id, stage) not in demos:
             raise HTTPException(404, "not_found")

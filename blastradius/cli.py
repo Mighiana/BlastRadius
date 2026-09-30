@@ -13,6 +13,7 @@ This is what a CI pipeline would call on a pull request.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import os
 import sys
 import tempfile
@@ -256,8 +257,18 @@ def _run_analysis(args, out):
             after_config = parse_input(after_dir)
             if git_mode:
                 for config in (before_config, after_config):
+                    prefix = Path(comparison.terraform_dir)
                     for resource in config.resources:
-                        resource.source_file = (Path(comparison.terraform_dir) / Path(resource.source_file).name).as_posix()
+                        resource.source_file = (prefix / Path(resource.source_file).name).as_posix()
+                    config.diagnostics = [
+                        dataclasses.replace(
+                            diagnostic,
+                            source_file=(prefix / Path(diagnostic.source_file).name).as_posix(),
+                        )
+                        if diagnostic.source_file
+                        else diagnostic
+                        for diagnostic in config.diagnostics
+                    ]
             before = analyze(build_graph(before_config), str(before_dir))
             after = analyze(build_graph(after_config), str(after_dir))
         except (OSError, UnexpectedInput, PlanParseError, InputLimitError, UnicodeError) as error:
