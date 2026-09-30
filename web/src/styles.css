@@ -378,6 +378,13 @@ details>code{display:block;padding-top:12px}
 .report-stack .panel{padding:20px}
 .report-stack .graph-path{padding-block:18px}
 .report-stack .graph-node{min-height:125px}
+.why-review{margin-top:16px;padding:14px 16px;background:var(--panel-alt);border:1px solid var(--border);border-radius:8px}
+.why-review>p{font-size:.78rem;line-height:1.55;margin-bottom:12px}
+.why-review>h3{font-size:.95rem;margin-bottom:10px}
+.why-review ul{list-style:none;padding:0;margin:0;display:grid;gap:10px}
+.why-review li{border-top:1px solid var(--border);padding-top:10px}
+.why-review li strong{font-size:.78rem;font-weight:600}
+.why-review li p{font-size:.74rem;color:var(--muted);line-height:1.5;margin-top:4px}
 .segmented button,.text-button,.pagination .button,.confirm-delete .button{min-height:44px}
 .analysis-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:20px 0;flex-wrap:wrap}
 .analysis-heading h2{font-size:1.2rem;line-height:1.8}

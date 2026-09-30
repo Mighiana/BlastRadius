@@ -15,6 +15,9 @@ Register a confidential web application with a trusted OIDC provider:
 
 Set `BR_AUTH_MODE=oidc`, `BR_OIDC_ISSUER`, `BR_OIDC_CLIENT_ID`,
 `BR_OIDC_CLIENT_SECRET`, and a stable `BR_SESSION_SECRET` (32+ characters).
+Optionally set `BR_OIDC_PROVIDER_NAME` (up to 40 printable characters); otherwise
+the sign-in label is derived from the issuer host for Google, Microsoft, Okta,
+Auth0 and Amazon Cognito, or uses the bare host name.
 Issuer must match the token's `iss` exactly, including a provider-required
 trailing slash. The discovery URL is `<issuer-without-trailing-slash>/.well-known/openid-configuration`.
 Authlib validates state, token signature, issuer, audience, expiration and nonce;

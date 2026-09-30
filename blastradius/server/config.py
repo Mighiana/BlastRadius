@@ -18,6 +18,7 @@ class Settings:
     session_secret: str = field(default_factory=lambda: secrets.token_urlsafe(48))
     auth_mode: str = "disabled"
     oidc_issuer: str = ""
+    oidc_provider_name: str = ""
     oidc_client_id: str = ""
     oidc_client_secret: str = ""
     admin_enabled: bool = False
@@ -82,6 +83,12 @@ class Settings:
             raise ValueError("BR_ENV must be development, test, preview or production")
         if self.auth_mode not in {"disabled", "demo", "oidc"}:
             raise ValueError("BR_AUTH_MODE must be disabled, demo or oidc")
+        if (
+            len(self.oidc_provider_name) > 40
+            or not all(character.isprintable() for character in self.oidc_provider_name)
+            or any(character in "<>" for character in self.oidc_provider_name)
+        ):
+            raise ValueError("BR_OIDC_PROVIDER_NAME must be at most 40 printable characters without angle brackets")
         if len(self.session_secret) < 32:
             raise ValueError("Session secret must contain at least 32 characters")
         if not self.database_url.startswith(("sqlite:///", "postgresql+psycopg://")):
@@ -206,6 +213,7 @@ class Settings:
             ),
             auth_mode=env.get("BR_AUTH_MODE", "disabled"),
             oidc_issuer=env.get("BR_OIDC_ISSUER", ""),
+            oidc_provider_name=env.get("BR_OIDC_PROVIDER_NAME", ""),
             oidc_client_id=env.get("BR_OIDC_CLIENT_ID", ""),
             oidc_client_secret=env.get("BR_OIDC_CLIENT_SECRET", ""),
             admin_enabled=env.get("BR_ADMIN_ENABLED") == "true",
@@ -241,3 +249,23 @@ class Settings:
         )
         settings.validate()
         return settings
+
+
+def provider_name(settings: Settings) -> str | None:
+    if settings.oidc_provider_name:
+        return settings.oidc_provider_name
+    hostname = urlsplit(settings.oidc_issuer).hostname
+    if not hostname:
+        return None
+    hostname = hostname.lower()
+    if hostname == "accounts.google.com":
+        return "Google"
+    if hostname.endswith((".microsoftonline.com", ".microsoft.com", "login.live.com")):
+        return "Microsoft"
+    if hostname.endswith((".okta.com", ".oktapreview.com")):
+        return "Okta"
+    if hostname.endswith(".auth0.com"):
+        return "Auth0"
+    if hostname.endswith(".amazonaws.com"):
+        return "Amazon Cognito"
+    return hostname[:40]

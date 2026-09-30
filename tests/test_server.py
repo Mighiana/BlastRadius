@@ -32,7 +32,7 @@ from sqlalchemy.engine import make_url
 from blastradius.server.app import create_app
 from blastradius.server.admin import assign_plan, main as admin_main
 from blastradius.server.auth import create_session, provision, token_hash
-from blastradius.server.config import Settings
+from blastradius.server.config import Settings, provider_name
 from blastradius.server.db import Database, migration_config
 from blastradius.server.demos import build_demos
 from blastradius.server.fixtures import FIXTURES
@@ -485,6 +485,7 @@ def test_disabled_auth_still_serves_demo(settings, demo_results, monkeypatch):
             "enabled": False,
             "mode": "disabled",
             "login_url": None,
+            "provider_name": None,
             "public_url": settings.public_url,
         }
         assert me["billing"] == {"enabled": False, "mode": "commercial_beta"}
@@ -493,6 +494,48 @@ def test_disabled_auth_still_serves_demo(settings, demo_results, monkeypatch):
         assert client.get("/api/auth/login").status_code == 503
         assert client.get("/api/auth/callback").status_code == 503
         assert client.get("/api/demo/public_ssh").status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("issuer", "expected"),
+    [
+        ("https://accounts.google.com", "Google"),
+        ("https://login.microsoftonline.com/tenant/v2.0", "Microsoft"),
+        ("https://acme.okta.com/oauth2/default", "Okta"),
+        ("https://tenant.example.test/oidc", "tenant.example.test"),
+    ],
+)
+def test_oidc_provider_name_derivation(settings, issuer, expected):
+    assert provider_name(replace(settings, oidc_issuer=issuer)) == expected
+
+
+def test_oidc_provider_name_env_override(monkeypatch):
+    monkeypatch.setenv("BR_AUTH_MODE", "oidc")
+    monkeypatch.setenv("BR_OIDC_ISSUER", "https://accounts.google.com")
+    monkeypatch.setenv("BR_OIDC_CLIENT_ID", "client")
+    monkeypatch.setenv("BR_OIDC_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("BR_OIDC_PROVIDER_NAME", "Acme Identity")
+    assert Settings.from_env().oidc_provider_name == "Acme Identity"
+    assert provider_name(Settings.from_env()) == "Acme Identity"
+
+
+@pytest.mark.parametrize("value", ["x" * 41, "bad<name", "bad\nname"])
+def test_oidc_provider_name_validation_rejects_invalid_override(settings, value):
+    with pytest.raises(ValueError):
+        replace(settings, oidc_provider_name=value).validate()
+
+
+def test_api_me_exposes_oidc_provider_name(settings, demo_results, monkeypatch):
+    monkeypatch.setattr("blastradius.server.app.build_demos", lambda _: demo_results)
+    configured = replace(
+        settings,
+        auth_mode="oidc",
+        oidc_issuer="https://accounts.google.com",
+        oidc_client_id="client",
+        oidc_client_secret="secret",
+    )
+    with TestClient(create_app(configured)) as client:
+        assert client.get("/api/me").json()["auth"]["provider_name"] == "Google"
 
 
 @pytest.mark.parametrize(

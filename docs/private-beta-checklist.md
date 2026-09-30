@@ -34,6 +34,7 @@ Tester: ______________________   Invited: ____-__-__   Workspace: ______________
                                             no Terraform, tokens, cookies, e-mails
 [ ] tester knows how to report problems (T) docs/beta-welcome.md "Reporting"
 [ ] validation questions answered       (T) docs/beta-feedback-form.md
+[ ] operator tracking row prepared     (O) docs/beta-tester-tracking.md
 
 Notes / blockers:
 ```

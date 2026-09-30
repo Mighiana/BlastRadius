@@ -30,7 +30,7 @@ from blastradius.server.auth import (
     require_csrf,
     require_user,
 )
-from blastradius.server.config import Settings
+from blastradius.server.config import Settings, provider_name
 from blastradius.server.beta import beta_router
 from blastradius.server.db import Database, LeaseLost
 from blastradius.server.demos import DEMO_COUNT, build_demos, load_demo_cache
@@ -433,6 +433,7 @@ def create_app(
                     "mode": settings.auth_mode,
                     "public_url": settings.public_url.rstrip("/"),
                     "login_url": "/api/auth/login" if settings.auth_mode == "oidc" else None,
+                    "provider_name": provider_name(settings) if settings.auth_mode == "oidc" else None,
                 },
                 "billing": {"enabled": False, "mode": "commercial_beta"},
                 "capabilities": {"platform_admin": is_platform_admin(user, login, settings)},
