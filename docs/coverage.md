@@ -73,6 +73,23 @@ Inline legacy bucket `policy` attributes and explicit ACL grant blocks are
 diagnosed rather than silently treated as modeled policy documents. The
 security model documents the deliberate broad IAM privilege compatibility.
 
+### Inert (non-blocking) types
+
+These resource types have no edge in the reachability model and remain listed
+as `UNSUPPORTED_RESOURCE` diagnostics without making the analysis incomplete:
+
+`aws_vpc`, `aws_subnet`, `aws_route_table`, `aws_route_table_association`,
+`aws_route`, `aws_internet_gateway`, `aws_nat_gateway`, `aws_eip`,
+`aws_vpc_dhcp_options`, `aws_vpc_dhcp_options_association`, `aws_flow_log`,
+`aws_cloudwatch_log_group`, `aws_cloudwatch_metric_alarm`, `aws_sns_topic`,
+`aws_kms_key`, `aws_kms_alias`, `aws_key_pair`, `aws_ebs_volume`,
+`aws_ebs_snapshot`, `aws_volume_attachment`, `aws_placement_group`,
+`aws_db_subnet_group`, `aws_db_parameter_group`, `aws_db_option_group`,
+`aws_ecr_repository`, `aws_ssm_parameter`, `aws_acm_certificate`,
+`aws_acm_certificate_validation`, `aws_route53_zone`, `aws_route53_record`,
+`random_string`, `random_id`, `random_password`, `random_pet`, `null_resource`,
+`time_sleep`, `local_file`, `tls_private_key`.
+
 ### Explicit exclusions
 
 No VPC routing, public-IP prerequisite, NAT, NACL, peering, transit gateway,

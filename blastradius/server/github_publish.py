@@ -5,6 +5,7 @@ from pydantic import TypeAdapter, ValidationError
 from blastradius.security.decision import Decision
 from blastradius.server.config import Settings
 from blastradius.server.db import Database, LeaseLost
+from blastradius.server.failures import FailureCode
 from blastradius.server.github_api import GitHubAPI, GitHubError
 from blastradius.server.github_types import Check, Checks, Comment, Repository
 from blastradius.server.models import (
@@ -29,6 +30,52 @@ LIMITATIONS = (
     "A passing check is not proof that infrastructure is secure. "
     "The linked report requires workspace access and expires under its retention policy."
 )
+FAILURE_DETAILS: dict[str, str] = {
+    "analysis_quota_exceeded": (
+        "This workspace has used its monthly analysis quota. Ask the operator for a higher plan "
+        "or wait for the next period; the PR was not analyzed."
+    ),
+    "github_no_terraform": (
+        "No .tf files were found at the project's Terraform root. Check the Terraform root in the project settings."
+    ),
+    "github_unsupported_terraform": (
+        "The Terraform root contains .tf.json files or nested directories that BlastRadius cannot analyze from GitHub. "
+        "Only .tf files in one directory are supported."
+    ),
+    "github_unsafe_tree": (
+        "The Terraform root contains symlinks, submodules or LFS objects, which BlastRadius does not fetch."
+    ),
+    "github_unsupported_tree": (
+        "The Terraform root contains symlinks, submodules or LFS objects, which BlastRadius does not fetch."
+    ),
+    "github_source_limit": (
+        "The Terraform root exceeds the source size limit for hosted analysis. Use the GitHub Actions integration "
+        "for large roots."
+    ),
+    "github_budget_exceeded": (
+        "Fetching the Terraform root exhausted the GitHub request budget (too many files/requests or a deadline). "
+        "Reduce the root or use the GitHub Actions integration."
+    ),
+    "github_response_limit": (
+        "The Terraform root exceeds the source size limit for hosted analysis. Use the GitHub Actions integration "
+        "for large roots."
+    ),
+    "github_installation_unavailable": (
+        "BlastRadius no longer has access to this repository. Reinstall or re-authorize the GitHub App."
+    ),
+    "github_access_denied": (
+        "BlastRadius no longer has access to this repository. Reinstall or re-authorize the GitHub App."
+    ),
+    "github_token_invalid": (
+        "BlastRadius no longer has access to this repository. Reinstall or re-authorize the GitHub App."
+    ),
+    FailureCode.SERVER_RESTARTED: (
+        "The analysis was interrupted by a service restart. Push a new commit or re-run to analyze again."
+    ),
+    "service_stopping": (
+        "The analysis was interrupted by a service restart. Push a new commit or re-run to analyze again."
+    ),
+}
 
 
 def active(
@@ -92,7 +139,12 @@ def summary(db: Database, run: GitHubRun, settings: Settings) -> tuple[str, str,
             raise GitHubError("github_analysis_expired")
         url = f"{settings.public_url.rstrip('/')}/dashboard?project={project.id}"
         title, conclusion = Decision.REVIEW.value, "failure"
-        details = "Analysis unavailable. Review manually or use the safe Actions integration."
+        details = FAILURE_DETAILS.get(
+            run.error or "",
+            "Analysis unavailable. Review manually or use the safe Actions integration.",
+        )
+        if run.error == "github_no_terraform":
+            details += f" Configured root: `{project.terraform_root or '.'}`."
         if job:
             url = f"{settings.public_url.rstrip('/')}/dashboard?project={project.id}&analysis={job.id}"
             if job.status == AnalysisStatus.SUCCEEDED:
