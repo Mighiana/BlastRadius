@@ -22,8 +22,10 @@ describe('report evidence and graph', () => {
     };
     render(<ReportView report={report} />);
     expect(screen.getByText(/2 resource types outside coverage/)).toBeVisible();
-    expect(screen.getByText('2× Modules not expanded')).toBeVisible();
+    const coverage = screen.getByRole('list', { name: 'Analysis coverage' });
+    expect(within(coverage).getByText('2× Modules not expanded')).toBeVisible();
     const summary = screen.getByText('Why this needs review').parentElement!;
+    expect(within(summary).getByText('2× Modules not expanded')).toBeVisible();
     expect(within(summary).queryByText(/aws_vpc|Synthetic notice/)).not.toBeInTheDocument();
   });
   it('uses blocked wording and splits module-address coverage gaps', () => {
@@ -77,7 +79,7 @@ describe('report evidence and graph', () => {
     expect(screen.getByLabelText('Analysis decision')).toHaveTextContent('BLOCK CHANGE');
     expect(screen.getByText(/Heuristic · not a risk probability/)).toBeVisible();
     expect(screen.getByText('-65 points')).toBeVisible();
-    expect(screen.getByLabelText('Responsible change')).toHaveTextContent('Bucket ACL changed.');
+    expect(screen.getByText('Bucket ACL changed.', { selector: 'p.change-summary' })).toBeVisible();
     const path = screen.getByRole('list', { name: 'Attack path' });
     expect(within(path).getByText('Internet')).toBeVisible();
     expect(within(path).getByText('Customer Data')).toBeVisible();
@@ -99,10 +101,15 @@ describe('report evidence and graph', () => {
   });
   it('does not infer score 100 from SAFE or claim no existing exposure', () => {
     render(<ReportView report={{ ...safe, score: { before: 85, after: 85, delta: 0 } }} />);
-    expect(screen.getByText('NO NEW PATHS')).toBeVisible();
-    expect(screen.queryByText('SAFE TO MERGE')).not.toBeInTheDocument();
-    expect(screen.getAllByText('85')).toHaveLength(2);
-    expect(screen.getByText(/does not prove safety/)).toBeVisible();
+    const hero = screen.getByLabelText('Analysis decision');
+    expect(within(hero).getByText('SAFE TO MERGE')).toBeVisible();
+    expect(screen.queryByText('NO NEW PATHS')).not.toBeInTheDocument();
+    const score = within(hero).getByRole('group', { name: 'Heuristic score 85 to 85, change 0' });
+    expect(score).toBeVisible();
+    expect(screen.queryByText('100', { exact: true })).not.toBeInTheDocument();
+    expect(within(score).getAllByText('85', { exact: true })).toHaveLength(2);
+    expect(within(hero).getByText('No new modeled blocking findings detected.')).toBeVisible();
+    expect(within(hero).getByText('This does not prove the infrastructure is secure. Existing exposure and coverage gaps may remain.')).toBeVisible();
   });
   it('disables persisted SARIF when stripped by the server entitlement gate', () => {
     render(<ReportView jobId="saved" report={{ ...risky, reports: { markdown: risky.reports.markdown } }} />);

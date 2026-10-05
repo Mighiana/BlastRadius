@@ -2,11 +2,11 @@ import { useId, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Database, Globe2, KeyRound, Server, Shield, LockKeyhole } from 'lucide-react';
 import type { Edge, Snapshot } from '../api';
 
-function NodeIcon({ type }: { type: string }) {
+export function NodeIcon({ type, size = 22 }: { type: string; size?: number }) {
   const Icon = type.includes('INTERNET') ? Globe2 : type.includes('SECURITY') ? Shield
     : type.includes('EC2') ? Server : type.includes('IAM') ? KeyRound
       : type.includes('SENSITIVE') ? LockKeyhole : Database;
-  return <Icon size={22} aria-hidden="true" />;
+  return <Icon size={size} aria-hidden="true" />;
 }
 function Evidence({ edge, index }: { edge: Edge; index: number }) {
   return <details className="evidence-item">

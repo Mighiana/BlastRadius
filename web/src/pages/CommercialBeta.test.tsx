@@ -301,7 +301,10 @@ describe('platform operator access and bounded inspection', () => {
 
 it('preserves the machine SAFE decision while explaining the bounded result and next step', () => {
   render(<ReportView report={safe} />);
-  expect(within(screen.getByLabelText('Analysis decision')).getByText(/adds no new modeled path to sensitive data\. It does not prove safety/)).toBeVisible();
-  expect(screen.getByText('NO NEW PATHS')).toBeVisible();
+  const hero = screen.getByLabelText('Analysis decision');
+  expect(within(hero).getByText('SAFE TO MERGE')).toBeVisible();
+  expect(within(hero).getByText('No new modeled blocking findings detected.')).toBeVisible();
+  expect(within(hero).getByText('This does not prove the infrastructure is secure. Existing exposure and coverage gaps may remain.')).toBeVisible();
+  expect(screen.queryByText('NO NEW PATHS')).not.toBeInTheDocument();
   expect(screen.getByRole('heading', { name: 'Recommended next step' })).toBeVisible();
 });

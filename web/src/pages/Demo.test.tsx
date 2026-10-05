@@ -16,9 +16,9 @@ describe('real API demo transitions', () => {
     render(<Demo />);
     expect(await screen.findByText('BLOCK CHANGE')).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Remediate & re-analyze' }));
-    expect(await screen.findByText('NO NEW PATHS')).toBeVisible();
+    expect(await screen.findByText('SAFE TO MERGE')).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Reset baseline' }));
-    expect(await screen.findByText('NO NEW PATHS')).toBeVisible();
+    expect(await screen.findByText('SAFE TO MERGE')).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Simulate risky change' }));
     expect(await screen.findByText('BLOCK CHANGE')).toBeVisible();
     expect(urls).toContain('/api/demo/public_ssh?stage=safe');
