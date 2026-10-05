@@ -3,7 +3,7 @@ import { ArrowRight, Download, GitBranch, RefreshCw, Wrench } from 'lucide-react
 import { download, exportReport, type Report } from '../api';
 import { ErrorNotice } from './UI';
 import { Graph } from './Graph';
-import { ChangeLines, ResultHero, changePairs, decisionKind } from './ResultHero';
+import { ChangeLines, ResultHero, changePairs, decisionKind, matchedRecommendation } from './ResultHero';
 import { CODE_HELP, CODE_LABEL, UNSUPPORTED_RESOURCE_HELP, blockingDiagnosticGroups, unsupportedBreakdown, type Diagnostic } from './diagnostics';
 export function ReportView({ report, jobId }: { report: Report; jobId?: string }) {
   const [side, setSide] = useState<'before' | 'after'>('after');
@@ -62,7 +62,7 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
   const kind = decisionKind(report.decision);
   const baseline = report.demo?.stage === 'safe';
   const pairs = baseline ? null : changePairs(report.responsible_changes);
-  const recommendation = report.remediation.recommendations[0];
+  const recommendation = matchedRecommendation(report);
   function inspectPatch() {
     setPatchOpen(true);
     jumpTo('remediation-patch');
@@ -83,12 +83,12 @@ export function ReportView({ report, jobId }: { report: Report; jobId?: string }
       </div>
       {kind === 'block' ? <>
         <ArrowRight className="cause-arrow" size={22} aria-hidden="true" />
-        <div className="fix-card"><p className="eyebrow">RECOMMENDED FIX</p>
+        <div className="fix-card"><p className="eyebrow">{recommendation ? 'RECOMMENDED FIX' : 'NEXT STEP'}</p>
           {recommendation ? <><h3>{recommendation.title}</h3>
             <div className="fix-pair"><div><span>Current</span><code>{recommendation.current}</code></div><div><span>Recommended</span><code>{recommendation.recommended}</code></div></div></>
-            : <p>No automatic recommendation for this change. Review the remediation section.</p>}
+            : <p>No recommendation is linked to the resources on this path. Review the candidate recommendations below.</p>}
           <div className="button-row">
-            {report.remediation.can_autofix && <button type="button" className="button primary" onClick={inspectPatch}><Wrench size={16} aria-hidden="true" />Inspect patch</button>}
+            {recommendation && report.remediation.can_autofix && <button type="button" className="button primary" onClick={inspectPatch}><Wrench size={16} aria-hidden="true" />Inspect patch</button>}
             <a className="button secondary" href="#remediation" onClick={event => { event.preventDefault(); jumpTo('remediation'); }}>All remediation</a>
           </div>
         </div>

@@ -5,7 +5,7 @@ import { reportSchema } from '../api';
 import sshDemo from '../test/ssh-demo.json';
 import { blockingDiagnosticGroups } from './diagnostics';
 import { ReportView } from './ReportView';
-import { ResultHero } from './ResultHero';
+import { changePairs, matchedRecommendation, ResultHero, primaryPath } from './ResultHero';
 
 const risky = reportSchema.parse(sshDemo.risky);
 const remediated = reportSchema.parse(sshDemo.remediated);
@@ -35,6 +35,70 @@ describe('ResultHero', () => {
     expect(within(nodes.at(-1)!).getByText(/^Sensitive$/i)).toBeVisible();
     expect(within(hero).getByText('10.0.0.0/24', { exact: true })).toBeVisible();
     expect(within(hero).getByText('0.0.0.0/0', { exact: true })).toBeVisible();
+  });
+
+  it('pairs the real SSH fixture CIDR replacement', () => {
+    const pairs = changePairs(risky.responsible_changes);
+    expect(pairs).toHaveLength(1);
+    expect(pairs?.[0]).toMatchObject({
+      before: 'cidr_blocks = ["10.0.0.0/24"]',
+      after: 'cidr_blocks = ["0.0.0.0/0"]',
+    });
+  });
+
+  it('pairs each unified-diff hunk independently', () => {
+    const changes = [{
+      file: 'main.tf',
+      diff: [
+        '--- a/main.tf',
+        '+++ b/main.tf',
+        '@@ -1,1 +1,1 @@',
+        '-first = "before"',
+        '+first = "after"',
+        ' context line',
+        '@@ -8,1 +8,1 @@',
+        '-second = "before"',
+        '+second = "after"',
+      ].join('\n'),
+    }];
+    expect(changePairs(changes)).toEqual([
+      { file: 'main.tf', before: 'first = "before"', after: 'first = "after"' },
+      { file: 'main.tf', before: 'second = "before"', after: 'second = "after"' },
+    ]);
+  });
+
+  it('rejects removals and additions from different hunks and falls back to responsible-change text', () => {
+    const changes = [{
+      file: 'main.tf',
+      diff: [
+        '--- a/main.tf',
+        '+++ b/main.tf',
+        '@@ -1,1 +1,0 @@',
+        '-removed = "alone"',
+        '@@ -8,0 +8,1 @@',
+        '+added = "alone"',
+      ].join('\n'),
+    }];
+    expect(changePairs(changes)).toBeNull();
+
+    const report = reportSchema.parse({
+      ...risky,
+      responsible_change: 'Review the responsible change directly.',
+      responsible_changes: changes,
+    });
+    render(<ReportView report={report} />);
+    const change = screen.getByLabelText('Responsible change');
+    expect(within(change).getByText('Review the responsible change directly.')).toBeVisible();
+    expect(change.querySelector('.change-lines')).toBeNull();
+    expect(within(change).queryByText('BEFORE', { exact: true })).not.toBeInTheDocument();
+    expect(within(change).queryByText('AFTER', { exact: true })).not.toBeInTheDocument();
+  });
+
+  it('rejects an edit block with unequal removal and addition counts', () => {
+    expect(changePairs([{
+      file: 'main.tf',
+      diff: ['@@ -1,2 +1,1 @@', '-a', '-b', '+c'].join('\n'),
+    }])).toBeNull();
   });
 
   it('renders the path supplied by the report instead of a fixed node sequence', () => {
@@ -118,6 +182,10 @@ describe('ResultHero', () => {
   });
 
   it('shows the recommended fix and opens the supported patch for inspection', async () => {
+    const recommendation = matchedRecommendation(risky);
+    expect(recommendation?.title).toBe('Restrict port 22 (SSH) on aws_security_group.web');
+    expect(primaryPath(risky)?.nodes).toContain(recommendation?.resource);
+
     const originalScrollIntoView = Element.prototype.scrollIntoView;
     const scrollIntoView = vi.fn();
     Element.prototype.scrollIntoView = scrollIntoView;
@@ -125,6 +193,8 @@ describe('ResultHero', () => {
       const user = userEvent.setup();
       render(<ReportView report={risky} />);
       const change = screen.getByLabelText('Responsible change');
+      expect(within(change).getByText('RECOMMENDED FIX')).toBeVisible();
+      expect(within(change).getByRole('heading', { name: 'Restrict port 22 (SSH) on aws_security_group.web' })).toBeVisible();
       expect(within(change).getByText('Current')).toBeVisible();
       expect(within(change).getByText('Recommended')).toBeVisible();
       expect(within(change).getByText('cidr_blocks = ["0.0.0.0/0"]')).toBeVisible();
@@ -137,5 +207,45 @@ describe('ResultHero', () => {
     } finally {
       Element.prototype.scrollIntoView = originalScrollIntoView;
     }
+  });
+
+  it('shows the next step without a fix pair when no recommendation targets the path', () => {
+    const report = reportSchema.parse({
+      ...risky,
+      remediation: {
+        ...risky.remediation,
+        recommendations: [{
+          ...risky.remediation.recommendations[0]!,
+          resource: 'aws_security_group.legacy',
+        }],
+      },
+    });
+    expect(matchedRecommendation(report)).toBeUndefined();
+    render(<ReportView report={report} />);
+    const change = screen.getByLabelText('Responsible change');
+    expect(within(change).getByText('NEXT STEP')).toBeVisible();
+    expect(within(change).getByText('No recommendation is linked to the resources on this path. Review the candidate recommendations below.')).toBeVisible();
+    expect(within(change).getByRole('link', { name: 'All remediation' })).toBeVisible();
+    expect(within(change).queryByText('Current', { exact: true })).not.toBeInTheDocument();
+    expect(within(change).queryByText('Recommended', { exact: true })).not.toBeInTheDocument();
+    expect(within(change).queryByRole('button', { name: 'Inspect patch' })).not.toBeInTheDocument();
+  });
+
+  it('skips unrelated candidate recommendations when finding a path-matched fix', () => {
+    const matching = risky.remediation.recommendations[0]!;
+    const report = reportSchema.parse({
+      ...risky,
+      remediation: {
+        ...risky.remediation,
+        recommendations: [
+          { ...matching, resource: 'aws_security_group.legacy' },
+          matching,
+        ],
+      },
+    });
+    expect(matchedRecommendation(report)?.title).toBe('Restrict port 22 (SSH) on aws_security_group.web');
+    render(<ReportView report={report} />);
+    const change = screen.getByLabelText('Responsible change');
+    expect(within(change).getByRole('heading', { name: 'Restrict port 22 (SSH) on aws_security_group.web' })).toBeVisible();
   });
 });

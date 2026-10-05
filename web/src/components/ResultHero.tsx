@@ -18,16 +18,27 @@ export function changePairs(changes: Report['responsible_changes'], limit = 4): 
   for (const change of changes) {
     const removed: string[] = [];
     const added: string[] = [];
+    const closeBlock = () => {
+      if (!removed.length && !added.length) return true;
+      if (removed.length !== added.length) return false;
+      removed.forEach((before, index) => {
+        const after = added[index]!;
+        if (before || after) pairs.push({ file: change.file, before, after });
+      });
+      removed.length = 0;
+      added.length = 0;
+      return true;
+    };
     for (const line of change.diff.split('\n')) {
       if (/^(---|\+\+\+) /.test(line)) continue;
+      if (!line || line.startsWith(' ') || line.startsWith('@@') || line.startsWith('\\ No newline')) {
+        if (!closeBlock()) return null;
+        continue;
+      }
       if (line.startsWith('-')) removed.push(line.slice(1).trim());
       else if (line.startsWith('+')) added.push(line.slice(1).trim());
     }
-    if (removed.length !== added.length) return null;
-    removed.forEach((before, index) => {
-      const after = added[index] ?? '';
-      if (before || after) pairs.push({ file: change.file, before, after });
-    });
+    if (!closeBlock()) return null;
   }
   return pairs.length && pairs.length <= limit ? pairs : null;
 }
@@ -50,6 +61,11 @@ export function splitChange(before: string, after: string) {
 
 export function primaryPath(report: Report): Path | undefined {
   return report.new_critical_paths.find(path => path.reaches_sensitive) ?? report.new_critical_paths[0] ?? report.new_attack_paths[0];
+}
+export function matchedRecommendation(report: Report) {
+  const path = primaryPath(report);
+  const targets = new Set([...(path?.nodes ?? []), ...report.newly_exposed, ...report.newly_reachable_sensitive]);
+  return report.remediation.recommendations.find(recommendation => recommendation.resource && targets.has(recommendation.resource));
 }
 function removedPath(report: Report): Path | undefined {
   return report.removed_critical_paths.find(path => path.reaches_sensitive) ?? report.removed_critical_paths[0] ?? report.removed_attack_paths[0];

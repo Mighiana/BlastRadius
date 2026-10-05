@@ -786,7 +786,8 @@ progress::-webkit-progress-bar{background:var(--c57);border-radius:5px}progress:
 .hero-link{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:1px;padding:0 3px;color:var(--c109)}
 .hero-link.new{color:var(--red)}
 .hero-link small{font-size:.5rem;font-weight:700;letter-spacing:.06em}
-.hero-path.removed .hero-node{border-style:dashed;opacity:.72}
+.hero-path.removed .hero-node{border-style:dashed;border-color:var(--muted)}
+.hero-path.removed .hero-node svg{opacity:.6}
 .hero-path.removed .hero-link{color:var(--muted)}
 .removed-note{display:flex;gap:7px;align-items:center;margin-top:10px;font-size:.74rem;color:var(--c143);font-weight:650}
 .clear-step{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:6px;border-color:var(--c86);color:var(--c143)}
