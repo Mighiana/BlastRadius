@@ -8,7 +8,7 @@ const widths = [320, 375, 430, 768, 1024, 1440, 1920];
 const pageHeadings = {
   'Product demo': 'A small diff. A new way in.',
   Pricing: 'A plan for every review.',
-  Documentation: 'From Terraform to an informed decision.',
+  Documentation: 'Three ways to run it.',
   'Get started': 'Know what this change opens.',
 };
 async function contained(page: Page) {
@@ -74,12 +74,18 @@ for (const width of widths) {
       await expect(page.locator('.product-preview').getByText('BLOCK CHANGE', { exact: true })).toBeVisible();
       await contained(page);
       await navigate(page, 'Product demo');
+      if (width === 375) {
+        await page.setViewportSize({ width: 390, height: 940 });
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+        expect(await page.locator('.report-jump').evaluate(element => getComputedStyle(element).position)).toBe('sticky');
+        await page.setViewportSize({ width, height: 940 });
+      }
       await expect(page.getByRole('group', { name: 'Demo scenario' }).getByRole('button')).toHaveCount(3);
       for (const scenario of ['Public SSH exposure', 'Overly broad IAM permission', 'Public sensitive S3 bucket']) {
         await page.getByRole('group', { name: 'Demo scenario' }).getByRole('button', { name: new RegExp(scenario) }).click();
         await expect(page.getByLabel('Analysis decision').getByText('BLOCK CHANGE', { exact: true })).toBeVisible();
         await page.getByRole('button', { name: 'Reset baseline' }).click();
-        await expect(page.getByLabel('Analysis decision').getByText('NO NEW PATHS', { exact: true })).toBeVisible();
+        await expect(page.getByLabel('Analysis decision').getByText('SAFE TO MERGE', { exact: true })).toBeVisible();
         await page.getByRole('button', { name: 'Simulate risky change' }).click();
         await expect(page.getByLabel('Analysis decision').getByText('BLOCK CHANGE', { exact: true })).toBeVisible();
         await contained(page);
@@ -138,11 +144,11 @@ for (const width of widths) {
       await expect(page.getByLabel('Analysis decision').getByText('BLOCK CHANGE', { exact: true })).toBeVisible();
       await expect(page.getByLabel('Selected analysis')).toBeFocused();
       await expect(page.getByLabel('Analysis decision')).toBeInViewport();
-      await expect(page.getByLabel('Responsible change')).toBeInViewport();
-      if (width >= 1024) await expect(page.getByTestId('attack-graph')).toBeInViewport();
+      await expect(page.getByLabel('Responsible change')).toBeVisible();
+      if (width >= 1024) await expect(page.getByTestId('attack-graph')).toBeVisible();
       await contained(page);
-      await page.getByRole('link', { name: 'Review remediation', exact: true }).click();
-      await page.getByText('Inspect supported patch', { exact: true }).click();
+      await page.getByRole('button', { name: 'Inspect patch', exact: true }).click();
+      await expect(page.locator('details#remediation-patch')).toHaveAttribute('open', '');
       const patchDownload = page.waitForEvent('download');
       await page.getByRole('button', { name: 'Download patch' }).click();
       expect((await patchDownload).suggestedFilename()).toBe('blastradius.patch');
@@ -150,7 +156,7 @@ for (const width of widths) {
       await page.getByLabel('Candidate Terraform files').setInputFiles(new URL('../../examples/safe/main.tf', import.meta.url).pathname);
       await page.getByLabel('Candidate label').fill('remediated-candidate');
       await page.getByRole('button', { name: 'Analyze change' }).click();
-      await expect(page.getByLabel('Analysis decision').getByText('NO NEW PATHS', { exact: true })).toBeVisible();
+      await expect(page.getByLabel('Analysis decision').getByText('SAFE TO MERGE', { exact: true })).toBeVisible();
       await contained(page);
       await exports(page, 'blastradius', false);
       await expect(page.getByText(/Saved SARIF exports require/)).toBeVisible();

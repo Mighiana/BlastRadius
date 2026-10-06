@@ -8,7 +8,7 @@ import { useOrganization, useSession } from '../session';
 import { AnalysisForm } from '../components/AnalysisForm';
 import { AnalysisFeedback } from '../components/AnalysisFeedback';
 import { AuthGate } from '../components/AuthGate';
-import { Decision, decisionLabel, Empty, ErrorNotice, Loading, PageHeading } from '../components/UI';
+import { Decision, Empty, ErrorNotice, Loading, PageHeading } from '../components/UI';
 import { ReportView } from '../components/ReportView';
 import { WorkspaceNav } from '../components/WorkspaceNav';
 import { ProjectPagination, useProjectSelection } from '../components/ProjectPicker';
@@ -164,7 +164,7 @@ function WorkspaceContent() {
               setAppliedFilters(query.size ? `&${query}` : ''); setHistoryPage(0);
             }}><div className="form-grid">
               <label>Status<select value={filters.status} onChange={e => setFilters({ ...filters, status: e.target.value })}><option value="">All statuses</option>{['queued', 'running', 'succeeded', 'failed'].map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-              <label>Decision<select value={filters.decision} onChange={e => setFilters({ ...filters, decision: e.target.value })}><option value="">All decisions</option>{['SAFE TO MERGE', 'REVIEW REQUIRED', 'BLOCK CHANGE'].map(value => <option key={value} value={value}>{decisionLabel(value)}</option>)}</select></label>
+              <label>Decision<select value={filters.decision} onChange={e => setFilters({ ...filters, decision: e.target.value })}><option value="">All decisions</option>{['SAFE TO MERGE', 'REVIEW REQUIRED', 'BLOCK CHANGE'].map(value => <option key={value} value={value}>{value}</option>)}</select></label>
               <label>Input type<select value={filters.input_type} onChange={e => setFilters({ ...filters, input_type: e.target.value })}><option value="">All inputs</option><option value="hcl">Uploaded HCL</option><option value="plan">Plan JSON</option><option value="github">GitHub pull request</option></select></label>
               <label>Candidate branch<input maxLength={120} value={filters.branch} onChange={e => setFilters({ ...filters, branch: e.target.value })} /></label>
               <label>Since (local time)<input type="datetime-local" value={filters.since} onChange={e => setFilters({ ...filters, since: e.target.value })} /></label>

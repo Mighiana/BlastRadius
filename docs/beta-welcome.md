@@ -38,7 +38,7 @@ If that is not you, you are still welcome — tell us what you expected instead.
    - **BLOCK CHANGE** — the change creates a new modeled path or violation.
    - **REVIEW REQUIRED** — the analysis could not see everything; a human
      must look. This is *not* a pass.
-   - **NO NEW PATHS** (API/CLI: `SAFE TO MERGE`) — no new modeled path under
+   - **SAFE TO MERGE** — no new modeled path under
      the selected model and policy. It is not a certificate that your
      infrastructure is secure.
 7. **Try your own change.** Paste the baseline (current) and candidate
@@ -82,7 +82,7 @@ Most real repositories return **REVIEW REQUIRED** on the first analysis. That is
 | Resource types outside the model (Lambda, RDS, EKS…) | `UNSUPPORTED_RESOURCE` | Nothing yet — the list of types is the most useful thing you can send us |
 | Managed IAM policy ARNs | `EXTERNAL_POLICY` | Nothing yet |
 
-The report's **Why this needs review** box summarises these for each analysis. The one number we track for every tester is: *did any analysis of your real repository reach NO NEW PATHS or BLOCK CHANGE?*
+The report's **Why this needs review** box summarises these for each analysis. The one number we track for every tester is: *did any analysis of your real repository reach SAFE TO MERGE or BLOCK CHANGE?*
 
 ## Before you upload
 

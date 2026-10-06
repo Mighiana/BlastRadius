@@ -39,7 +39,7 @@ export default function Guide() {
         <p>Or analyze a plan generated in your trusted environment:</p>
         <CodeBlock code={planCommand} label="plan command" />
         <table className="exit-codes" aria-label="CLI exit codes"><thead><tr><th>Exit code</th><th>Meaning</th></tr></thead><tbody>
-          <tr><td><code>0</code></td><td><span className="decision safe">NO NEW PATHS</span> or REVIEW — passes the gate</td></tr>
+          <tr><td><code>0</code></td><td><span className="decision safe">SAFE TO MERGE</span> or REVIEW — passes the gate</td></tr>
           <tr><td><code>1</code></td><td><span className="decision block">BLOCK CHANGE</span> — new sensitive path or policy violation</td></tr>
           <tr><td><code>2</code></td><td>Invalid input or usage</td></tr>
         </tbody></table>
@@ -55,7 +55,7 @@ export default function Guide() {
         <p className="muted">No repository connection required. Uploads are read as data; nothing is executed.</p></section>
       <section className="panel" id="model"><span className="eyebrow">REFERENCE</span><h2>What the model covers</h2>
         <p>A static graph from supported Terraform relationships: public ingress → compute → assumed roles → storage tagged sensitive.</p>
-        <ul className="guide-points"><li>Coverage is bounded: modules, unresolved values and IAM conditions can lower accuracy. Every report lists its coverage gaps.</li><li>The decision judges the <em>change</em>. NO NEW PATHS can coexist with exposure that already existed.</li><li>The 0–100 score is a capped heuristic for comparison, not a probability of compromise.</li></ul>
+        <ul className="guide-points"><li>Coverage is bounded: modules, unresolved values and IAM conditions can lower accuracy. Every report lists its coverage gaps.</li><li>The decision judges the <em>change</em>. SAFE TO MERGE can coexist with exposure that already existed.</li><li>The 0–100 score is a capped heuristic for comparison, not a probability of compromise.</li></ul>
         <Link to="/demo" className="text-link">Inspect a real example<ArrowRight size={16} aria-hidden="true" /></Link></section>
       <section className="panel" id="privacy"><span className="eyebrow">REFERENCE</span><h2>Data handling</h2>
         <ul className="guide-points"><li>Public demos use fixed fixtures.</li><li>Workspace uploads are processed by your configured backend; reports can retain source diffs and patched Terraform. Keep secrets out of uploads.</li><li>Credentials live in backend-managed HttpOnly cookies, never in browser storage.</li><li>Deleting a history entry removes the stored analysis; it does not refund quota or erase backups. Evidence expires per plan: Free 7 days, Pro 90, Team 365, Enterprise configurable.</li></ul>

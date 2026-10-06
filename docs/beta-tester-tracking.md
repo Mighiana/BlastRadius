@@ -2,7 +2,7 @@
 
 One row per tester, filled in by the operator after the first week; the last column decides the engine backlog.
 
-| Tester | Repository structure (single root / multi-root / modules) | Terraform style (plain / count-for_each / dynamic / computed tags) | Connected GitHub? (YES/NO) | Could analyze? (YES/PARTIAL/NO) | Reached NO NEW PATHS or BLOCK? (YES/NO) | Decision understandable? (YES/NO) | Finding correct? (YES/NO/n.a.) | Top REVIEW causes (diagnostic codes) | Would use again? (YES/MAYBE/NO) | Most important missing support |
+| Tester | Repository structure (single root / multi-root / modules) | Terraform style (plain / count-for_each / dynamic / computed tags) | Connected GitHub? (YES/NO) | Could analyze? (YES/PARTIAL/NO) | Reached SAFE TO MERGE or BLOCK? (YES/NO) | Decision understandable? (YES/NO) | Finding correct? (YES/NO/n.a.) | Top REVIEW causes (diagnostic codes) | Would use again? (YES/MAYBE/NO) | Most important missing support |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 |  |  |  |  |  |  |  |  |  |  |  |
 |  |  |  |  |  |  |  |  |  |  |  |

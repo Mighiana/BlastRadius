@@ -1,0 +1,1884 @@
+{
+ "remediated": {
+  "after": {
+   "attack_paths": [],
+   "complete": true,
+   "exposed_resources": [],
+   "graph": {
+    "edges": [
+     {
+      "category": "data_access",
+      "confidence": "conservative",
+      "evidence": "\"Action\": ['s3:GetObject', 's3:ListBucket'], \"Resource\": the bucket ARN",
+      "metadata": {
+       "actions": [
+        "s3:GetObject",
+        "s3:ListBucket"
+       ],
+       "data_read": true,
+       "resources": [
+        "${aws_s3_bucket.customer_data.arn}",
+        "${aws_s3_bucket.customer_data.arn}/*"
+       ]
+      },
+      "reason": "Role allows s3:GetObject, s3:ListBucket on the bucket",
+      "relationship": "CAN_ACCESS",
+      "remediation": "Narrow IAM actions and bucket ARNs; verify effective policies.",
+      "severity": "MEDIUM",
+      "source": "aws_iam_role.app",
+      "source_file": "main.tf",
+      "target": "aws_s3_bucket.customer_data",
+      "terraform_resource": "aws_iam_role_policy.app_s3_read"
+     },
+     {
+      "category": "privilege",
+      "confidence": "conditional",
+      "evidence": "iam_instance_profile = aws_iam_instance_profile.app.name",
+      "metadata": {},
+      "reason": "IAM role attached through instance profile (aws_iam_instance_profile.app.name); compromised compute may obtain metadata credentials",
+      "relationship": "ASSUMES_ROLE",
+      "remediation": "Use least-privilege instance roles and protect metadata credentials.",
+      "severity": "MEDIUM",
+      "source": "aws_instance.web_server",
+      "source_file": "main.tf",
+      "target": "aws_iam_role.app",
+      "terraform_resource": "aws_instance.web_server"
+     },
+     {
+      "category": "impact",
+      "confidence": "modeled",
+      "evidence": "tags = { Sensitive = \"true\" }",
+      "metadata": {},
+      "reason": "Bucket is tagged as holding sensitive data",
+      "relationship": "CONTAINS",
+      "remediation": "Verify sensitivity classification and restrict access to this bucket.",
+      "severity": "HIGH",
+      "source": "aws_s3_bucket.customer_data",
+      "source_file": "main.tf",
+      "target": "sensitive_data.customer_data",
+      "terraform_resource": "aws_s3_bucket.customer_data"
+     },
+     {
+      "category": "reachability",
+      "confidence": "modeled",
+      "evidence": "vpc_security_group_ids = [aws_security_group.web.id]",
+      "metadata": {},
+      "reason": "Security group is attached to Web Server",
+      "relationship": "PROTECTS",
+      "remediation": "Review the instance security-group attachment and network routes.",
+      "severity": "LOW",
+      "source": "aws_security_group.web",
+      "source_file": "main.tf",
+      "target": "aws_instance.web_server",
+      "terraform_resource": "aws_instance.web_server"
+     }
+    ],
+    "nodes": [
+     {
+      "id": "INTERNET",
+      "name": "Internet",
+      "risk": "NONE",
+      "sensitive": false,
+      "type": "INTERNET"
+     },
+     {
+      "id": "aws_iam_role.app",
+      "name": "App Role",
+      "risk": "NONE",
+      "sensitive": false,
+      "type": "IAM_ROLE"
+     },
+     {
+      "id": "aws_instance.web_server",
+      "name": "Web Server",
+      "risk": "NONE",
+      "sensitive": false,
+      "type": "EC2"
+     },
+     {
+      "id": "aws_s3_bucket.customer_data",
+      "name": "Customer Data",
+      "risk": "NONE",
+      "sensitive": true,
+      "type": "S3_BUCKET"
+     },
+     {
+      "id": "aws_security_group.web",
+      "name": "Web SG",
+      "risk": "NONE",
+      "sensitive": false,
+      "type": "SECURITY_GROUP"
+     },
+     {
+      "id": "sensitive_data.customer_data",
+      "name": "Sensitive Data",
+      "risk": "HIGH",
+      "sensitive": true,
+      "type": "SENSITIVE_DATA"
+     }
+    ]
+   },
+   "label": "remediated",
+   "path_work": 0,
+   "paths_truncated": false,
+   "reachable_sensitive": [],
+   "risk_level": "LOW",
+   "score": 100,
+   "score_breakdown": []
+  },
+  "analysis_complete": true,
+  "before": {
+   "attack_paths": [
+    {
+     "edges": [
+      {
+       "category": "exposure",
+       "confidence": "modeled",
+       "evidence": "ingress { protocol = \"tcp\", from_port = 22, to_port = 22, cidr_blocks = [\"0.0.0.0/0\"] }",
+       "metadata": {
+        "admin_port": true,
+        "cidr": "0.0.0.0/0",
+        "from_port": 22,
+        "protocol": "tcp",
+        "to_port": 22
+       },
+       "reason": "Security group allows 0.0.0.0/0 on port 22 (SSH)",
+       "relationship": "INGRESS_ALLOWS",
+       "remediation": "Restrict ingress to intended CIDRs and ports.",
+       "severity": "CRITICAL",
+       "source": "INTERNET",
+       "source_file": "main.tf",
+       "target": "aws_security_group.web",
+       "terraform_resource": "aws_security_group.web"
+      },
+      {
+       "category": "reachability",
+       "confidence": "modeled",
+       "evidence": "vpc_security_group_ids = [aws_security_group.web.id]",
+       "metadata": {},
+       "reason": "Security group is attached to Web Server",
+       "relationship": "PROTECTS",
+       "remediation": "Review the instance security-group attachment and network routes.",
+       "severity": "LOW",
+       "source": "aws_security_group.web",
+       "source_file": "main.tf",
+       "target": "aws_instance.web_server",
+       "terraform_resource": "aws_instance.web_server"
+      },
+      {
+       "category": "privilege",
+       "confidence": "conditional",
+       "evidence": "iam_instance_profile = aws_iam_instance_profile.app.name",
+       "metadata": {},
+       "reason": "IAM role attached through instance profile (aws_iam_instance_profile.app.name); compromised compute may obtain metadata credentials",
+       "relationship": "ASSUMES_ROLE",
+       "remediation": "Use least-privilege instance roles and protect metadata credentials.",
+       "severity": "MEDIUM",
+       "source": "aws_instance.web_server",
+       "source_file": "main.tf",
+       "target": "aws_iam_role.app",
+       "terraform_resource": "aws_instance.web_server"
+      },
+      {
+       "category": "data_access",
+       "confidence": "conservative",
+       "evidence": "\"Action\": ['s3:GetObject', 's3:ListBucket'], \"Resource\": the bucket ARN",
+       "metadata": {
+        "actions": [
+         "s3:GetObject",
+         "s3:ListBucket"
+        ],
+        "data_read": true,
+        "resources": [
+         "${aws_s3_bucket.customer_data.arn}",
+         "${aws_s3_bucket.customer_data.arn}/*"
+        ]
+       },
+       "reason": "Role allows s3:GetObject, s3:ListBucket on the bucket",
+       "relationship": "CAN_ACCESS",
+       "remediation": "Narrow IAM actions and bucket ARNs; verify effective policies.",
+       "severity": "MEDIUM",
+       "source": "aws_iam_role.app",
+       "source_file": "main.tf",
+       "target": "aws_s3_bucket.customer_data",
+       "terraform_resource": "aws_iam_role_policy.app_s3_read"
+      },
+      {
+       "category": "impact",
+       "confidence": "modeled",
+       "evidence": "tags = { Sensitive = \"true\" }",
+       "metadata": {},
+       "reason": "Bucket is tagged as holding sensitive data",
+       "relationship": "CONTAINS",
+       "remediation": "Verify sensitivity classification and restrict access to this bucket.",
+       "severity": "HIGH",
+       "source": "aws_s3_bucket.customer_data",
+       "source_file": "main.tf",
+       "target": "sensitive_data.customer_data",
+       "terraform_resource": "aws_s3_bucket.customer_data"
+      }
+     ],
+     "explanation": "Web Server is reachable from the public internet because its security group permits inbound traffic from the whole internet (0.0.0.0/0 on port 22 (SSH)). An attacker who compromises Web Server may obtain credentials for App Role if instance metadata is accessible. Modeled IAM grants associate those credentials with Customer Data (role allows s3:getobject, s3:listbucket on the bucket); effective authorization and object read access require separate verification. Customer Data is tagged as sensitive, so this is a complete path from the internet to a sensitive resource under this model, not proof of data exfiltration.",
+     "id": "INTERNET -> aws_security_group.web -> aws_instance.web_server -> aws_iam_role.app -> aws_s3_bucket.customer_data -> sensitive_data.customer_data",
+     "labels": [
+      "Internet",
+      "Web SG",
+      "Web Server",
+      "App Role",
+      "Customer Data",
+      "Sensitive Data"
+     ],
+     "nodes": [
+      "INTERNET",
+      "aws_security_group.web",
+      "aws_instance.web_server",
+      "aws_iam_role.app",
+      "aws_s3_bucket.customer_data",
+      "sensitive_data.customer_data"
+     ],
+     "reaches_sensitive": true,
+     "severity": "CRITICAL"
+    }
+   ],
+   "complete": true,
+   "exposed_resources": [
+    "aws_iam_role.app",
+    "aws_instance.web_server",
+    "aws_s3_bucket.customer_data"
+   ],
+   "graph": {
+    "edges": [
+     {
+      "category": "exposure",
+      "confidence": "modeled",
+      "evidence": "ingress { protocol = \"tcp\", from_port = 22, to_port = 22, cidr_blocks = [\"0.0.0.0/0\"] }",
+      "metadata": {
+       "admin_port": true,
+       "cidr": "0.0.0.0/0",
+       "from_port": 22,
+       "protocol": "tcp",
+       "to_port": 22
+      },
+      "reason": "Security group allows 0.0.0.0/0 on port 22 (SSH)",
+      "relationship": "INGRESS_ALLOWS",
+      "remediation": "Restrict ingress to intended CIDRs and ports.",
+      "severity": "CRITICAL",
+      "source": "INTERNET",
+      "source_file": "main.tf",
+      "target": "aws_security_group.web",
+      "terraform_resource": "aws_security_group.web"
+     },
+     {
+      "category": "data_access",
+      "confidence": "conservative",
+      "evidence": "\"Action\": ['s3:GetObject', 's3:ListBucket'], \"Resource\": the bucket ARN",
+      "metadata": {
+       "actions": [
+        "s3:GetObject",
+        "s3:ListBucket"
+       ],
+       "data_read": true,
+       "resources": [
+        "${aws_s3_bucket.customer_data.arn}",
+        "${aws_s3_bucket.customer_data.arn}/*"
+       ]
+      },
+      "reason": "Role allows s3:GetObject, s3:ListBucket on the bucket",
+      "relationship": "CAN_ACCESS",
+      "remediation": "Narrow IAM actions and bucket ARNs; verify effective policies.",
+      "severity": "MEDIUM",
+      "source": "aws_iam_role.app",
+      "source_file": "main.tf",
+      "target": "aws_s3_bucket.customer_data",
+      "terraform_resource": "aws_iam_role_policy.app_s3_read"
+     },
+     {
+      "category": "privilege",
+      "confidence": "conditional",
+      "evidence": "iam_instance_profile = aws_iam_instance_profile.app.name",
+      "metadata": {},
+      "reason": "IAM role attached through instance profile (aws_iam_instance_profile.app.name); compromised compute may obtain metadata credentials",
+      "relationship": "ASSUMES_ROLE",
+      "remediation": "Use least-privilege instance roles and protect metadata credentials.",
+      "severity": "MEDIUM",
+      "source": "aws_instance.web_server",
+      "source_file": "main.tf",
+      "target": "aws_iam_role.app",
+      "terraform_resource": "aws_instance.web_server"
+     },
+     {
+      "category": "impact",
+      "confidence": "modeled",
+      "evidence": "tags = { Sensitive = \"true\" }",
+      "metadata": {},
+      "reason": "Bucket is tagged as holding sensitive data",
+      "relationship": "CONTAINS",
+      "remediation": "Verify sensitivity classification and restrict access to this bucket.",
+      "severity": "HIGH",
+      "source": "aws_s3_bucket.customer_data",
+      "source_file": "main.tf",
+      "target": "sensitive_data.customer_data",
+      "terraform_resource": "aws_s3_bucket.customer_data"
+     },
+     {
+      "category": "reachability",
+      "confidence": "modeled",
+      "evidence": "vpc_security_group_ids = [aws_security_group.web.id]",
+      "metadata": {},
+      "reason": "Security group is attached to Web Server",
+      "relationship": "PROTECTS",
+      "remediation": "Review the instance security-group attachment and network routes.",
+      "severity": "LOW",
+      "source": "aws_security_group.web",
+      "source_file": "main.tf",
+      "target": "aws_instance.web_server",
+      "terraform_resource": "aws_instance.web_server"
+     }
+    ],
+    "nodes": [
+     {
+      "id": "INTERNET",
+      "name": "Internet",
+      "risk": "NONE",
+      "sensitive": false,
+      "type": "INTERNET"
+     },
+     {
+      "id": "aws_iam_role.app",
+      "name": "App Role",
+      "risk": "NONE",
+      "sensitive": false,
+      "type": "IAM_ROLE"
+     },
+     {
+      "id": "aws_instance.web_server",
+      "name": "Web Server",
+      "risk": "NONE",
+      "sensitive": false,
+      "type": "EC2"
+     },
+     {
+      "id": "aws_s3_bucket.customer_data",
+      "name": "Customer Data",
+      "risk": "NONE",
+      "sensitive": true,
+      "type": "S3_BUCKET"
+     },
+     {
+      "id": "aws_security_group.web",
+      "name": "Web SG",
+      "risk": "NONE",
+      "sensitive": false,
+      "type": "SECURITY_GROUP"
+     },
+     {
+      "id": "sensitive_data.customer_data",
+      "name": "Sensitive Data",
+      "risk": "HIGH",
+      "sensitive": true,
+      "type": "SENSITIVE_DATA"
+     }
+    ]
+   },
+   "label": "risky",
+   "path_work": 10,
+   "paths_truncated": false,
+   "reachable_sensitive": [
+    "aws_s3_bucket.customer_data"
+   ],
+   "risk_level": "CRITICAL",
+   "score": 20,
+   "score_breakdown": [
+    {
+     "count": 1,
+     "finding": "Administrative port open to 0.0.0.0/0",
+     "points": -20
+    },
+    {
+     "count": 1,
+     "finding": "Compute instance reachable from the internet",
+     "points": -15
+    },
+    {
+     "count": 1,
+     "finding": "Sensitive resource reachable from the internet",
+     "points": -25
+    },
+    {
+     "count": 1,
+     "finding": "Complete internet -> sensitive-data attack path",
+     "points": -20
+    }
+   ]
+  },
+  "decision": "SAFE TO MERGE",
+  "demo": {
+   "note": "The IAM fix restores the reviewed least-privilege fixture; it is not an automatic IAM patch.",
+   "remediation_kind": "supported_patch",
+   "scenario_id": "public_ssh",
+   "stage": "remediated"
+  },
+  "diagnostics": [
+   {
+    "code": "model_limitations",
+    "message": "Simplified static AWS model; a path is not proof of exploitability and no path is not proof of safety.",
+    "severity": "info"
+   }
+  ],
+  "findings": [
+   {
+    "delta": 0,
+    "detail": "No new internet-to-sensitive-data path",
+    "label": "New critical attack paths",
+    "severity": "NONE"
+   },
+   {
+    "delta": 0,
+    "detail": "No sensitive resource became reachable",
+    "label": "Newly reachable sensitive resources",
+    "severity": "NONE"
+   },
+   {
+    "delta": 0,
+    "detail": "No resource became internet-reachable",
+    "label": "Newly internet-reachable resources",
+    "severity": "NONE"
+   },
+   {
+    "delta": 0,
+    "detail": "Score improved by 80 points",
+    "label": "Security score delta",
+    "severity": "NONE"
+   }
+  ],
+  "headline": "1 critical attack path removed and no new exposure introduced.",
+  "limitations": [
+   "Simplified static AWS model; a path is not proof of exploitability and no path is not proof of safety."
+  ],
+  "new_attack_paths": [],
+  "new_critical_paths": [],
+  "new_edges": [],
+  "new_nodes": [],
+  "newly_exposed": [],
+  "newly_reachable_sensitive": [],
+  "passed": true,
+  "remediation": {
+   "can_autofix": false,
+   "diff": "",
+   "patched_files": {},
+   "recommendations": []
+  },
+  "removed_attack_paths": [
+   {
+    "edges": [
+     {
+      "category": "exposure",
+      "confidence": "modeled",
+      "evidence": "ingress { protocol = \"tcp\", from_port = 22, to_port = 22, cidr_blocks = [\"0.0.0.0/0\"] }",
+      "metadata": {
+       "admin_port": true,
+       "cidr": "0.0.0.0/0",
+       "from_port": 22,
+       "protocol": "tcp",
+       "to_port": 22
+      },
+      "reason": "Security group allows 0.0.0.0/0 on port 22 (SSH)",
+      "relationship": "INGRESS_ALLOWS",
+      "remediation": "Restrict ingress to intended CIDRs and ports.",
+      "severity": "CRITICAL",
+      "source": "INTERNET",
+      "source_file": "main.tf",
+      "target": "aws_security_group.web",
+      "terraform_resource": "aws_security_group.web"
+     },
+     {
+      "category": "reachability",
+      "confidence": "modeled",
+      "evidence": "vpc_security_group_ids = [aws_security_group.web.id]",
+      "metadata": {},
+      "reason": "Security group is attached to Web Server",
+      "relationship": "PROTECTS",
+      "remediation": "Review the instance security-group attachment and network routes.",
+      "severity": "LOW",
+      "source": "aws_security_group.web",
+      "source_file": "main.tf",
+      "target": "aws_instance.web_server",
+      "terraform_resource": "aws_instance.web_server"
+     },
+     {
+      "category": "privilege",
+      "confidence": "conditional",
+      "evidence": "iam_instance_profile = aws_iam_instance_profile.app.name",
+      "metadata": {},
+      "reason": "IAM role attached through instance profile (aws_iam_instance_profile.app.name); compromised compute may obtain metadata credentials",
+      "relationship": "ASSUMES_ROLE",
+      "remediation": "Use least-privilege instance roles and protect metadata credentials.",
+      "severity": "MEDIUM",
+      "source": "aws_instance.web_server",
+      "source_file": "main.tf",
+      "target": "aws_iam_role.app",
+      "terraform_resource": "aws_instance.web_server"
+     },
+     {
+      "category": "data_access",
+      "confidence": "conservative",
+      "evidence": "\"Action\": ['s3:GetObject', 's3:ListBucket'], \"Resource\": the bucket ARN",
+      "metadata": {
+       "actions": [
+        "s3:GetObject",
+        "s3:ListBucket"
+       ],
+       "data_read": true,
+       "resources": [
+        "${aws_s3_bucket.customer_data.arn}",
+        "${aws_s3_bucket.customer_data.arn}/*"
+       ]
+      },
+      "reason": "Role allows s3:GetObject, s3:ListBucket on the bucket",
+      "relationship": "CAN_ACCESS",
+      "remediation": "Narrow IAM actions and bucket ARNs; verify effective policies.",
+      "severity": "MEDIUM",
+      "source": "aws_iam_role.app",
+      "source_file": "main.tf",
+      "target": "aws_s3_bucket.customer_data",
+      "terraform_resource": "aws_iam_role_policy.app_s3_read"
+     },
+     {
+      "category": "impact",
+      "confidence": "modeled",
+      "evidence": "tags = { Sensitive = \"true\" }",
+      "metadata": {},
+      "reason": "Bucket is tagged as holding sensitive data",
+      "relationship": "CONTAINS",
+      "remediation": "Verify sensitivity classification and restrict access to this bucket.",
+      "severity": "HIGH",
+      "source": "aws_s3_bucket.customer_data",
+      "source_file": "main.tf",
+      "target": "sensitive_data.customer_data",
+      "terraform_resource": "aws_s3_bucket.customer_data"
+     }
+    ],
+    "explanation": "Web Server is reachable from the public internet because its security group permits inbound traffic from the whole internet (0.0.0.0/0 on port 22 (SSH)). An attacker who compromises Web Server may obtain credentials for App Role if instance metadata is accessible. Modeled IAM grants associate those credentials with Customer Data (role allows s3:getobject, s3:listbucket on the bucket); effective authorization and object read access require separate verification. Customer Data is tagged as sensitive, so this is a complete path from the internet to a sensitive resource under this model, not proof of data exfiltration.",
+    "id": "INTERNET -> aws_security_group.web -> aws_instance.web_server -> aws_iam_role.app -> aws_s3_bucket.customer_data -> sensitive_data.customer_data",
+    "labels": [
+     "Internet",
+     "Web SG",
+     "Web Server",
+     "App Role",
+     "Customer Data",
+     "Sensitive Data"
+    ],
+    "nodes": [
+     "INTERNET",
+     "aws_security_group.web",
+     "aws_instance.web_server",
+     "aws_iam_role.app",
+     "aws_s3_bucket.customer_data",
+     "sensitive_data.customer_data"
+    ],
+    "reaches_sensitive": true,
+    "severity": "CRITICAL"
+   }
+  ],
+  "removed_critical_paths": [
+   {
+    "edges": [
+     {
+      "category": "exposure",
+      "confidence": "modeled",
+      "evidence": "ingress { protocol = \"tcp\", from_port = 22, to_port = 22, cidr_blocks = [\"0.0.0.0/0\"] }",
+      "metadata": {
+       "admin_port": true,
+       "cidr": "0.0.0.0/0",
+       "from_port": 22,
+       "protocol": "tcp",
+       "to_port": 22
+      },
+      "reason": "Security group allows 0.0.0.0/0 on port 22 (SSH)",
+      "relationship": "INGRESS_ALLOWS",
+      "remediation": "Restrict ingress to intended CIDRs and ports.",
+      "severity": "CRITICAL",
+      "source": "INTERNET",
+      "source_file": "main.tf",
+      "target": "aws_security_group.web",
+      "terraform_resource": "aws_security_group.web"
+     },
+     {
+      "category": "reachability",
+      "confidence": "modeled",
+      "evidence": "vpc_security_group_ids = [aws_security_group.web.id]",
+      "metadata": {},
+      "reason": "Security group is attached to Web Server",
+      "relationship": "PROTECTS",
+      "remediation": "Review the instance security-group attachment and network routes.",
+      "severity": "LOW",
+      "source": "aws_security_group.web",
+      "source_file": "main.tf",
+      "target": "aws_instance.web_server",
+      "terraform_resource": "aws_instance.web_server"
+     },
+     {
+      "category": "privilege",
+      "confidence": "conditional",
+      "evidence": "iam_instance_profile = aws_iam_instance_profile.app.name",
+      "metadata": {},
+      "reason": "IAM role attached through instance profile (aws_iam_instance_profile.app.name); compromised compute may obtain metadata credentials",
+      "relationship": "ASSUMES_ROLE",
+      "remediation": "Use least-privilege instance roles and protect metadata credentials.",
+      "severity": "MEDIUM",
+      "source": "aws_instance.web_server",
+      "source_file": "main.tf",
+      "target": "aws_iam_role.app",
+      "terraform_resource": "aws_instance.web_server"
+     },
+     {
+      "category": "data_access",
+      "confidence": "conservative",
+      "evidence": "\"Action\": ['s3:GetObject', 's3:ListBucket'], \"Resource\": the bucket ARN",
+      "metadata": {
+       "actions": [
+        "s3:GetObject",
+        "s3:ListBucket"
+       ],
+       "data_read": true,
+       "resources": [
+        "${aws_s3_bucket.customer_data.arn}",
+        "${aws_s3_bucket.customer_data.arn}/*"
+       ]
+      },
+      "reason": "Role allows s3:GetObject, s3:ListBucket on the bucket",
+      "relationship": "CAN_ACCESS",
+      "remediation": "Narrow IAM actions and bucket ARNs; verify effective policies.",
+      "severity": "MEDIUM",
+      "source": "aws_iam_role.app",
+      "source_file": "main.tf",
+      "target": "aws_s3_bucket.customer_data",
+      "terraform_resource": "aws_iam_role_policy.app_s3_read"
+     },
+     {
+      "category": "impact",
+      "confidence": "modeled",
+      "evidence": "tags = { Sensitive = \"true\" }",
+      "metadata": {},
+      "reason": "Bucket is tagged as holding sensitive data",
+      "relationship": "CONTAINS",
+      "remediation": "Verify sensitivity classification and restrict access to this bucket.",
+      "severity": "HIGH",
+      "source": "aws_s3_bucket.customer_data",
+      "source_file": "main.tf",
+      "target": "sensitive_data.customer_data",
+      "terraform_resource": "aws_s3_bucket.customer_data"
+     }
+    ],
+    "explanation": "Web Server is reachable from the public internet because its security group permits inbound traffic from the whole internet (0.0.0.0/0 on port 22 (SSH)). An attacker who compromises Web Server may obtain credentials for App Role if instance metadata is accessible. Modeled IAM grants associate those credentials with Customer Data (role allows s3:getobject, s3:listbucket on the bucket); effective authorization and object read access require separate verification. Customer Data is tagged as sensitive, so this is a complete path from the internet to a sensitive resource under this model, not proof of data exfiltration.",
+    "id": "INTERNET -> aws_security_group.web -> aws_instance.web_server -> aws_iam_role.app -> aws_s3_bucket.customer_data -> sensitive_data.customer_data",
+    "labels": [
+     "Internet",
+     "Web SG",
+     "Web Server",
+     "App Role",
+     "Customer Data",
+     "Sensitive Data"
+    ],
+    "nodes": [
+     "INTERNET",
+     "aws_security_group.web",
+     "aws_instance.web_server",
+     "aws_iam_role.app",
+     "aws_s3_bucket.customer_data",
+     "sensitive_data.customer_data"
+    ],
+    "reaches_sensitive": true,
+    "severity": "CRITICAL"
+   }
+  ],
+  "removed_edges": [
+   {
+    "category": "exposure",
+    "confidence": "modeled",
+    "evidence": "ingress { protocol = \"tcp\", from_port = 22, to_port = 22, cidr_blocks = [\"0.0.0.0/0\"] }",
+    "metadata": {
+     "admin_port": true,
+     "cidr": "0.0.0.0/0",
+     "from_port": 22,
+     "protocol": "tcp",
+     "to_port": 22
+    },
+    "reason": "Security group allows 0.0.0.0/0 on port 22 (SSH)",
+    "relationship": "INGRESS_ALLOWS",
+    "remediation": "Restrict ingress to intended CIDRs and ports.",
+    "severity": "CRITICAL",
+    "source": "INTERNET",
+    "source_file": "main.tf",
+    "target": "aws_security_group.web",
+    "terraform_resource": "aws_security_group.web"
+   }
+  ],
+  "removed_nodes": [],
+  "reports": {
+   "markdown": "BlastRadius Security Check\n\n\u2705 PASSED\n\nThis infrastructure change removes an existing attack path.\n\nDecision: SAFE TO MERGE\nSecurity score: 20 -> 100 (+80)\n\n-1 critical attack path\n\nEliminated attack path:\n  Internet -> Web SG -> Web Server -> App Role -> Customer Data -> Sensitive Data\n\nResponsible Terraform change:\n  cidr_blocks = [\"0.0.0.0/0\"] -> cidr_blocks = [\"10.0.0.0/24\"]\n\nRecommendation:\n  No action required.\n\nAnalysis coverage: complete within documented model\n\n-- BlastRadius static attack-path analysis. Simplified AWS model; no infrastructure was deployed or accessed.",
+   "sarif": {
+    "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+    "runs": [
+     {
+      "invocations": [
+       {
+        "executionSuccessful": true
+       }
+      ],
+      "properties": {
+       "analysisComplete": true,
+       "decision": "SAFE TO MERGE",
+       "pathsTruncated": false,
+       "unsupportedResourceTypes": []
+      },
+      "results": [],
+      "tool": {
+       "driver": {
+        "name": "BlastRadius",
+        "rules": [
+         {
+          "defaultConfiguration": {
+           "level": "error"
+          },
+          "id": "BR001",
+          "name": "NewCriticalAttackPath",
+          "properties": {
+           "security-severity": "9.0"
+          },
+          "shortDescription": {
+           "text": "New internet-to-sensitive-data attack path"
+          }
+         },
+         {
+          "defaultConfiguration": {
+           "level": "warning"
+          },
+          "id": "BR002",
+          "name": "NewInternetExposure",
+          "properties": {
+           "security-severity": "6.0"
+          },
+          "shortDescription": {
+           "text": "New internet-facing attack path"
+          }
+         },
+         {
+          "defaultConfiguration": {
+           "level": "error"
+          },
+          "id": "BR003",
+          "name": "PolicyGateViolation",
+          "shortDescription": {
+           "text": "Repository security policy blocks this change"
+          }
+         },
+         {
+          "defaultConfiguration": {
+           "level": "warning"
+          },
+          "id": "BR004",
+          "name": "IncompleteAnalysis",
+          "shortDescription": {
+           "text": "Static analysis coverage diagnostic"
+          }
+         }
+        ],
+        "version": "0.1.0"
+       }
+      }
+     }
+    ],
+    "version": "2.1.0"
+   }
+  },
+  "responsible_change": "cidr_blocks = [\"0.0.0.0/0\"] -> cidr_blocks = [\"10.0.0.0/24\"]",
+  "responsible_changes": [
+   {
+    "diff": "--- a/main.tf\n+++ b/main.tf\n@@ -25,7 +25,7 @@\n     from_port   = 22\n     to_port     = 22\n     protocol    = \"tcp\"\n-    cidr_blocks = [\"0.0.0.0/0\"]\n+    cidr_blocks = [\"10.0.0.0/24\"]\n   }\n \n   ingress {\n",
+    "file": "main.tf"
+   }
+  ],
+  "schema_version": 1,
+  "score": {
+   "after": 100,
+   "before": 20,
+   "delta": 80
+  },
+  "verdict": "SECURITY IMPROVED"
+ },
+ "risky": {
+  "after": {
+   "attack_paths": [
+    {
+     "edges": [
+      {
+       "category": "exposure",
+       "confidence": "modeled",
+       "evidence": "ingress { protocol = \"tcp\", from_port = 22, to_port = 22, cidr_blocks = [\"0.0.0.0/0\"] }",
+       "metadata": {
+        "admin_port": true,
+        "cidr": "0.0.0.0/0",
+        "from_port": 22,
+        "protocol": "tcp",
+        "to_port": 22
+       },
+       "reason": "Security group allows 0.0.0.0/0 on port 22 (SSH)",
+       "relationship": "INGRESS_ALLOWS",
+       "remediation": "Restrict ingress to intended CIDRs and ports.",
+       "severity": "CRITICAL",
+       "source": "INTERNET",
+       "source_file": "main.tf",
+       "target": "aws_security_group.web",
+       "terraform_resource": "aws_security_group.web"
+      },
+      {
+       "category": "reachability",
+       "confidence": "modeled",
+       "evidence": "vpc_security_group_ids = [aws_security_group.web.id]",
+       "metadata": {},
+       "reason": "Security group is attached to Web Server",
+       "relationship": "PROTECTS",
+       "remediation": "Review the instance security-group attachment and network routes.",
+       "severity": "LOW",
+       "source": "aws_security_group.web",
+       "source_file": "main.tf",
+       "target": "aws_instance.web_server",
+       "terraform_resource": "aws_instance.web_server"
+      },
+      {
+       "category": "privilege",
+       "confidence": "conditional",
+       "evidence": "iam_instance_profile = aws_iam_instance_profile.app.name",
+       "metadata": {},
+       "reason": "IAM role attached through instance profile (aws_iam_instance_profile.app.name); compromised compute may obtain metadata credentials",
+       "relationship": "ASSUMES_ROLE",
+       "remediation": "Use least-privilege instance roles and protect metadata credentials.",
+       "severity": "MEDIUM",
+       "source": "aws_instance.web_server",
+       "source_file": "main.tf",
+       "target": "aws_iam_role.app",
+       "terraform_resource": "aws_instance.web_server"
+      },
+      {
+       "category": "data_access",
+       "confidence": "conservative",
+       "evidence": "\"Action\": ['s3:GetObject', 's3:ListBucket'], \"Resource\": the bucket ARN",
+       "metadata": {
+        "actions": [
+         "s3:GetObject",
+         "s3:ListBucket"
+        ],
+        "data_read": true,
+        "resources": [
+         "${aws_s3_bucket.customer_data.arn}",
+         "${aws_s3_bucket.customer_data.arn}/*"
+        ]
+       },
+       "reason": "Role allows s3:GetObject, s3:ListBucket on the bucket",
+       "relationship": "CAN_ACCESS",
+       "remediation": "Narrow IAM actions and bucket ARNs; verify effective policies.",
+       "severity": "MEDIUM",
+       "source": "aws_iam_role.app",
+       "source_file": "main.tf",
+       "target": "aws_s3_bucket.customer_data",
+       "terraform_resource": "aws_iam_role_policy.app_s3_read"
+      },
+      {
+       "category": "impact",
+       "confidence": "modeled",
+       "evidence": "tags = { Sensitive = \"true\" }",
+       "metadata": {},
+       "reason": "Bucket is tagged as holding sensitive data",
+       "relationship": "CONTAINS",
+       "remediation": "Verify sensitivity classification and restrict access to this bucket.",
+       "severity": "HIGH",
+       "source": "aws_s3_bucket.customer_data",
+       "source_file": "main.tf",
+       "target": "sensitive_data.customer_data",
+       "terraform_resource": "aws_s3_bucket.customer_data"
+      }
+     ],
+     "explanation": "Web Server is reachable from the public internet because its security group permits inbound traffic from the whole internet (0.0.0.0/0 on port 22 (SSH)). An attacker who compromises Web Server may obtain credentials for App Role if instance metadata is accessible. Modeled IAM grants associate those credentials with Customer Data (role allows s3:getobject, s3:listbucket on the bucket); effective authorization and object read access require separate verification. Customer Data is tagged as sensitive, so this is a complete path from the internet to a sensitive resource under this model, not proof of data exfiltration.",
+     "id": "INTERNET -> aws_security_group.web -> aws_instance.web_server -> aws_iam_role.app -> aws_s3_bucket.customer_data -> sensitive_data.customer_data",
+     "labels": [
+      "Internet",
+      "Web SG",
+      "Web Server",
+      "App Role",
+      "Customer Data",
+      "Sensitive Data"
+     ],
+     "nodes": [
+      "INTERNET",
+      "aws_security_group.web",
+      "aws_instance.web_server",
+      "aws_iam_role.app",
+      "aws_s3_bucket.customer_data",
+      "sensitive_data.customer_data"
+     ],
+     "reaches_sensitive": true,
+     "severity": "CRITICAL"
+    }
+   ],
+   "complete": true,
+   "exposed_resources": [
+    "aws_iam_role.app",
+    "aws_instance.web_server",
+    "aws_s3_bucket.customer_data"
+   ],
+   "graph": {
+    "edges": [
+     {
+      "category": "exposure",
+      "confidence": "modeled",
+      "evidence": "ingress { protocol = \"tcp\", from_port = 22, to_port = 22, cidr_blocks = [\"0.0.0.0/0\"] }",
+      "metadata": {
+       "admin_port": true,
+       "cidr": "0.0.0.0/0",
+       "from_port": 22,
+       "protocol": "tcp",
+       "to_port": 22
+      },
+      "reason": "Security group allows 0.0.0.0/0 on port 22 (SSH)",
+      "relationship": "INGRESS_ALLOWS",
+      "remediation": "Restrict ingress to intended CIDRs and ports.",
+      "severity": "CRITICAL",
+      "source": "INTERNET",
+      "source_file": "main.tf",
+      "target": "aws_security_group.web",
+      "terraform_resource": "aws_security_group.web"
+     },
+     {
+      "category": "data_access",
+      "confidence": "conservative",
+      "evidence": "\"Action\": ['s3:GetObject', 's3:ListBucket'], \"Resource\": the bucket ARN",
+      "metadata": {
+       "actions": [
+        "s3:GetObject",
+        "s3:ListBucket"
+       ],
+       "data_read": true,
+       "resources": [
+        "${aws_s3_bucket.customer_data.arn}",
+        "${aws_s3_bucket.customer_data.arn}/*"
+       ]
+      },
+      "reason": "Role allows s3:GetObject, s3:ListBucket on the bucket",
+      "relationship": "CAN_ACCESS",
+      "remediation": "Narrow IAM actions and bucket ARNs; verify effective policies.",
+      "severity": "MEDIUM",
+      "source": "aws_iam_role.app",
+      "source_file": "main.tf",
+      "target": "aws_s3_bucket.customer_data",
+      "terraform_resource": "aws_iam_role_policy.app_s3_read"
+     },
+     {
+      "category": "privilege",
+      "confidence": "conditional",
+      "evidence": "iam_instance_profile = aws_iam_instance_profile.app.name",
+      "metadata": {},
+      "reason": "IAM role attached through instance profile (aws_iam_instance_profile.app.name); compromised compute may obtain metadata credentials",
+      "relationship": "ASSUMES_ROLE",
+      "remediation": "Use least-privilege instance roles and protect metadata credentials.",
+      "severity": "MEDIUM",
+      "source": "aws_instance.web_server",
+      "source_file": "main.tf",
+      "target": "aws_iam_role.app",
+      "terraform_resource": "aws_instance.web_server"
+     },
+     {
+      "category": "impact",
+      "confidence": "modeled",
+      "evidence": "tags = { Sensitive = \"true\" }",
+      "metadata": {},
+      "reason": "Bucket is tagged as holding sensitive data",
+      "relationship": "CONTAINS",
+      "remediation": "Verify sensitivity classification and restrict access to this bucket.",
+      "severity": "HIGH",
+      "source": "aws_s3_bucket.customer_data",
+      "source_file": "main.tf",
+      "target": "sensitive_data.customer_data",
+      "terraform_resource": "aws_s3_bucket.customer_data"
+     },
+     {
+      "category": "reachability",
+      "confidence": "modeled",
+      "evidence": "vpc_security_group_ids = [aws_security_group.web.id]",
+      "metadata": {},
+      "reason": "Security group is attached to Web Server",
+      "relationship": "PROTECTS",
+      "remediation": "Review the instance security-group attachment and network routes.",
+      "severity": "LOW",
+      "source": "aws_security_group.web",
+      "source_file": "main.tf",
+      "target": "aws_instance.web_server",
+      "terraform_resource": "aws_instance.web_server"
+     }
+    ],
+    "nodes": [
+     {
+      "id": "INTERNET",
+      "name": "Internet",
+      "risk": "NONE",
+      "sensitive": false,
+      "type": "INTERNET"
+     },
+     {
+      "id": "aws_iam_role.app",
+      "name": "App Role",
+      "risk": "NONE",
+      "sensitive": false,
+      "type": "IAM_ROLE"
+     },
+     {
+      "id": "aws_instance.web_server",
+      "name": "Web Server",
+      "risk": "NONE",
+      "sensitive": false,
+      "type": "EC2"
+     },
+     {
+      "id": "aws_s3_bucket.customer_data",
+      "name": "Customer Data",
+      "risk": "NONE",
+      "sensitive": true,
+      "type": "S3_BUCKET"
+     },
+     {
+      "id": "aws_security_group.web",
+      "name": "Web SG",
+      "risk": "NONE",
+      "sensitive": false,
+      "type": "SECURITY_GROUP"
+     },
+     {
+      "id": "sensitive_data.customer_data",
+      "name": "Sensitive Data",
+      "risk": "HIGH",
+      "sensitive": true,
+      "type": "SENSITIVE_DATA"
+     }
+    ]
+   },
+   "label": "risky",
+   "path_work": 10,
+   "paths_truncated": false,
+   "reachable_sensitive": [
+    "aws_s3_bucket.customer_data"
+   ],
+   "risk_level": "CRITICAL",
+   "score": 20,
+   "score_breakdown": [
+    {
+     "count": 1,
+     "finding": "Administrative port open to 0.0.0.0/0",
+     "points": -20
+    },
+    {
+     "count": 1,
+     "finding": "Compute instance reachable from the internet",
+     "points": -15
+    },
+    {
+     "count": 1,
+     "finding": "Sensitive resource reachable from the internet",
+     "points": -25
+    },
+    {
+     "count": 1,
+     "finding": "Complete internet -> sensitive-data attack path",
+     "points": -20
+    }
+   ]
+  },
+  "analysis_complete": true,
+  "before": {
+   "attack_paths": [],
+   "complete": true,
+   "exposed_resources": [],
+   "graph": {
+    "edges": [
+     {
+      "category": "data_access",
+      "confidence": "conservative",
+      "evidence": "\"Action\": ['s3:GetObject', 's3:ListBucket'], \"Resource\": the bucket ARN",
+      "metadata": {
+       "actions": [
+        "s3:GetObject",
+        "s3:ListBucket"
+       ],
+       "data_read": true,
+       "resources": [
+        "${aws_s3_bucket.customer_data.arn}",
+        "${aws_s3_bucket.customer_data.arn}/*"
+       ]
+      },
+      "reason": "Role allows s3:GetObject, s3:ListBucket on the bucket",
+      "relationship": "CAN_ACCESS",
+      "remediation": "Narrow IAM actions and bucket ARNs; verify effective policies.",
+      "severity": "MEDIUM",
+      "source": "aws_iam_role.app",
+      "source_file": "main.tf",
+      "target": "aws_s3_bucket.customer_data",
+      "terraform_resource": "aws_iam_role_policy.app_s3_read"
+     },
+     {
+      "category": "privilege",
+      "confidence": "conditional",
+      "evidence": "iam_instance_profile = aws_iam_instance_profile.app.name",
+      "metadata": {},
+      "reason": "IAM role attached through instance profile (aws_iam_instance_profile.app.name); compromised compute may obtain metadata credentials",
+      "relationship": "ASSUMES_ROLE",
+      "remediation": "Use least-privilege instance roles and protect metadata credentials.",
+      "severity": "MEDIUM",
+      "source": "aws_instance.web_server",
+      "source_file": "main.tf",
+      "target": "aws_iam_role.app",
+      "terraform_resource": "aws_instance.web_server"
+     },
+     {
+      "category": "impact",
+      "confidence": "modeled",
+      "evidence": "tags = { Sensitive = \"true\" }",
+      "metadata": {},
+      "reason": "Bucket is tagged as holding sensitive data",
+      "relationship": "CONTAINS",
+      "remediation": "Verify sensitivity classification and restrict access to this bucket.",
+      "severity": "HIGH",
+      "source": "aws_s3_bucket.customer_data",
+      "source_file": "main.tf",
+      "target": "sensitive_data.customer_data",
+      "terraform_resource": "aws_s3_bucket.customer_data"
+     },
+     {
+      "category": "reachability",
+      "confidence": "modeled",
+      "evidence": "vpc_security_group_ids = [aws_security_group.web.id]",
+      "metadata": {},
+      "reason": "Security group is attached to Web Server",
+      "relationship": "PROTECTS",
+      "remediation": "Review the instance security-group attachment and network routes.",
+      "severity": "LOW",
+      "source": "aws_security_group.web",
+      "source_file": "main.tf",
+      "target": "aws_instance.web_server",
+      "terraform_resource": "aws_instance.web_server"
+     }
+    ],
+    "nodes": [
+     {
+      "id": "INTERNET",
+      "name": "Internet",
+      "risk": "NONE",
+      "sensitive": false,
+      "type": "INTERNET"
+     },
+     {
+      "id": "aws_iam_role.app",
+      "name": "App Role",
+      "risk": "NONE",
+      "sensitive": false,
+      "type": "IAM_ROLE"
+     },
+     {
+      "id": "aws_instance.web_server",
+      "name": "Web Server",
+      "risk": "NONE",
+      "sensitive": false,
+      "type": "EC2"
+     },
+     {
+      "id": "aws_s3_bucket.customer_data",
+      "name": "Customer Data",
+      "risk": "NONE",
+      "sensitive": true,
+      "type": "S3_BUCKET"
+     },
+     {
+      "id": "aws_security_group.web",
+      "name": "Web SG",
+      "risk": "NONE",
+      "sensitive": false,
+      "type": "SECURITY_GROUP"
+     },
+     {
+      "id": "sensitive_data.customer_data",
+      "name": "Sensitive Data",
+      "risk": "HIGH",
+      "sensitive": true,
+      "type": "SENSITIVE_DATA"
+     }
+    ]
+   },
+   "label": "baseline",
+   "path_work": 0,
+   "paths_truncated": false,
+   "reachable_sensitive": [],
+   "risk_level": "LOW",
+   "score": 100,
+   "score_breakdown": []
+  },
+  "decision": "BLOCK CHANGE",
+  "demo": {
+   "note": "The IAM fix restores the reviewed least-privilege fixture; it is not an automatic IAM patch.",
+   "remediation_kind": "supported_patch",
+   "scenario_id": "public_ssh",
+   "stage": "risky"
+  },
+  "diagnostics": [
+   {
+    "code": "model_limitations",
+    "message": "Simplified static AWS model; a path is not proof of exploitability and no path is not proof of safety.",
+    "severity": "info"
+   }
+  ],
+  "findings": [
+   {
+    "delta": 1,
+    "detail": "1 new path from the internet to data marked sensitive",
+    "label": "New critical attack paths",
+    "severity": "CRITICAL"
+   },
+   {
+    "delta": 1,
+    "detail": "aws_s3_bucket.customer_data",
+    "label": "Newly reachable sensitive resources",
+    "severity": "CRITICAL"
+   },
+   {
+    "delta": 3,
+    "detail": "aws_iam_role.app, aws_instance.web_server, aws_s3_bucket.customer_data",
+    "label": "Newly internet-reachable resources",
+    "severity": "HIGH"
+   },
+   {
+    "delta": 80,
+    "detail": "Score dropped by 80 points",
+    "label": "Security score delta",
+    "severity": "MEDIUM"
+   }
+  ],
+  "headline": "This change opens a new path from the public internet to data marked sensitive.",
+  "limitations": [
+   "Simplified static AWS model; a path is not proof of exploitability and no path is not proof of safety."
+  ],
+  "new_attack_paths": [
+   {
+    "edges": [
+     {
+      "category": "exposure",
+      "confidence": "modeled",
+      "evidence": "ingress { protocol = \"tcp\", from_port = 22, to_port = 22, cidr_blocks = [\"0.0.0.0/0\"] }",
+      "metadata": {
+       "admin_port": true,
+       "cidr": "0.0.0.0/0",
+       "from_port": 22,
+       "protocol": "tcp",
+       "to_port": 22
+      },
+      "reason": "Security group allows 0.0.0.0/0 on port 22 (SSH)",
+      "relationship": "INGRESS_ALLOWS",
+      "remediation": "Restrict ingress to intended CIDRs and ports.",
+      "severity": "CRITICAL",
+      "source": "INTERNET",
+      "source_file": "main.tf",
+      "target": "aws_security_group.web",
+      "terraform_resource": "aws_security_group.web"
+     },
+     {
+      "category": "reachability",
+      "confidence": "modeled",
+      "evidence": "vpc_security_group_ids = [aws_security_group.web.id]",
+      "metadata": {},
+      "reason": "Security group is attached to Web Server",
+      "relationship": "PROTECTS",
+      "remediation": "Review the instance security-group attachment and network routes.",
+      "severity": "LOW",
+      "source": "aws_security_group.web",
+      "source_file": "main.tf",
+      "target": "aws_instance.web_server",
+      "terraform_resource": "aws_instance.web_server"
+     },
+     {
+      "category": "privilege",
+      "confidence": "conditional",
+      "evidence": "iam_instance_profile = aws_iam_instance_profile.app.name",
+      "metadata": {},
+      "reason": "IAM role attached through instance profile (aws_iam_instance_profile.app.name); compromised compute may obtain metadata credentials",
+      "relationship": "ASSUMES_ROLE",
+      "remediation": "Use least-privilege instance roles and protect metadata credentials.",
+      "severity": "MEDIUM",
+      "source": "aws_instance.web_server",
+      "source_file": "main.tf",
+      "target": "aws_iam_role.app",
+      "terraform_resource": "aws_instance.web_server"
+     },
+     {
+      "category": "data_access",
+      "confidence": "conservative",
+      "evidence": "\"Action\": ['s3:GetObject', 's3:ListBucket'], \"Resource\": the bucket ARN",
+      "metadata": {
+       "actions": [
+        "s3:GetObject",
+        "s3:ListBucket"
+       ],
+       "data_read": true,
+       "resources": [
+        "${aws_s3_bucket.customer_data.arn}",
+        "${aws_s3_bucket.customer_data.arn}/*"
+       ]
+      },
+      "reason": "Role allows s3:GetObject, s3:ListBucket on the bucket",
+      "relationship": "CAN_ACCESS",
+      "remediation": "Narrow IAM actions and bucket ARNs; verify effective policies.",
+      "severity": "MEDIUM",
+      "source": "aws_iam_role.app",
+      "source_file": "main.tf",
+      "target": "aws_s3_bucket.customer_data",
+      "terraform_resource": "aws_iam_role_policy.app_s3_read"
+     },
+     {
+      "category": "impact",
+      "confidence": "modeled",
+      "evidence": "tags = { Sensitive = \"true\" }",
+      "metadata": {},
+      "reason": "Bucket is tagged as holding sensitive data",
+      "relationship": "CONTAINS",
+      "remediation": "Verify sensitivity classification and restrict access to this bucket.",
+      "severity": "HIGH",
+      "source": "aws_s3_bucket.customer_data",
+      "source_file": "main.tf",
+      "target": "sensitive_data.customer_data",
+      "terraform_resource": "aws_s3_bucket.customer_data"
+     }
+    ],
+    "explanation": "Web Server is reachable from the public internet because its security group permits inbound traffic from the whole internet (0.0.0.0/0 on port 22 (SSH)). An attacker who compromises Web Server may obtain credentials for App Role if instance metadata is accessible. Modeled IAM grants associate those credentials with Customer Data (role allows s3:getobject, s3:listbucket on the bucket); effective authorization and object read access require separate verification. Customer Data is tagged as sensitive, so this is a complete path from the internet to a sensitive resource under this model, not proof of data exfiltration.",
+    "id": "INTERNET -> aws_security_group.web -> aws_instance.web_server -> aws_iam_role.app -> aws_s3_bucket.customer_data -> sensitive_data.customer_data",
+    "labels": [
+     "Internet",
+     "Web SG",
+     "Web Server",
+     "App Role",
+     "Customer Data",
+     "Sensitive Data"
+    ],
+    "nodes": [
+     "INTERNET",
+     "aws_security_group.web",
+     "aws_instance.web_server",
+     "aws_iam_role.app",
+     "aws_s3_bucket.customer_data",
+     "sensitive_data.customer_data"
+    ],
+    "reaches_sensitive": true,
+    "severity": "CRITICAL"
+   }
+  ],
+  "new_critical_paths": [
+   {
+    "edges": [
+     {
+      "category": "exposure",
+      "confidence": "modeled",
+      "evidence": "ingress { protocol = \"tcp\", from_port = 22, to_port = 22, cidr_blocks = [\"0.0.0.0/0\"] }",
+      "metadata": {
+       "admin_port": true,
+       "cidr": "0.0.0.0/0",
+       "from_port": 22,
+       "protocol": "tcp",
+       "to_port": 22
+      },
+      "reason": "Security group allows 0.0.0.0/0 on port 22 (SSH)",
+      "relationship": "INGRESS_ALLOWS",
+      "remediation": "Restrict ingress to intended CIDRs and ports.",
+      "severity": "CRITICAL",
+      "source": "INTERNET",
+      "source_file": "main.tf",
+      "target": "aws_security_group.web",
+      "terraform_resource": "aws_security_group.web"
+     },
+     {
+      "category": "reachability",
+      "confidence": "modeled",
+      "evidence": "vpc_security_group_ids = [aws_security_group.web.id]",
+      "metadata": {},
+      "reason": "Security group is attached to Web Server",
+      "relationship": "PROTECTS",
+      "remediation": "Review the instance security-group attachment and network routes.",
+      "severity": "LOW",
+      "source": "aws_security_group.web",
+      "source_file": "main.tf",
+      "target": "aws_instance.web_server",
+      "terraform_resource": "aws_instance.web_server"
+     },
+     {
+      "category": "privilege",
+      "confidence": "conditional",
+      "evidence": "iam_instance_profile = aws_iam_instance_profile.app.name",
+      "metadata": {},
+      "reason": "IAM role attached through instance profile (aws_iam_instance_profile.app.name); compromised compute may obtain metadata credentials",
+      "relationship": "ASSUMES_ROLE",
+      "remediation": "Use least-privilege instance roles and protect metadata credentials.",
+      "severity": "MEDIUM",
+      "source": "aws_instance.web_server",
+      "source_file": "main.tf",
+      "target": "aws_iam_role.app",
+      "terraform_resource": "aws_instance.web_server"
+     },
+     {
+      "category": "data_access",
+      "confidence": "conservative",
+      "evidence": "\"Action\": ['s3:GetObject', 's3:ListBucket'], \"Resource\": the bucket ARN",
+      "metadata": {
+       "actions": [
+        "s3:GetObject",
+        "s3:ListBucket"
+       ],
+       "data_read": true,
+       "resources": [
+        "${aws_s3_bucket.customer_data.arn}",
+        "${aws_s3_bucket.customer_data.arn}/*"
+       ]
+      },
+      "reason": "Role allows s3:GetObject, s3:ListBucket on the bucket",
+      "relationship": "CAN_ACCESS",
+      "remediation": "Narrow IAM actions and bucket ARNs; verify effective policies.",
+      "severity": "MEDIUM",
+      "source": "aws_iam_role.app",
+      "source_file": "main.tf",
+      "target": "aws_s3_bucket.customer_data",
+      "terraform_resource": "aws_iam_role_policy.app_s3_read"
+     },
+     {
+      "category": "impact",
+      "confidence": "modeled",
+      "evidence": "tags = { Sensitive = \"true\" }",
+      "metadata": {},
+      "reason": "Bucket is tagged as holding sensitive data",
+      "relationship": "CONTAINS",
+      "remediation": "Verify sensitivity classification and restrict access to this bucket.",
+      "severity": "HIGH",
+      "source": "aws_s3_bucket.customer_data",
+      "source_file": "main.tf",
+      "target": "sensitive_data.customer_data",
+      "terraform_resource": "aws_s3_bucket.customer_data"
+     }
+    ],
+    "explanation": "Web Server is reachable from the public internet because its security group permits inbound traffic from the whole internet (0.0.0.0/0 on port 22 (SSH)). An attacker who compromises Web Server may obtain credentials for App Role if instance metadata is accessible. Modeled IAM grants associate those credentials with Customer Data (role allows s3:getobject, s3:listbucket on the bucket); effective authorization and object read access require separate verification. Customer Data is tagged as sensitive, so this is a complete path from the internet to a sensitive resource under this model, not proof of data exfiltration.",
+    "id": "INTERNET -> aws_security_group.web -> aws_instance.web_server -> aws_iam_role.app -> aws_s3_bucket.customer_data -> sensitive_data.customer_data",
+    "labels": [
+     "Internet",
+     "Web SG",
+     "Web Server",
+     "App Role",
+     "Customer Data",
+     "Sensitive Data"
+    ],
+    "nodes": [
+     "INTERNET",
+     "aws_security_group.web",
+     "aws_instance.web_server",
+     "aws_iam_role.app",
+     "aws_s3_bucket.customer_data",
+     "sensitive_data.customer_data"
+    ],
+    "reaches_sensitive": true,
+    "severity": "CRITICAL"
+   }
+  ],
+  "new_edges": [
+   {
+    "category": "exposure",
+    "confidence": "modeled",
+    "evidence": "ingress { protocol = \"tcp\", from_port = 22, to_port = 22, cidr_blocks = [\"0.0.0.0/0\"] }",
+    "metadata": {
+     "admin_port": true,
+     "cidr": "0.0.0.0/0",
+     "from_port": 22,
+     "protocol": "tcp",
+     "to_port": 22
+    },
+    "reason": "Security group allows 0.0.0.0/0 on port 22 (SSH)",
+    "relationship": "INGRESS_ALLOWS",
+    "remediation": "Restrict ingress to intended CIDRs and ports.",
+    "severity": "CRITICAL",
+    "source": "INTERNET",
+    "source_file": "main.tf",
+    "target": "aws_security_group.web",
+    "terraform_resource": "aws_security_group.web"
+   }
+  ],
+  "new_nodes": [],
+  "newly_exposed": [
+   "aws_iam_role.app",
+   "aws_instance.web_server",
+   "aws_s3_bucket.customer_data"
+  ],
+  "newly_reachable_sensitive": [
+   "aws_s3_bucket.customer_data"
+  ],
+  "passed": false,
+  "remediation": {
+   "can_autofix": true,
+   "diff": "--- a/main.tf\n+++ b/main.tf\n@@ -25,7 +25,7 @@\n     from_port   = 22\n     to_port     = 22\n     protocol    = \"tcp\"\n-    cidr_blocks = [\"0.0.0.0/0\"]\n+    cidr_blocks = [\"10.0.0.0/24\"]\n   }\n \n   ingress {\n",
+   "patched_files": {
+    "main.tf": "##############################################################################\n# BlastRadius demo environment\n#\n# This configuration is intentionally simple and is NEVER applied to a real\n# AWS account. It exists only so BlastRadius has realistic Terraform to model.\n#\n# examples/safe/ and examples/vulnerable/ are identical except for ONE line:\n# the SSH ingress CIDR of the web security group (line 28). That single line\n# decides whether a path exists from the internet to sensitive data.\n##############################################################################\n\nprovider \"aws\" {\n  region = \"us-east-1\"\n}\n\n# ---------------------------------------------------------------------------\n# Network exposure\n# ---------------------------------------------------------------------------\nresource \"aws_security_group\" \"web\" {\n  name        = \"web-sg\"\n  description = \"Ingress rules for the public web tier\"\n\n  ingress {\n    description = \"SSH access for operators\"\n    from_port   = 22\n    to_port     = 22\n    protocol    = \"tcp\"\n    cidr_blocks = [\"10.0.0.0/24\"]\n  }\n\n  ingress {\n    description = \"HTTPS from the internal load balancer subnet\"\n    from_port   = 443\n    to_port     = 443\n    protocol    = \"tcp\"\n    cidr_blocks = [\"10.0.0.0/24\"]\n  }\n\n  egress {\n    from_port   = 0\n    to_port     = 0\n    protocol    = \"-1\"\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }\n}\n\n# ---------------------------------------------------------------------------\n# Compute\n# ---------------------------------------------------------------------------\nresource \"aws_instance\" \"web_server\" {\n  ami           = \"ami-0c55b159cbfafe1f0\"\n  instance_type = \"t3.micro\"\n\n  vpc_security_group_ids = [aws_security_group.web.id]\n  iam_instance_profile   = aws_iam_instance_profile.app.name\n\n  tags = {\n    Name = \"web-server\"\n    Role = \"public-web-tier\"\n  }\n}\n\n# ---------------------------------------------------------------------------\n# Identity\n# ---------------------------------------------------------------------------\nresource \"aws_iam_role\" \"app\" {\n  name = \"app-role\"\n\n  assume_role_policy = <<POLICY\n{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Principal\": { \"Service\": \"ec2.amazonaws.com\" },\n      \"Action\": \"sts:AssumeRole\"\n    }\n  ]\n}\nPOLICY\n}\n\nresource \"aws_iam_instance_profile\" \"app\" {\n  name = \"app-instance-profile\"\n  role = aws_iam_role.app.name\n}\n\nresource \"aws_iam_role_policy\" \"app_s3_read\" {\n  name = \"app-s3-read\"\n  role = aws_iam_role.app.id\n\n  policy = <<POLICY\n{\n  \"Version\": \"2012-10-17\",\n  \"Statement\": [\n    {\n      \"Effect\": \"Allow\",\n      \"Action\": [\"s3:GetObject\", \"s3:ListBucket\"],\n      \"Resource\": [\n        \"${aws_s3_bucket.customer_data.arn}\",\n        \"${aws_s3_bucket.customer_data.arn}/*\"\n      ]\n    }\n  ]\n}\nPOLICY\n}\n\n# ---------------------------------------------------------------------------\n# Data\n# ---------------------------------------------------------------------------\nresource \"aws_s3_bucket\" \"customer_data\" {\n  bucket = \"acme-customer-data\"\n\n  tags = {\n    Name      = \"customer-data\"\n    Sensitive = \"true\"\n    DataClass = \"pii\"\n  }\n}"
+   },
+   "recommendations": [
+    {
+     "current": "cidr_blocks = [\"0.0.0.0/0\"]",
+     "detail": "The security group grants administrative access from 0.0.0.0/0, which means any host on the internet can attempt to connect. Limit the CIDR to your corporate or VPC range, or place the instance behind a bastion host / SSM Session Manager.",
+     "recommended": "cidr_blocks = [\"10.0.0.0/24\"]",
+     "resource": "aws_security_group.web",
+     "severity": "CRITICAL",
+     "title": "Restrict port 22 (SSH) on aws_security_group.web"
+    },
+    {
+     "current": "bucket reachable from internet-exposed IAM role",
+     "detail": "This bucket holds data marked sensitive and is reachable from an internet-exposed role. Consider a VPC endpoint policy, bucket policy conditions (aws:SourceVpce) and server-side encryption with a dedicated KMS key.",
+     "recommended": "restrict bucket policy to a VPC endpoint",
+     "resource": "aws_s3_bucket.customer_data",
+     "severity": "HIGH",
+     "title": "Add defence in depth around Customer Data"
+    }
+   ]
+  },
+  "removed_attack_paths": [],
+  "removed_critical_paths": [],
+  "removed_edges": [],
+  "removed_nodes": [],
+  "reports": {
+   "markdown": "BlastRadius Security Check\n\n\u274c FAILED\n\nThis infrastructure change introduces a security regression.\n\nDecision: BLOCK CHANGE\nPolicy: New critical attack paths are prohibited\nPolicy: New sensitive resource exposure is prohibited\nSecurity score: 100 -> 20 (-80)\n\n+1 critical attack path\n+3 internet-reachable resources\n+1 sensitive resource reachable\n\nAttack path:\n  Internet -> Web SG -> Web Server -> App Role -> Customer Data -> Sensitive Data\n\nResponsible Terraform change:\n  cidr_blocks = [\"10.0.0.0/24\"] -> cidr_blocks = [\"0.0.0.0/0\"]\n\nRecommendation:\n  Restrict the public ingress CIDR before merging.\n\nAnalysis coverage: complete within documented model\n\n-- BlastRadius static attack-path analysis. Simplified AWS model; no infrastructure was deployed or accessed.",
+   "sarif": {
+    "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+    "runs": [
+     {
+      "invocations": [
+       {
+        "executionSuccessful": true
+       }
+      ],
+      "properties": {
+       "analysisComplete": true,
+       "decision": "BLOCK CHANGE",
+       "pathsTruncated": false,
+       "unsupportedResourceTypes": []
+      },
+      "results": [
+       {
+        "codeFlows": [
+         {
+          "threadFlows": [
+           {
+            "locations": [
+             {
+              "location": {
+               "logicalLocations": [
+                {
+                 "fullyQualifiedName": "aws_security_group.web",
+                 "kind": "resource"
+                }
+               ],
+               "message": {
+                "text": "INTERNET -> aws_security_group.web: Security group allows 0.0.0.0/0 on port 22 (SSH)"
+               },
+               "physicalLocation": {
+                "artifactLocation": {
+                 "uri": "main.tf"
+                }
+               }
+              }
+             },
+             {
+              "location": {
+               "logicalLocations": [
+                {
+                 "fullyQualifiedName": "aws_instance.web_server",
+                 "kind": "resource"
+                }
+               ],
+               "message": {
+                "text": "aws_security_group.web -> aws_instance.web_server: Security group is attached to Web Server"
+               },
+               "physicalLocation": {
+                "artifactLocation": {
+                 "uri": "main.tf"
+                }
+               }
+              }
+             },
+             {
+              "location": {
+               "logicalLocations": [
+                {
+                 "fullyQualifiedName": "aws_instance.web_server",
+                 "kind": "resource"
+                }
+               ],
+               "message": {
+                "text": "aws_instance.web_server -> aws_iam_role.app: IAM role attached through instance profile (aws_iam_instance_profile.app.name); compromised compute may obtain metadata credentials"
+               },
+               "physicalLocation": {
+                "artifactLocation": {
+                 "uri": "main.tf"
+                }
+               }
+              }
+             },
+             {
+              "location": {
+               "logicalLocations": [
+                {
+                 "fullyQualifiedName": "aws_iam_role_policy.app_s3_read",
+                 "kind": "resource"
+                }
+               ],
+               "message": {
+                "text": "aws_iam_role.app -> aws_s3_bucket.customer_data: Role allows s3:GetObject, s3:ListBucket on the bucket"
+               },
+               "physicalLocation": {
+                "artifactLocation": {
+                 "uri": "main.tf"
+                }
+               }
+              }
+             },
+             {
+              "location": {
+               "logicalLocations": [
+                {
+                 "fullyQualifiedName": "aws_s3_bucket.customer_data",
+                 "kind": "resource"
+                }
+               ],
+               "message": {
+                "text": "aws_s3_bucket.customer_data -> sensitive_data.customer_data: Bucket is tagged as holding sensitive data"
+               },
+               "physicalLocation": {
+                "artifactLocation": {
+                 "uri": "main.tf"
+                }
+               }
+              }
+             }
+            ]
+           }
+          ]
+         }
+        ],
+        "level": "error",
+        "locations": [
+         {
+          "logicalLocations": [
+           {
+            "fullyQualifiedName": "aws_security_group.web",
+            "kind": "resource"
+           }
+          ],
+          "physicalLocation": {
+           "artifactLocation": {
+            "uri": "main.tf"
+           }
+          }
+         }
+        ],
+        "message": {
+         "text": "New attack path: Internet -> Web SG -> Web Server -> App Role -> Customer Data -> Sensitive Data. Restrict public administrative ingress to a trusted CIDR and re-analyze."
+        },
+        "partialFingerprints": {
+         "attackPath/v1": "1b71eaac92c334b4c868382f26e79a3a02cdd1658f8fded09e2da19af956bdfe"
+        },
+        "properties": {
+         "attackPath": [
+          "INTERNET",
+          "aws_security_group.web",
+          "aws_instance.web_server",
+          "aws_iam_role.app",
+          "aws_s3_bucket.customer_data",
+          "sensitive_data.customer_data"
+         ],
+         "edgeEvidence": [
+          {
+           "category": "exposure",
+           "confidence": "modeled",
+           "evidence": "ingress { protocol = \"tcp\", from_port = 22, to_port = 22, cidr_blocks = [\"0.0.0.0/0\"] }",
+           "metadata": {
+            "admin_port": true,
+            "cidr": "0.0.0.0/0",
+            "from_port": 22,
+            "protocol": "tcp",
+            "to_port": 22
+           },
+           "reason": "Security group allows 0.0.0.0/0 on port 22 (SSH)",
+           "relationship": "INGRESS_ALLOWS",
+           "remediation": "Restrict ingress to intended CIDRs and ports.",
+           "risk": "CRITICAL",
+           "source": "INTERNET",
+           "source_file": "main.tf",
+           "target": "aws_security_group.web",
+           "terraform_resource": "aws_security_group.web"
+          },
+          {
+           "category": "reachability",
+           "confidence": "modeled",
+           "evidence": "vpc_security_group_ids = [aws_security_group.web.id]",
+           "metadata": {},
+           "reason": "Security group is attached to Web Server",
+           "relationship": "PROTECTS",
+           "remediation": "Review the instance security-group attachment and network routes.",
+           "risk": "LOW",
+           "source": "aws_security_group.web",
+           "source_file": "main.tf",
+           "target": "aws_instance.web_server",
+           "terraform_resource": "aws_instance.web_server"
+          },
+          {
+           "category": "privilege",
+           "confidence": "conditional",
+           "evidence": "iam_instance_profile = aws_iam_instance_profile.app.name",
+           "metadata": {},
+           "reason": "IAM role attached through instance profile (aws_iam_instance_profile.app.name); compromised compute may obtain metadata credentials",
+           "relationship": "ASSUMES_ROLE",
+           "remediation": "Use least-privilege instance roles and protect metadata credentials.",
+           "risk": "MEDIUM",
+           "source": "aws_instance.web_server",
+           "source_file": "main.tf",
+           "target": "aws_iam_role.app",
+           "terraform_resource": "aws_instance.web_server"
+          },
+          {
+           "category": "data_access",
+           "confidence": "conservative",
+           "evidence": "\"Action\": ['s3:GetObject', 's3:ListBucket'], \"Resource\": the bucket ARN",
+           "metadata": {
+            "actions": [
+             "s3:GetObject",
+             "s3:ListBucket"
+            ],
+            "data_read": true,
+            "resources": [
+             "${aws_s3_bucket.customer_data.arn}",
+             "${aws_s3_bucket.customer_data.arn}/*"
+            ]
+           },
+           "reason": "Role allows s3:GetObject, s3:ListBucket on the bucket",
+           "relationship": "CAN_ACCESS",
+           "remediation": "Narrow IAM actions and bucket ARNs; verify effective policies.",
+           "risk": "MEDIUM",
+           "source": "aws_iam_role.app",
+           "source_file": "main.tf",
+           "target": "aws_s3_bucket.customer_data",
+           "terraform_resource": "aws_iam_role_policy.app_s3_read"
+          },
+          {
+           "category": "impact",
+           "confidence": "modeled",
+           "evidence": "tags = { Sensitive = \"true\" }",
+           "metadata": {},
+           "reason": "Bucket is tagged as holding sensitive data",
+           "relationship": "CONTAINS",
+           "remediation": "Verify sensitivity classification and restrict access to this bucket.",
+           "risk": "HIGH",
+           "source": "aws_s3_bucket.customer_data",
+           "source_file": "main.tf",
+           "target": "sensitive_data.customer_data",
+           "terraform_resource": "aws_s3_bucket.customer_data"
+          }
+         ],
+         "recommendation": "Restrict public administrative ingress to a trusted CIDR and re-analyze.",
+         "severity": "CRITICAL",
+         "terraformResource": "aws_security_group.web"
+        },
+        "ruleId": "BR001",
+        "ruleIndex": 0
+       },
+       {
+        "level": "error",
+        "message": {
+         "text": "This change opens a new path from the public internet to data marked sensitive. New critical attack paths are prohibited; New sensitive resource exposure is prohibited"
+        },
+        "properties": {
+         "attackPath": [],
+         "recommendation": "Resolve the listed gate violations and re-analyze.",
+         "severity": "HIGH"
+        },
+        "ruleId": "BR003",
+        "ruleIndex": 2
+       }
+      ],
+      "tool": {
+       "driver": {
+        "name": "BlastRadius",
+        "rules": [
+         {
+          "defaultConfiguration": {
+           "level": "error"
+          },
+          "id": "BR001",
+          "name": "NewCriticalAttackPath",
+          "properties": {
+           "security-severity": "9.0"
+          },
+          "shortDescription": {
+           "text": "New internet-to-sensitive-data attack path"
+          }
+         },
+         {
+          "defaultConfiguration": {
+           "level": "warning"
+          },
+          "id": "BR002",
+          "name": "NewInternetExposure",
+          "properties": {
+           "security-severity": "6.0"
+          },
+          "shortDescription": {
+           "text": "New internet-facing attack path"
+          }
+         },
+         {
+          "defaultConfiguration": {
+           "level": "error"
+          },
+          "id": "BR003",
+          "name": "PolicyGateViolation",
+          "shortDescription": {
+           "text": "Repository security policy blocks this change"
+          }
+         },
+         {
+          "defaultConfiguration": {
+           "level": "warning"
+          },
+          "id": "BR004",
+          "name": "IncompleteAnalysis",
+          "shortDescription": {
+           "text": "Static analysis coverage diagnostic"
+          }
+         }
+        ],
+        "version": "0.1.0"
+       }
+      }
+     }
+    ],
+    "version": "2.1.0"
+   }
+  },
+  "responsible_change": "cidr_blocks = [\"10.0.0.0/24\"] -> cidr_blocks = [\"0.0.0.0/0\"]",
+  "responsible_changes": [
+   {
+    "diff": "--- a/main.tf\n+++ b/main.tf\n@@ -25,7 +25,7 @@\n     from_port   = 22\n     to_port     = 22\n     protocol    = \"tcp\"\n-    cidr_blocks = [\"10.0.0.0/24\"]\n+    cidr_blocks = [\"0.0.0.0/0\"]\n   }\n \n   ingress {\n",
+    "file": "main.tf"
+   }
+  ],
+  "schema_version": 1,
+  "score": {
+   "after": 20,
+   "before": 100,
+   "delta": -80
+  },
+  "verdict": "SECURITY REGRESSION"
+ }
+}
